@@ -83,3 +83,13 @@ target_compile_definitions(test_input PRIVATE
     ASSETS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/assets")
 beexref_set_warnings(test_input)
 add_test(NAME input COMMAND test_input)
+
+qt_add_executable(test_levels test_levels.cpp)
+target_link_libraries(test_levels PRIVATE beexref_core Qt6::Test)
+beexref_set_warnings(test_levels)
+add_test(NAME levels COMMAND test_levels)
+
+qt_add_executable(test_lod_manager test_lod_manager.cpp)
+target_link_libraries(test_lod_manager PRIVATE beexref_core Qt6::Test)
+beexref_set_warnings(test_lod_manager)
+add_test(NAME lod_manager COMMAND test_lod_manager)

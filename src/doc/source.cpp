@@ -21,6 +21,11 @@ QByteArray BytesSource::bytes() const
     return data_;
 }
 
+qint64 BytesSource::residentBytes() const
+{
+    return data_.size();
+}
+
 BoardSource::BoardSource(std::shared_ptr<board::Board> board, qint64 itemId)
     : board_(std::move(board))
     , itemId_(itemId)
@@ -38,6 +43,12 @@ QByteArray BoardSource::bytes() const
         return {};
     auto blob = board_->blob(itemId_);
     return blob.isOk() ? blob.take() : QByteArray();
+}
+
+qint64 BoardSource::residentBytes() const
+{
+    // Blobs are read from the board on demand and not retained.
+    return 0;
 }
 
 } // namespace doc

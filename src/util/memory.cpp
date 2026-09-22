@@ -3,8 +3,10 @@
 #include <QFile>
 
 #if defined(Q_OS_LINUX)
+#include <malloc.h>
 #include <unistd.h>
 #elif defined(Q_OS_MACOS)
+#include <malloc/malloc.h>
 #include <mach/mach.h>
 #elif defined(Q_OS_WIN)
 #include <windows.h>
@@ -42,6 +44,31 @@ qint64 processRssBytes()
     return static_cast<qint64>(counters.WorkingSetSize);
 #else
     return 0;
+#endif
+}
+
+bool releaseFreeMemory()
+{
+#if defined(Q_OS_LINUX) && defined(__GLIBC__)
+    return malloc_trim(0) != 0;
+#elif defined(Q_OS_MACOS)
+    malloc_zone_pressure_relief(nullptr, 0);
+    return true;
+#else
+    return false;
+#endif
+}
+
+void configureAllocator()
+{
+#if defined(Q_OS_LINUX) && defined(__GLIBC__)
+    // Buffers of 1 MB and up are mmap'd, so freeing them returns the
+    // pages immediately instead of parking them in an arena.
+    mallopt(M_MMAP_THRESHOLD, 1024 * 1024);
+    // Trim the heap top once 128 KB are free.
+    mallopt(M_TRIM_THRESHOLD, 128 * 1024);
+    // Two arenas (main + decode worker) bound the virtual growth.
+    mallopt(M_ARENA_MAX, 2);
 #endif
 }
 

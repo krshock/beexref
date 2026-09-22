@@ -41,6 +41,8 @@ public:
 
 signals:
     void message(const QString &text);
+    // One or more items were inserted (for the memory audit).
+    void itemsInserted();
 
 private:
     void insertLoaded(const doc::LoadedImage &loaded, const QPointF &scenePos);

@@ -72,6 +72,8 @@ void SceneItem::setLevel(const QImage &image, double fraction)
     level_ = image;
     levelFraction_ = fraction > 0 ? fraction : 1.0;
     failed_ = false;
+    failures_ = 0;
+    lastFailed_ = QDateTime();
     update();
 }
 
@@ -81,6 +83,86 @@ void SceneItem::setLevelUnavailable()
     failed_ = true;
     level_ = QImage();
     update();
+}
+
+void SceneItem::noteDecodeFailure()
+{
+    ++failures_;
+    lastFailed_ = QDateTime::currentDateTime();
+}
+
+bool SceneItem::retryBlocked() const
+{
+    static constexpr int kMaxFailures = 3;
+    static constexpr qint64 kRetryCooldownMs = 5000;
+    if (failures_ < kMaxFailures || !lastFailed_.isValid())
+        return false;
+    return lastFailed_.msecsTo(QDateTime::currentDateTime()) < kRetryCooldownMs;
+}
+
+double SceneItem::coarsestFraction() const
+{
+    if (!levels_.isEmpty())
+        return levels_.first().fraction;
+    return levelFraction_ > 0 ? levelFraction_ : 1.0;
+}
+
+std::optional<double> SceneItem::coarserFraction(double fraction) const
+{
+    for (qsizetype i = 0; i < levels_.size(); ++i) {
+        if (qFuzzyCompare(levels_.at(i).fraction, fraction) && i > 0)
+            return levels_.at(i - 1).fraction;
+    }
+    return std::nullopt;
+}
+
+qint64 SceneItem::levelBytesFor(double fraction) const
+{
+    for (const Level &level : levels_) {
+        if (qFuzzyCompare(level.fraction, fraction))
+            return level.decodedBytes();
+    }
+    if (qFuzzyCompare(levelFraction_, fraction) && !level_.isNull())
+        return qint64(level_.width()) * level_.height() * 4;
+    return 0;
+}
+
+QSize SceneItem::levelSizeFor(double fraction) const
+{
+    for (const Level &level : levels_) {
+        if (qFuzzyCompare(level.fraction, fraction))
+            return level.size;
+    }
+    return scaledLevelSize(imageSize(), fraction);
+}
+
+qint64 SceneItem::displayedLevelBytes() const
+{
+    if (level_.isNull())
+        return 0;
+    return qint64(level_.width()) * level_.height() * 4;
+}
+
+void SceneItem::rememberCoarsestLevel()
+{
+    if (level_.isNull() || levels_.isEmpty())
+        return;
+    if (levelFraction_ > 0 && qFuzzyCompare(levelFraction_, levels_.first().fraction)) {
+        coarsestLevel_ = level_;
+        coarsestLevelFraction_ = levelFraction_;
+    }
+}
+
+bool SceneItem::hasCoarsestCopy() const
+{
+    return !coarsestLevel_.isNull() && coarsestLevelFraction_ > 0
+        && qFuzzyCompare(coarsestLevelFraction_, coarsestFraction());
+}
+
+void SceneItem::applyCoarsestCopy()
+{
+    if (hasCoarsestCopy())
+        setLevel(coarsestLevel_, coarsestLevelFraction_);
 }
 
 void SceneItem::applyModelState()

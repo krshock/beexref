@@ -62,6 +62,10 @@ qt_add_library(beexref_core STATIC
     src/ui/input_controller.h
     src/ui/level_loader.cpp
     src/ui/level_loader.h
+    src/ui/levels.cpp
+    src/ui/levels.h
+    src/ui/lod_manager.cpp
+    src/ui/lod_manager.h
     src/ui/main_window.cpp
     src/ui/main_window.h
     src/ui/scene.cpp

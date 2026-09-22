@@ -7,6 +7,7 @@
 #include "logging.h"
 #include "settings.h"
 #include "ui/main_window.h"
+#include "util/memory.h"
 
 namespace {
 
@@ -28,6 +29,8 @@ logging::Level levelFromName(const QString &name)
 
 int main(int argc, char *argv[])
 {
+    util::configureAllocator();
+
     QApplication app(argc, argv);
     QCoreApplication::setApplicationName(QString::fromLatin1(constants::AppName));
     QCoreApplication::setApplicationVersion(QString::fromLatin1(constants::Version));
@@ -52,6 +55,12 @@ int main(int argc, char *argv[])
         QStringLiteral("level"), QStringLiteral("INFO"));
     parser.addOption(logLevelOption);
 
+    QCommandLineOption memAuditOption(
+        QStringLiteral("mem-audit"),
+        QStringLiteral("Log a memory audit line every <seconds> seconds (0 disables)."),
+        QStringLiteral("seconds"), QStringLiteral("0"));
+    parser.addOption(memAuditOption);
+
     parser.process(app);
 
     settings::setSettingsDir(parser.value(settingsDirOption));
@@ -63,6 +72,7 @@ int main(int argc, char *argv[])
 
     ui::MainWindow window;
     window.show();
+    window.startMemoryAudit(parser.value(memAuditOption).toInt());
 
     const QStringList files = parser.positionalArguments();
     if (!files.isEmpty())

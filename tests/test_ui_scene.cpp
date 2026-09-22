@@ -1,6 +1,7 @@
 #include <QBuffer>
 #include <QColor>
 #include <QImage>
+#include <QMimeData>
 #include <QMouseEvent>
 #include <QScrollBar>
 #include <QTemporaryDir>
@@ -10,7 +11,9 @@
 #include "doc/document.h"
 #include "doc/item.h"
 #include "doc/source.h"
+#include "doc/undo.h"
 #include "settings.h"
+#include "ui/input_controller.h"
 #include "ui/main_window.h"
 #include "ui/scene.h"
 #include "ui/scene_item.h"
@@ -79,6 +82,7 @@ private slots:
     void middleDragPansWithTheCursor();
     void wheelPanAxesMatchReference();
     void windowOpensBoardAndLoadsLevel();
+    void newWindowHasUnsavedDocument();
 };
 
 void TestUiScene::buildsItemsFromDocument()
@@ -167,6 +171,8 @@ void TestUiScene::dragMovesItemAndModel()
     auto *scene = new ui::Scene(&view);
     scene->setDocument(document);
     view.setBoardScene(scene);
+    doc::UndoStack stack(document.get());
+    view.setUndoStack(&stack);
     view.resize(400, 300);
     view.fitScene();
 
@@ -186,6 +192,18 @@ void TestUiScene::dragMovesItemAndModel()
     QCOMPARE(viewItem->pos().x(), item->x);
     QCOMPARE(viewItem->pos().y(), item->y);
     QVERIFY(document->isModified());
+
+    // The whole drag is one undo step.
+    QVERIFY(stack.canUndo());
+    QVERIFY(stack.undo());
+    scene->syncDocument();
+    QCOMPARE(item->x, 0.0);
+    QCOMPARE(item->y, 0.0);
+    QCOMPARE(viewItem->pos().x(), 0.0);
+    QVERIFY(stack.redo());
+    scene->syncDocument();
+    QVERIFY(item->x > 0);
+    QCOMPARE(viewItem->pos().x(), item->x);
 }
 
 void TestUiScene::fitSceneFramesTheItems()
@@ -329,6 +347,25 @@ void TestUiScene::windowOpensBoardAndLoadsLevel()
     QVERIFY2(title.contains(QStringLiteral("|")), qPrintable(title));
 
     settings::setSettingsDir(QString());
+}
+
+void TestUiScene::newWindowHasUnsavedDocument()
+{
+    // A window always has a document, so paste, drops and undo/redo
+    // work before any file is opened.
+    ui::MainWindow window;
+    QVERIFY(window.scene());
+    QCOMPARE(window.scene()->itemViews().size(), 0);
+    QVERIFY(window.scene()->document());
+
+    QImage image(6, 4, QImage::Format_ARGB32);
+    image.fill(Qt::red);
+    QMimeData mime;
+    mime.setImageData(image);
+    window.input()->insertMimeData(mime, QPointF(10, 10));
+
+    QCOMPARE(window.scene()->pixmapItemViews().size(), 1);
+    QVERIFY(window.scene()->document()->isModified());
 }
 
 QTEST_MAIN(TestUiScene)

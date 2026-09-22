@@ -1,6 +1,9 @@
 #include "view.h"
 
+#include "lod_manager.h"
 #include "theme.h"
+
+#include "doc/undo.h"
 
 #include <QDragEnterEvent>
 #include <QDragMoveEvent>
@@ -12,12 +15,15 @@
 #include <QWheelEvent>
 
 #include <cmath>
+#include <memory>
 
 namespace ui {
 
 View::View(QWidget *parent)
     : QGraphicsView(parent)
 {
+    lod_ = new LodManager(this);
+
     setRenderHints(QPainter::Antialiasing | QPainter::SmoothPixmapTransform);
     setViewportUpdateMode(QGraphicsView::MinimalViewportUpdate);
     setOptimizationFlags(QGraphicsView::DontSavePainterState
@@ -35,86 +41,37 @@ View::View(QWidget *parent)
 
 void View::setLevelLoader(LevelLoader *loader)
 {
-    if (loader_)
-        disconnect(loader_, nullptr, this, nullptr);
     loader_ = loader;
-    if (!loader_)
-        return;
-
-    connect(loader_, &LevelLoader::levelReady, this, [this](quint64 requestId, const QImage &image) {
-        if (!boardScene_)
-            return;
-        for (SceneItem *view : boardScene_->pixmapItemViews()) {
-            if (view->pendingRequest() != requestId)
-                continue;
-            view->setPendingRequest(0);
-            const QSize original = view->item()->originalSize();
-            const double fraction =
-                original.width() > 0 ? static_cast<double>(image.width()) / original.width()
-                                     : 1.0;
-            view->setLevel(image, fraction);
-            scheduleLevelRequest();
-            return;
-        }
-    });
-    connect(loader_, &LevelLoader::levelFailed, this, [this](quint64 requestId) {
-        if (!boardScene_)
-            return;
-        for (SceneItem *view : boardScene_->pixmapItemViews()) {
-            if (view->pendingRequest() != requestId)
-                continue;
-            view->setPendingRequest(0);
-            view->setLevelUnavailable();
-            return;
-        }
-    });
+    lod_->setLoader(loader);
 }
 
 void View::setBoardScene(Scene *scene)
 {
+    if (boardScene_)
+        disconnect(boardScene_, &Scene::itemViewAboutToBeRemoved, this, nullptr);
     boardScene_ = scene;
-    QGraphicsView::setScene(scene);
-    scheduleLevelRequest();
-}
-
-void View::scheduleLevelRequest()
-{
-    if (levelRequestScheduled_)
-        return;
-    levelRequestScheduled_ = true;
-    QTimer::singleShot(0, this, [this]() { requestVisibleLevels(); });
-}
-
-void View::requestVisibleLevels()
-{
-    levelRequestScheduled_ = false;
-    if (!loader_ || !boardScene_)
-        return;
-
-    const QRectF visible = mapToScene(viewport()->rect()).boundingRect();
-    const double viewScale = transform().m11();
-    for (SceneItem *view : boardScene_->pixmapItemViews()) {
-        if (view->levelUnavailable() || view->pendingRequest() != 0)
-            continue;
-        if (!view->sceneBoundingRect().intersects(visible))
-            continue;
-        const QSize original = view->item()->originalSize();
-        if (!original.isValid() || original.isEmpty())
-            continue;
-
-        const double needed = qBound(0.0, view->item()->scale * viewScale, 1.0);
-        if (needed <= 0)
-            continue;
-        if (view->levelFraction() >= needed * 0.99)
-            continue;
-
-        const double fraction = qMax(needed, 0.05);
-        const QSize target(qMax(1, qRound(original.width() * fraction)),
-                           qMax(1, qRound(original.height() * fraction)));
-        const quint64 requestId = nextRequestId_++;
-        view->setPendingRequest(requestId);
-        loader_->request(requestId, view->item()->source, target);
+    if (boardScene_) {
+        // Drop scheduler state for a view before the scene deletes it,
+        // so an in-flight decode can never touch freed memory.
+        connect(boardScene_, &Scene::itemViewAboutToBeRemoved, this,
+                [this](SceneItem *view) { lod_->forgetItem(view); });
     }
+    lod_->setScene(scene);
+    QGraphicsView::setScene(scene);
+    updateViewState();
+    lod_->schedule();
+}
+
+void View::setLodSettings(const LodSettings &settings)
+{
+    lod_->setSettings(settings);
+}
+
+void View::updateViewState()
+{
+    if (!scene())
+        return;
+    lod_->setViewState(mapToScene(viewport()->rect()).boundingRect(), transform().m11());
 }
 
 void View::panBy(const QPoint &delta)
@@ -156,7 +113,8 @@ void View::zoomAt(int delta, const QPoint &anchor)
         scale(1.0 / factor, 1.0 / factor);
     }
     panBy(mapFromScene(sceneAnchor) - anchor);
-    scheduleLevelRequest();
+    updateViewState();
+    lod_->evaluateNow();
 }
 
 void View::fitScene()
@@ -166,7 +124,8 @@ void View::fitScene()
     const QRectF rect = scene()->itemsBoundingRect();
     fitInView(rect, Qt::KeepAspectRatio);
     fitInView(rect, Qt::KeepAspectRatio);
-    scheduleLevelRequest();
+    updateViewState();
+    lod_->evaluateNow();
 }
 
 void View::fitSelection()
@@ -178,7 +137,8 @@ void View::fitSelection()
         return;
     fitInView(rect, Qt::KeepAspectRatio);
     fitInView(rect, Qt::KeepAspectRatio);
-    scheduleLevelRequest();
+    updateViewState();
+    lod_->evaluateNow();
 }
 
 void View::wheelEvent(QWheelEvent *event)
@@ -195,8 +155,12 @@ void View::wheelEvent(QWheelEvent *event)
     if (modifiers.testFlag(Qt::ShiftModifier)
         && modifiers.testFlag(Qt::ControlModifier)) {
         panBy(QPoint(qRound(0.5 * delta), 0));
+        updateViewState();
+        lod_->schedule();
     } else if (modifiers.testFlag(Qt::ShiftModifier)) {
         panBy(QPoint(0, qRound(0.5 * delta)));
+        updateViewState();
+        lod_->schedule();
     } else {
         zoomAt(delta, event->position().toPoint());
     }
@@ -205,6 +169,8 @@ void View::wheelEvent(QWheelEvent *event)
 
 void View::mousePressEvent(QMouseEvent *event)
 {
+    lod_->evaluateNow();
+
     if (event->button() == Qt::MiddleButton) {
         panning_ = true;
         panStart_ = event->position().toPoint();
@@ -228,8 +194,13 @@ void View::mousePressEvent(QMouseEvent *event)
 
             moveStarts_.clear();
             for (QGraphicsItem *selected : scene()->selectedItems()) {
-                if (auto *view = dynamic_cast<SceneItem *>(selected))
-                    moveStarts_.append({view, QPointF(view->item()->x, view->item()->y)});
+                if (auto *view = dynamic_cast<SceneItem *>(selected)) {
+                    MoveEntry entry;
+                    entry.view = view;
+                    entry.startPosition = QPointF(view->item()->x, view->item()->y);
+                    entry.startState = doc::ChangeItemCommand::State::capture(*view->item());
+                    moveStarts_.append(entry);
+                }
             }
             event->accept();
             return;
@@ -246,7 +217,8 @@ void View::mouseMoveEvent(QMouseEvent *event)
         // (start - current), which is the negated scrollbar delta.
         panBy(panStart_ - position);
         panStart_ = position;
-        scheduleLevelRequest();
+        updateViewState();
+        lod_->schedule();
         event->accept();
         return;
     }
@@ -257,11 +229,18 @@ void View::mouseMoveEvent(QMouseEvent *event)
             event->accept();
             return;
         }
+        if (!moveStarted_) {
+            // The gesture freezes the levels of the items being moved.
+            QSet<const doc::Item *> gesture;
+            for (const MoveEntry &entry : moveStarts_)
+                gesture.insert(entry.view->item().get());
+            lod_->setGestureItems(gesture);
+        }
         moveStarted_ = true;
         const QPointF delta = mapToScene(position) - pressScenePos_;
-        for (const auto &entry : moveStarts_) {
-            entry.first->setPos(entry.second + delta);
-            entry.first->update();
+        for (const MoveEntry &entry : moveStarts_) {
+            entry.view->setPos(entry.startPosition + delta);
+            entry.view->update();
         }
         event->accept();
         return;
@@ -279,12 +258,26 @@ void View::mouseReleaseEvent(QMouseEvent *event)
 
     if (moving_ && event->button() == Qt::LeftButton) {
         if (moveStarted_) {
-            for (const auto &entry : moveStarts_)
-                entry.first->syncPositionToModel();
+            for (const MoveEntry &entry : moveStarts_)
+                entry.view->syncPositionToModel();
             if (boardScene_ && boardScene_->document()) {
                 boardScene_->document()->setModified(true);
                 boardScene_->updateSceneRect();
             }
+            // One undo step for the whole gesture.
+            if (undoStack_ && !moveStarts_.isEmpty()) {
+                undoStack_->beginMacro(QStringLiteral("Move"));
+                for (const MoveEntry &entry : moveStarts_) {
+                    const doc::ChangeItemCommand::State after =
+                        doc::ChangeItemCommand::State::capture(*entry.view->item());
+                    undoStack_->push(std::make_unique<doc::ChangeItemCommand>(
+                        entry.view->item(), entry.startState, after, QStringLiteral("Move")));
+                }
+                undoStack_->endMacro();
+            }
+            lod_->setGestureItems({});
+            lod_->schedule();
+            emit documentModified();
         }
         moving_ = false;
         moveStarted_ = false;
@@ -298,13 +291,15 @@ void View::mouseReleaseEvent(QMouseEvent *event)
 void View::resizeEvent(QResizeEvent *event)
 {
     QGraphicsView::resizeEvent(event);
-    scheduleLevelRequest();
+    updateViewState();
+    lod_->schedule();
 }
 
 void View::scrollContentsBy(int dx, int dy)
 {
     QGraphicsView::scrollContentsBy(dx, dy);
-    scheduleLevelRequest();
+    updateViewState();
+    lod_->schedule();
 }
 
 void View::dragEnterEvent(QDragEnterEvent *event)

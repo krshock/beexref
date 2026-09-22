@@ -169,6 +169,7 @@ void InputController::insertItems(QVector<doc::ItemPtr> items, const QPointF &sc
         if (SceneItem *view = scene_->itemViewFor(item))
             view->setSelected(true);
     }
+    emit itemsInserted();
 }
 
 void InputController::arrangeInserted(const QVector<doc::ItemPtr> &items, const QPointF &scenePos)

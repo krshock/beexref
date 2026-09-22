@@ -26,6 +26,10 @@ public:
 
     // Encoded bytes; empty when unavailable.
     virtual QByteArray bytes() const = 0;
+
+    // Bytes this source holds in RAM (0 when it reads from disk on
+    // demand); the memory audit uses it.
+    virtual qint64 residentBytes() const = 0;
 };
 
 using SourcePtr = std::shared_ptr<const Source>;
@@ -39,6 +43,7 @@ public:
 
     bool isValid() const override;
     QByteArray bytes() const override;
+    qint64 residentBytes() const override;
 
 private:
     const QByteArray data_;
@@ -54,6 +59,7 @@ public:
 
     bool isValid() const override;
     QByteArray bytes() const override;
+    qint64 residentBytes() const override;
 
 private:
     const std::shared_ptr<board::Board> board_;

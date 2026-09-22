@@ -1,5 +1,7 @@
 #include "level_loader.h"
 
+#include "util/memory.h"
+
 #include <QBuffer>
 #include <QCoreApplication>
 #include <QImageReader>
@@ -8,7 +10,7 @@
 namespace ui {
 namespace {
 
-QImage decodeLevel(const doc::SourcePtr &source, const QSize &targetSize)
+QImage decodeLevel(const doc::SourcePtr &source, const QSize &targetSize, const QString &quality)
 {
     if (!source || !source->isValid())
         return {};
@@ -35,6 +37,10 @@ QImage decodeLevel(const doc::SourcePtr &source, const QSize &targetSize)
 
     if (!targetSize.isValid() || targetSize.isEmpty() || image.size() == targetSize)
         return image;
+
+    if (quality == QLatin1String("fast")) {
+        return image.scaled(targetSize, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+    }
 
     // Progressive halving keeps every bilinear step within a 2x ratio,
     // matching the reference's smooth downscale.
@@ -65,20 +71,32 @@ LevelLoader::~LevelLoader()
     shutdown();
 }
 
-void LevelLoader::request(quint64 requestId, doc::SourcePtr source, const QSize &targetSize)
+void LevelLoader::request(quint64 requestId, doc::SourcePtr source, const QSize &targetSize,
+                          const QString &quality)
 {
     if (shutdown_)
         return;
     QMetaObject::invokeMethod(
         &worker_,
-        [this, requestId, source = std::move(source), targetSize]() {
-            const QImage image = decodeLevel(source, targetSize);
+        [this, requestId, source = std::move(source), targetSize, quality]() {
+            const QImage image = decodeLevel(source, targetSize, quality);
             if (image.isNull())
                 emit levelFailed(requestId);
             else
                 emit levelReady(requestId, image);
+            // Drop the decode transients right away: they live in this
+            // thread's arena and are the largest churn the app creates.
+            util::releaseFreeMemory();
         },
         Qt::QueuedConnection);
+}
+
+void LevelLoader::releaseMemory()
+{
+    if (shutdown_)
+        return;
+    QMetaObject::invokeMethod(&worker_, []() { util::releaseFreeMemory(); },
+                              Qt::QueuedConnection);
 }
 
 void LevelLoader::shutdown()

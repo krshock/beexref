@@ -41,6 +41,14 @@ public:
     // Keeps the scene rect in sync with the item bounds.
     void updateSceneRect();
 
+signals:
+    // The set of canvas items changed (document replaced, items added or
+    // removed by commands).
+    void itemsChanged();
+    // Emitted just before a view is deleted, so scheduler state can be
+    // dropped before the pointer dangles.
+    void itemViewAboutToBeRemoved(SceneItem *view);
+
 private:
     // Applies the saved floor thumbnail, or the unavailable marker, to
     // a newly created view.

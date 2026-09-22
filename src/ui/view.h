@@ -1,7 +1,9 @@
 #pragma once
 
-#include "level_loader.h"
+#include "levels.h"
 #include "scene.h"
+
+#include "doc/undo.h"
 
 #include <QGraphicsView>
 #include <QPoint>
@@ -14,10 +16,12 @@ class QMimeData;
 
 namespace ui {
 
+class LevelLoader;
+class LodManager;
+
 // Canvas view: pan, zoom, fit, rubber-band selection and
-// threshold-based moving of the selected items. Requests display
-// levels for the visible items through the loader. Drags are
-// classified with a filter and forwarded as mimeDropped.
+// threshold-based moving of the selected items. Viewport changes drive
+// the LOD manager; accepted drags are forwarded as mimeDropped.
 class View : public QGraphicsView
 {
     Q_OBJECT
@@ -31,20 +35,23 @@ public:
     void setBoardScene(Scene *scene);
     void setMimeFilter(MimeFilter filter) { mimeFilter_ = std::move(filter); }
 
+    void setLodSettings(const LodSettings &settings);
+    LodManager *lodManager() const { return lod_; }
+    // Commands for completed gestures (moves) are pushed here.
+    void setUndoStack(doc::UndoStack *stack) { undoStack_ = stack; }
+
     void fitScene();
     void fitSelection();
 
     // delta is a wheel angleDelta step; anchor is in viewport pixels.
     void zoomAt(int delta, const QPoint &anchor);
 
-    // Requests levels for visible items whose current level is too
-    // coarse for the current zoom.
-    void requestVisibleLevels();
-
 signals:
     // A drop the filter accepted, with its position in scene
     // coordinates. The mime data stays owned by the event.
     void mimeDropped(const QMimeData *data, const QPointF &scenePos);
+    // A gesture changed the document (a move); the window refreshes.
+    void documentModified();
 
 protected:
     void wheelEvent(QWheelEvent *event) override;
@@ -59,14 +66,14 @@ protected:
 
 private:
     void panBy(const QPoint &delta);
-    void scheduleLevelRequest();
+    void updateViewState();
     double zoomExtent(bool maximum) const;
 
     LevelLoader *loader_ = nullptr;
     Scene *boardScene_ = nullptr;
+    LodManager *lod_ = nullptr;
+    doc::UndoStack *undoStack_ = nullptr;
     MimeFilter mimeFilter_;
-    quint64 nextRequestId_ = 1;
-    bool levelRequestScheduled_ = false;
 
     bool panning_ = false;
     QPoint panStart_;
@@ -74,7 +81,13 @@ private:
     bool moveStarted_ = false;
     QPoint pressPos_;
     QPointF pressScenePos_;
-    QVector<QPair<SceneItem *, QPointF>> moveStarts_;
+    struct MoveEntry
+    {
+        SceneItem *view = nullptr;
+        QPointF startPosition;
+        doc::ChangeItemCommand::State startState;
+    };
+    QVector<MoveEntry> moveStarts_;
 
     static constexpr double kMoveThreshold = 3.0; // viewport pixels
     static constexpr double kMaxZoomExtent = 10000000.0;

@@ -2,6 +2,8 @@
 
 #include "constants.h"
 #include "input_controller.h"
+#include "levels.h"
+#include "lod_manager.h"
 #include "logging.h"
 #include "settings.h"
 #include "util/format.h"
@@ -11,12 +13,30 @@
 #include <QCursor>
 #include <QFileDialog>
 #include <QFileInfo>
+#include <QImageReader>
 #include <QMenuBar>
 #include <QMessageBox>
 #include <QMimeData>
 #include <QTimer>
 
 namespace ui {
+namespace {
+
+// LOD settings from the INI, with the FIELDS defaults.
+LodSettings loadLodSettings()
+{
+    settings::File file(settings::iniPath());
+    file.load();
+    LodSettings lod;
+    lod.method = settings::valueOrDefault(file, QStringLiteral("Items/lod_method")).toString();
+    lod.fractions =
+        settings::valueOrDefault(file, QStringLiteral("Items/lod_fractions")).toString();
+    lod.budgetMB = settings::valueOrDefault(file, QStringLiteral("Items/lod_ram_budget_mb")).toInt();
+    lod.quality = settings::valueOrDefault(file, QStringLiteral("Items/lod_quality")).toString();
+    return normalized(lod);
+}
+
+} // namespace
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
@@ -27,14 +47,28 @@ MainWindow::MainWindow(QWidget *parent)
     input_ = new InputController(scene_, &undoStack_, this);
     view_->setBoardScene(scene_);
     view_->setLevelLoader(loader_);
+    view_->setLodSettings(loadLodSettings());
+    view_->setUndoStack(&undoStack_);
     view_->setMimeFilter([this](const QMimeData &data) { return input_->acceptsMimeData(data); });
     connect(view_, &View::mimeDropped, this, [this](const QMimeData *data, const QPointF &pos) {
         input_->insertMimeData(*data, pos, view_->transform().m11());
     });
+    connect(view_, &View::documentModified, this, &MainWindow::updateTitle);
     connect(input_, &InputController::message, this, [](const QString &text) {
         logging::info(text);
     });
+    connect(input_, &InputController::itemsInserted, this, [this]() {
+        view_->lodManager()->logAudit(QStringLiteral("insert"));
+        view_->lodManager()->evaluateNow();
+        updateTitle();
+    });
     setCentralWidget(view_);
+
+    // A window always has a document: a new unsaved board until a file
+    // is opened, so paste, drops and undo/redo work from the start.
+    document_ = std::make_shared<doc::Document>(doc::Document::create());
+    undoStack_.setDocument(document_.get());
+    scene_->setDocument(document_);
 
     auto *editMenu = menuBar()->addMenu(QStringLiteral("&Edit"));
     auto *undoAction = editMenu->addAction(QStringLiteral("&Undo"));
@@ -95,6 +129,22 @@ MainWindow::MainWindow(QWidget *parent)
     auto *titleTimer = new QTimer(this);
     connect(titleTimer, &QTimer::timeout, this, &MainWindow::updateTitle);
     titleTimer->start(2000);
+
+    // Decode allocation limit, as the reference applies on startup; the
+    // environment variable wins, matching the Python app.
+    {
+        settings::File file(settings::iniPath());
+        file.load();
+        int limit =
+            settings::valueOrDefault(file, QStringLiteral("Items/image_allocation_limit")).toInt();
+        if (qEnvironmentVariableIsSet("QT_IMAGEIO_MAXALLOC")) {
+            bool ok = false;
+            const int fromEnv = qEnvironmentVariableIntValue("QT_IMAGEIO_MAXALLOC", &ok);
+            if (ok)
+                limit = fromEnv;
+        }
+        QImageReader::setAllocationLimit(limit);
+    }
 }
 
 MainWindow::~MainWindow()
@@ -124,7 +174,9 @@ bool MainWindow::openBoard(const QString &path)
     undoStack_.setDocument(document_.get());
     undoStack_.clear();
     scene_->setDocument(document_);
+    view_->setLodSettings(loadLodSettings());
     view_->fitScene();
+    view_->lodManager()->logAudit(QStringLiteral("open"));
     updateTitle();
     logging::info(QStringLiteral("Board opened"),
                   {{QStringLiteral("file"), path},
@@ -141,6 +193,17 @@ void MainWindow::openFileDialog()
         openBoard(path);
 }
 
+void MainWindow::startMemoryAudit(int seconds)
+{
+    if (seconds <= 0)
+        return;
+    auto *timer = new QTimer(this);
+    connect(timer, &QTimer::timeout, this, [this]() {
+        view_->lodManager()->logAudit(QStringLiteral("periodic"));
+    });
+    timer->start(seconds * 1000);
+}
+
 void MainWindow::applyHistoryStep(bool undo)
 {
     const bool changed = undo ? undoStack_.undo() : undoStack_.redo();
@@ -149,6 +212,7 @@ void MainWindow::applyHistoryStep(bool undo)
     scene_->syncDocument();
     if (document_)
         document_->setModified(!undoStack_.isClean());
+    view_->lodManager()->evaluateNow();
     updateTitle();
 }
 

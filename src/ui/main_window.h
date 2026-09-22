@@ -31,6 +31,9 @@ public:
     Scene *scene() const { return scene_; }
     InputController *input() const { return input_; }
 
+    // Enables the periodic memory audit line (0 disables it).
+    void startMemoryAudit(int seconds);
+
 private:
     void openFileDialog();
     void updateTitle();

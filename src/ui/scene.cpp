@@ -25,6 +25,8 @@ void Scene::setDocument(std::shared_ptr<doc::Document> document)
 
 void Scene::rebuild()
 {
+    // Invalidate scheduler state before views are deleted.
+    emit itemsChanged();
     clear();
     syncDocument();
 }
@@ -32,6 +34,7 @@ void Scene::rebuild()
 void Scene::syncDocument()
 {
     if (!document_) {
+        emit itemsChanged();
         clear();
         return;
     }
@@ -43,6 +46,7 @@ void Scene::syncDocument()
     const QVector<SceneItem *> views = itemViews();
     for (SceneItem *view : views) {
         if (!live.contains(view->item().get())) {
+            emit itemViewAboutToBeRemoved(view);
             removeItem(view);
             delete view;
         }
@@ -58,6 +62,7 @@ void Scene::syncDocument()
         view->applyModelState();
     }
     updateSceneRect();
+    emit itemsChanged();
 }
 
 void Scene::applyPlaceholder(SceneItem *view)
@@ -67,8 +72,10 @@ void Scene::applyPlaceholder(SceneItem *view)
         return;
     if (!item->floorData.isEmpty()) {
         const QImage floor = QImage::fromData(item->floorData);
-        if (!floor.isNull())
+        if (!floor.isNull()) {
             view->setLevel(floor, item->floorFraction > 0 ? item->floorFraction : 1.0);
+            return;
+        }
     }
     if (!item->hasSource())
         view->setLevelUnavailable();

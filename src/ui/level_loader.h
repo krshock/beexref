@@ -27,12 +27,20 @@ public:
     ~LevelLoader() override;
 
     // requestId is the caller's token; it is echoed back with the
-    // result. targetSize is the wanted pixel size (aspect preserved).
-    void request(quint64 requestId, doc::SourcePtr source, const QSize &targetSize);
+    // result. targetSize is the wanted pixel size (aspect preserved);
+    // quality is "fast" (single step) or "smooth" (progressive halving).
+    void request(quint64 requestId, doc::SourcePtr source, const QSize &targetSize,
+                 const QString &quality);
 
     // Stops the worker thread and drops pending requests. Must be
     // called before the documents the sources read from are closed.
     void shutdown();
+
+    // Returns the worker thread's freed heap memory to the OS. Decode
+    // transients (full-size decode buffers, scaled copies) live in the
+    // worker's malloc arena, which a trim from the UI thread cannot
+    // release.
+    void releaseMemory();
 
 signals:
     void levelReady(quint64 requestId, const QImage &image);
