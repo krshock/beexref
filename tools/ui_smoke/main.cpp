@@ -22,6 +22,8 @@
 #include <QWheelEvent>
 #include <QtTest>
 
+#include <cmath>
+
 #include "doc/document.h"
 #include "settings.h"
 #include "ui/input_controller.h"
@@ -148,6 +150,38 @@ public:
         }
         out() << "items after redo: " << afterRedo << "\n";
         snapshot(QStringLiteral("06-redo-paste"));
+
+        // Scale the pasted item with its bottom-right handle, then undo.
+        ui::SceneItem *target = nullptr;
+        for (ui::SceneItem *candidate : window_.scene()->pixmapItemViews()) {
+            if (!target || candidate->zValue() > target->zValue())
+                target = candidate;
+        }
+        if (target) {
+            target->setSelected(true);
+            window_.view()->fitSelection();
+            QTest::qWait(400);
+
+            const QRectF bounds = window_.scene()->selectionBounds();
+            const double viewScale = view->transform().m11();
+            const QPointF unit(1.0 / std::sqrt(2.0), 1.0 / std::sqrt(2.0));
+            const QPoint press = view->mapFromScene(bounds.bottomRight()
+                                                    - unit * (4.0 / viewScale));
+            const QPoint move = view->mapFromScene(bounds.bottomRight()
+                                                   + unit * (120.0 / viewScale));
+            sendMouse(viewport, QEvent::MouseButtonPress, press, Qt::LeftButton, Qt::LeftButton);
+            sendMouse(viewport, QEvent::MouseMove, move, Qt::NoButton, Qt::LeftButton);
+            sendMouse(viewport, QEvent::MouseButtonRelease, move, Qt::LeftButton, Qt::NoButton);
+            QTest::qWait(800);
+            out() << "scale after handle drag: " << QString::number(target->item()->scale, 'f', 3)
+                  << "\n";
+            snapshot(QStringLiteral("07-scaled"));
+
+            QTest::keyClick(&window_, Qt::Key_Z, Qt::ControlModifier);
+            QTest::qWait(800);
+            out() << "scale after undo: " << QString::number(target->item()->scale, 'f', 3) << "\n";
+            snapshot(QStringLiteral("08-scale-undone"));
+        }
 
         const ui::LodManager::Stats stats = view->lodManager()->stats();
         out() << "items=" << window_.scene()->itemViews().size()

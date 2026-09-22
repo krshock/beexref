@@ -131,6 +131,9 @@ public:
 
         static State capture(const Item &item);
         void apply(Item &item) const;
+
+        bool operator==(const State &other) const;
+        bool operator!=(const State &other) const { return !(*this == other); }
     };
 
     ChangeItemCommand(ItemPtr item, State before, State after, QString text = {});

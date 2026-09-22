@@ -208,6 +208,13 @@ void ChangeItemCommand::State::apply(Item &item) const
     item.meta = meta;
 }
 
+bool ChangeItemCommand::State::operator==(const State &other) const
+{
+    return qFuzzyCompare(x, other.x) && qFuzzyCompare(y, other.y) && qFuzzyCompare(z, other.z)
+        && qFuzzyCompare(scale, other.scale) && qFuzzyCompare(rotation, other.rotation)
+        && qFuzzyCompare(flip, other.flip) && data == other.data && meta == other.meta;
+}
+
 ChangeItemCommand::ChangeItemCommand(ItemPtr item, State before, State after, QString text)
     : item_(std::move(item))
     , before_(std::move(before))

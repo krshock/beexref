@@ -6,6 +6,7 @@
 #include "levels.h"
 #include "lod_manager.h"
 #include "logging.h"
+#include "selection_ops.h"
 #include "settings.h"
 #include "util/format.h"
 #include "util/memory.h"
@@ -103,6 +104,40 @@ MainWindow::MainWindow(bool cacheDisabled, QWidget *parent)
     // The reference binds redo to Ctrl+Shift+Z on every platform.
     redoAction->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_Z));
     connect(redoAction, &QAction::triggered, this, [this]() { applyHistoryStep(false); });
+    editMenu->addSeparator();
+    auto *flipHorizontalAction = editMenu->addAction(QStringLiteral("Flip &Horizontally"));
+    flipHorizontalAction->setShortcut(QKeySequence(Qt::Key_H));
+    connect(flipHorizontalAction, &QAction::triggered, this, [this]() {
+        selection::flip(*scene_, undoStack_, false);
+        afterSelectionAction();
+    });
+    auto *flipVerticalAction = editMenu->addAction(QStringLiteral("Flip &Vertically"));
+    flipVerticalAction->setShortcut(QKeySequence(Qt::Key_V));
+    connect(flipVerticalAction, &QAction::triggered, this, [this]() {
+        selection::flip(*scene_, undoStack_, true);
+        afterSelectionAction();
+    });
+    editMenu->addSeparator();
+    auto *resetScaleAction = editMenu->addAction(QStringLiteral("Reset &Scale"));
+    connect(resetScaleAction, &QAction::triggered, this, [this]() {
+        selection::resetScale(*scene_, undoStack_);
+        afterSelectionAction();
+    });
+    auto *resetRotationAction = editMenu->addAction(QStringLiteral("Reset &Rotation"));
+    connect(resetRotationAction, &QAction::triggered, this, [this]() {
+        selection::resetRotation(*scene_, undoStack_);
+        afterSelectionAction();
+    });
+    auto *resetFlipAction = editMenu->addAction(QStringLiteral("Reset &Flip"));
+    connect(resetFlipAction, &QAction::triggered, this, [this]() {
+        selection::resetFlip(*scene_, undoStack_);
+        afterSelectionAction();
+    });
+    auto *resetTransformsAction = editMenu->addAction(QStringLiteral("Reset &All Transformations"));
+    connect(resetTransformsAction, &QAction::triggered, this, [this]() {
+        selection::resetTransforms(*scene_, undoStack_);
+        afterSelectionAction();
+    });
     editMenu->addSeparator();
     auto *cutAction = editMenu->addAction(QStringLiteral("Cu&t"));
     cutAction->setShortcut(QKeySequence::Cut);
@@ -240,6 +275,14 @@ void MainWindow::applyHistoryStep(bool undo)
     scene_->syncDocument();
     if (document_)
         document_->setModified(!undoStack_.isClean());
+    view_->lodManager()->evaluateNow();
+    updateTitle();
+}
+
+void MainWindow::afterSelectionAction()
+{
+    if (document_)
+        document_->setModified(true);
     view_->lodManager()->evaluateNow();
     updateTitle();
 }

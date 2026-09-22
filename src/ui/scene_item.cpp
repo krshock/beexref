@@ -17,6 +17,7 @@ namespace {
 constexpr int kPlaceholderWidth = 200;
 constexpr int kPlaceholderHeight = 150;
 constexpr int kErrorWidth = 220;
+constexpr double kSelectionLineWidth = 2.0;
 
 } // namespace
 
@@ -223,7 +224,9 @@ void SceneItem::paint(QPainter *painter, const QStyleOptionGraphicsItem *option,
     }
 
     if (option && (option->state & QStyle::State_Selected)) {
-        painter->setPen(QPen(theme::selection, 0, Qt::DashLine));
+        QPen pen(theme::selection, kSelectionLineWidth);
+        pen.setCosmetic(true);
+        painter->setPen(pen);
         painter->setBrush(Qt::NoBrush);
         painter->drawRect(boundingRect());
     }

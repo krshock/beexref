@@ -44,6 +44,8 @@ private:
     void updateTitle();
     // Applies an undo/redo step and brings the scene in line.
     void applyHistoryStep(bool undo);
+    // Refreshes the document state after a selection transformation.
+    void afterSelectionAction();
 
     Scene *scene_ = nullptr;
     View *view_ = nullptr;

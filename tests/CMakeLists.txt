@@ -98,3 +98,8 @@ qt_add_executable(test_session_cache test_session_cache.cpp)
 target_link_libraries(test_session_cache PRIVATE beexref_core Qt6::Test)
 beexref_set_warnings(test_session_cache)
 add_test(NAME session_cache COMMAND test_session_cache)
+
+qt_add_executable(test_selection_tools test_selection_tools.cpp)
+target_link_libraries(test_selection_tools PRIVATE beexref_core Qt6::Test)
+beexref_set_warnings(test_selection_tools)
+add_test(NAME selection_tools COMMAND test_selection_tools)

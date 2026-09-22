@@ -2,6 +2,7 @@
 
 #include "levels.h"
 #include "scene.h"
+#include "selection_tools.h"
 
 #include "doc/undo.h"
 
@@ -58,13 +59,31 @@ protected:
     void mousePressEvent(QMouseEvent *event) override;
     void mouseMoveEvent(QMouseEvent *event) override;
     void mouseReleaseEvent(QMouseEvent *event) override;
+    void leaveEvent(QEvent *event) override;
     void resizeEvent(QResizeEvent *event) override;
     void scrollContentsBy(int dx, int dy) override;
     void dragEnterEvent(QDragEnterEvent *event) override;
     void dragMoveEvent(QDragMoveEvent *event) override;
     void dropEvent(QDropEvent *event) override;
+    void drawForeground(QPainter *painter, const QRectF &rect) override;
 
 private:
+    // What a left-drag on the selection is doing.
+    enum class Drag {
+        None,
+        Move,
+        Scale,
+        Rotate,
+    };
+
+    struct GestureEntry
+    {
+        SceneItem *view = nullptr;
+        doc::ChangeItemCommand::State before;
+        double startScale = 1.0;
+        double startRotation = 0.0;
+    };
+
     void panBy(const QPoint &delta);
     void updateViewState();
     // Items bbox expanded by one viewport per side: the scrollable
@@ -73,6 +92,15 @@ private:
     void beginInteraction();
     void restoreSmoothing();
     double zoomExtent(bool maximum) const;
+
+    // Transform gestures.
+    bool beginScaleGesture(int corner, const QPointF &scenePos);
+    bool beginRotateGesture(const QPointF &scenePos);
+    void applyTransformGesture(const QPointF &scenePos, bool snap);
+    void finishTransformGesture();
+    void updateHoverCursor(const QPoint &viewportPos);
+    void setGestureFrozen(bool frozen);
+    QVector<SceneItem *> transformableSelection() const;
 
     LevelLoader *loader_ = nullptr;
     Scene *boardScene_ = nullptr;
@@ -85,6 +113,17 @@ private:
     bool sceneRectValid_ = false;
     bool moving_ = false;
     bool moveStarted_ = false;
+    Drag drag_ = Drag::None;
+
+    // Scale/rotate gesture state.
+    QRectF gestureBounds_;
+    QPointF gestureAnchor_;
+    QPointF gesturePress_;
+    double gestureStartAngle_ = 0;
+    double gestureSnapBase_ = 0;
+    int gestureCorner_ = -1;
+    QVector<GestureEntry> gestureEntries_;
+
     QPoint pressPos_;
     QPointF pressScenePos_;
     struct MoveEntry

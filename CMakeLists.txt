@@ -58,6 +58,13 @@ qt_add_library(beexref_core STATIC
     src/settings.h
     src/ui/downloader.cpp
     src/ui/downloader.h
+    src/ui/cursors.cpp
+    src/ui/cursors.h
+    src/ui/selection_ops.cpp
+    src/ui/selection_ops.h
+    src/ui/selection_tools.cpp
+    src/ui/selection_tools.h
+    src/ui/downloader.h
     src/ui/drop.cpp
     src/ui/drop.h
     src/ui/input_controller.cpp
@@ -87,6 +94,12 @@ qt_add_library(beexref_core STATIC
     src/util/process.h)
 target_include_directories(beexref_core PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>)
+qt_add_resources(beexref_core "beexref_assets"
+    PREFIX "/"
+    FILES
+        assets/cursors/cursor_flip_h.png
+        assets/cursors/cursor_flip_v.png
+        assets/cursors/cursor_rotate.png)
 target_link_libraries(beexref_core
     PUBLIC Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Svg Qt6::Network Threads::Threads
     PRIVATE beexref_sqlite3)

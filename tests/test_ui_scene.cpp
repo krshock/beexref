@@ -8,6 +8,8 @@
 #include <QtTest>
 #include <QWheelEvent>
 
+#include <cmath>
+
 #include "doc/document.h"
 #include "doc/item.h"
 #include "doc/source.h"
@@ -16,6 +18,7 @@
 #include "ui/input_controller.h"
 #include "ui/main_window.h"
 #include "ui/rendering.h"
+#include "ui/selection_ops.h"
 #include "ui/scene.h"
 #include "ui/scene_item.h"
 #include "ui/view.h"
@@ -87,6 +90,9 @@ private slots:
     void smoothingSuspendsDuringInteraction();
     void sceneRectLeavesRoomToPan();
     void pansBeyondTheItemsWhenZoomedIn();
+    void scaleHandleScalesAroundOppositeCorner();
+    void rotateGestureRotatesAndUndoes();
+    void flipActionMirrorsAroundTheCentre();
 };
 
 void TestUiScene::buildsItemsFromDocument()
@@ -469,6 +475,108 @@ void TestUiScene::pansBeyondTheItemsWhenZoomedIn()
              qPrintable(QStringLiteral("centre=%1 right=%2")
                             .arg(centre.x())
                             .arg(scene->itemsBoundingRect().right())));
+}
+
+void TestUiScene::scaleHandleScalesAroundOppositeCorner()
+{
+    auto document = std::make_shared<doc::Document>(doc::Document::create());
+    const doc::ItemPtr item = pixmapItem(200, 100, Qt::red);
+    item->x = 0;
+    item->y = 0;
+    document->addItem(item);
+
+    ui::View view;
+    auto *scene = new ui::Scene(&view);
+    scene->setDocument(document);
+    view.setBoardScene(scene);
+    doc::UndoStack stack(document.get());
+    view.setUndoStack(&stack);
+    view.resize(600, 400);
+    view.fitScene();
+
+    SceneItem *viewItem = scene->pixmapItemViews().first();
+    viewItem->setSelected(true);
+    QCOMPARE(scene->selectionBounds(), QRectF(0, 0, 200, 100));
+
+    // Press a little inside the bottom-right corner and drag outward.
+    const QPoint press = view.mapFromScene(QPointF(197, 97));
+    const QPoint move = view.mapFromScene(QPointF(320, 197));
+    sendMouse(view.viewport(), QEvent::MouseButtonPress, press, Qt::LeftButton, Qt::LeftButton);
+    sendMouse(view.viewport(), QEvent::MouseMove, move, Qt::NoButton, Qt::LeftButton);
+    sendMouse(view.viewport(), QEvent::MouseButtonRelease, move, Qt::LeftButton, Qt::NoButton);
+
+    QVERIFY2(item->scale > 1.0, qPrintable(QStringLiteral("scale=%1").arg(item->scale)));
+    // The opposite (top-left) corner stays put.
+    QCOMPARE(item->x, 0.0);
+    QCOMPARE(item->y, 0.0);
+    QVERIFY(stack.canUndo());
+
+    QVERIFY(stack.undo());
+    scene->syncDocument();
+    QCOMPARE(item->scale, 1.0);
+    QCOMPARE(item->x, 0.0);
+}
+
+void TestUiScene::rotateGestureRotatesAndUndoes()
+{
+    auto document = std::make_shared<doc::Document>(doc::Document::create());
+    const doc::ItemPtr item = pixmapItem(200, 100, Qt::green);
+    document->addItem(item);
+
+    ui::View view;
+    auto *scene = new ui::Scene(&view);
+    scene->setDocument(document);
+    view.setBoardScene(scene);
+    doc::UndoStack stack(document.get());
+    view.setUndoStack(&stack);
+    view.resize(600, 400);
+    view.fitScene();
+
+    SceneItem *viewItem = scene->pixmapItemViews().first();
+    viewItem->setSelected(true);
+
+    // The rotation band sits between 10 and 20 device pixels outside
+    // the corner; convert that to scene units for the actual zoom.
+    const double viewScale = view.transform().m11();
+    const QPointF unit(1.0 / std::sqrt(2.0), 1.0 / std::sqrt(2.0));
+    const QPointF pressScene =
+        QPointF(200, 100) + unit * (15.0 / viewScale);
+    const QPoint press = view.mapFromScene(pressScene);
+    const QPoint move = view.mapFromScene(QPointF(240, 60));
+    sendMouse(view.viewport(), QEvent::MouseButtonPress, press, Qt::LeftButton, Qt::LeftButton);
+    sendMouse(view.viewport(), QEvent::MouseMove, move, Qt::NoButton, Qt::LeftButton);
+    sendMouse(view.viewport(), QEvent::MouseButtonRelease, move, Qt::LeftButton, Qt::NoButton);
+
+    QVERIFY2(std::abs(item->rotation) > 1.0,
+             qPrintable(QStringLiteral("rotation=%1").arg(item->rotation)));
+    QVERIFY(stack.canUndo());
+    QVERIFY(stack.undo());
+    scene->syncDocument();
+    QCOMPARE(item->rotation, 0.0);
+}
+
+void TestUiScene::flipActionMirrorsAroundTheCentre()
+{
+    auto document = std::make_shared<doc::Document>(doc::Document::create());
+    const doc::ItemPtr item = pixmapItem(200, 100, Qt::blue);
+    document->addItem(item);
+
+    ui::Scene scene;
+    scene.setDocument(document);
+    doc::UndoStack stack(document.get());
+    SceneItem *view = scene.pixmapItemViews().first();
+    view->setSelected(true);
+
+    ui::selection::flip(scene, stack, false);
+    QCOMPARE(item->flip, -1.0);
+    QVERIFY(stack.undo());
+    QCOMPARE(item->flip, 1.0);
+
+    ui::selection::flip(scene, stack, true);
+    QCOMPARE(item->flip, -1.0);
+    QCOMPARE(item->rotation, 180.0);
+    QVERIFY(stack.undo());
+    QCOMPARE(item->rotation, 0.0);
 }
 
 QTEST_MAIN(TestUiScene)

@@ -1,7 +1,9 @@
 #include "view.h"
 
+#include "cursors.h"
 #include "lod_manager.h"
 #include "rendering.h"
+#include "selection_ops.h"
 #include "theme.h"
 
 #include "doc/undo.h"
@@ -12,6 +14,7 @@
 #include <QDropEvent>
 #include <QMimeData>
 #include <QMouseEvent>
+#include <QPainter>
 #include <QScrollBar>
 #include <QTimer>
 #include <QWheelEvent>
@@ -243,12 +246,50 @@ void View::mousePressEvent(QMouseEvent *event)
     }
 
     if (event->button() == Qt::LeftButton) {
-        if (auto *item = dynamic_cast<SceneItem *>(itemAt(event->position().toPoint()))) {
-            moving_ = true;
-            moveStarted_ = false;
-            pressPos_ = event->position().toPoint();
-            pressScenePos_ = mapToScene(pressPos_);
+        const QPoint viewportPos = event->position().toPoint();
+        const QPointF scenePos = mapToScene(viewportPos);
 
+        // Selection handles first: the rotation and flip areas lie
+        // partly outside the items, so they are hit-tested against the
+        // selection bounds rather than through itemAt().
+        if (boardScene_) {
+            const QRectF bounds = boardScene_->selectionBounds();
+            if (!bounds.isEmpty()) {
+                const selection::Hit hit =
+                    selection::hitTest(bounds, transform().m11(), scenePos);
+                switch (hit.part) {
+                case selection::Part::Scale:
+                    if (beginScaleGesture(hit.corner, scenePos)) {
+                        event->accept();
+                        return;
+                    }
+                    break;
+                case selection::Part::Rotate:
+                    if (beginRotateGesture(scenePos)) {
+                        event->accept();
+                        return;
+                    }
+                    break;
+                case selection::Part::FlipHorizontal:
+                case selection::Part::FlipVertical:
+                    if (undoStack_) {
+                        selection::flip(*boardScene_, *undoStack_,
+                                        hit.part == selection::Part::FlipVertical);
+                        if (const auto &document = boardScene_->document())
+                            document->setModified(true);
+                        lod_->evaluateNow();
+                        emit documentModified();
+                        event->accept();
+                        return;
+                    }
+                    break;
+                case selection::Part::None:
+                    break;
+                }
+            }
+        }
+
+        if (auto *item = dynamic_cast<SceneItem *>(itemAt(viewportPos))) {
             if (event->modifiers().testFlag(Qt::ControlModifier)) {
                 item->setSelected(!item->isSelected());
             } else if (!item->isSelected()) {
@@ -256,6 +297,11 @@ void View::mousePressEvent(QMouseEvent *event)
                 item->setSelected(true);
             }
 
+            // Plain move.
+            moving_ = true;
+            moveStarted_ = false;
+            pressPos_ = viewportPos;
+            pressScenePos_ = scenePos;
             moveStarts_.clear();
             for (QGraphicsItem *selected : scene()->selectedItems()) {
                 if (auto *view = dynamic_cast<SceneItem *>(selected)) {
@@ -275,8 +321,9 @@ void View::mousePressEvent(QMouseEvent *event)
 
 void View::mouseMoveEvent(QMouseEvent *event)
 {
+    const QPoint position = event->position().toPoint();
+
     if (panning_) {
-        const QPoint position = event->position().toPoint();
         // Content follows the cursor: the reference pans by
         // (start - current), which is the negated scrollbar delta.
         panBy(panStart_ - position);
@@ -287,8 +334,15 @@ void View::mouseMoveEvent(QMouseEvent *event)
         return;
     }
 
+    if (drag_ == Drag::Scale || drag_ == Drag::Rotate) {
+        const bool snap = event->modifiers().testFlag(Qt::ControlModifier)
+            || event->modifiers().testFlag(Qt::ShiftModifier);
+        applyTransformGesture(mapToScene(position), snap);
+        event->accept();
+        return;
+    }
+
     if (moving_) {
-        const QPoint position = event->position().toPoint();
         if (!moveStarted_ && (position - pressPos_).manhattanLength() < kMoveThreshold) {
             event->accept();
             return;
@@ -312,6 +366,9 @@ void View::mouseMoveEvent(QMouseEvent *event)
         event->accept();
         return;
     }
+
+    if (!(event->buttons() & Qt::LeftButton))
+        updateHoverCursor(position);
     QGraphicsView::mouseMoveEvent(event);
 }
 
@@ -321,6 +378,13 @@ void View::mouseReleaseEvent(QMouseEvent *event)
 
     if (panning_ && event->button() == Qt::MiddleButton) {
         panning_ = false;
+        event->accept();
+        return;
+    }
+
+    if ((drag_ == Drag::Scale || drag_ == Drag::Rotate) && event->button() == Qt::LeftButton) {
+        finishTransformGesture();
+        drag_ = Drag::None;
         event->accept();
         return;
     }
@@ -355,6 +419,221 @@ void View::mouseReleaseEvent(QMouseEvent *event)
     }
     QGraphicsView::mouseReleaseEvent(event);
 }
+
+QVector<SceneItem *> View::transformableSelection() const
+{
+    QVector<SceneItem *> items;
+    if (!boardScene_)
+        return items;
+    for (SceneItem *view : boardScene_->selectedItemViews()) {
+        if (!view->isError())
+            items.append(view);
+    }
+    return items;
+}
+
+void View::setGestureFrozen(bool frozen)
+{
+    if (!frozen) {
+        lod_->setGestureItems({});
+        return;
+    }
+    QSet<const doc::Item *> gesture;
+    for (SceneItem *view : transformableSelection())
+        gesture.insert(view->item().get());
+    lod_->setGestureItems(gesture);
+}
+
+bool View::beginScaleGesture(int corner, const QPointF &scenePos)
+{
+    const QVector<SceneItem *> items = transformableSelection();
+    if (items.isEmpty())
+        return false;
+
+    gestureBounds_ = boardScene_->selectionBounds();
+    gestureAnchor_ = selection::scaleAnchor(gestureBounds_, corner);
+    gesturePress_ = scenePos;
+    gestureCorner_ = corner;
+    gestureEntries_.clear();
+    for (SceneItem *view : items) {
+        GestureEntry entry;
+        entry.view = view;
+        entry.before = doc::ChangeItemCommand::State::capture(*view->item());
+        entry.startScale = view->item()->scale;
+        entry.startRotation = view->item()->rotation;
+        gestureEntries_.append(entry);
+    }
+    setGestureFrozen(true);
+    drag_ = Drag::Scale;
+    return true;
+}
+
+bool View::beginRotateGesture(const QPointF &scenePos)
+{
+    const QVector<SceneItem *> items = transformableSelection();
+    if (items.isEmpty())
+        return false;
+
+    gestureBounds_ = boardScene_->selectionBounds();
+    gestureAnchor_ = gestureBounds_.center();
+    gesturePress_ = scenePos;
+    gestureStartAngle_ = selection::rotationAngle(gestureAnchor_, scenePos);
+    // The reference snaps against the selection owner's rotation, which
+    // is the item itself for a single selection and zero otherwise.
+    gestureSnapBase_ = items.size() == 1 ? items.first()->item()->rotation : 0.0;
+    gestureEntries_.clear();
+    for (SceneItem *view : items) {
+        GestureEntry entry;
+        entry.view = view;
+        entry.before = doc::ChangeItemCommand::State::capture(*view->item());
+        entry.startScale = view->item()->scale;
+        entry.startRotation = view->item()->rotation;
+        gestureEntries_.append(entry);
+    }
+    setGestureFrozen(true);
+    drag_ = Drag::Rotate;
+    return true;
+}
+
+void View::applyTransformGesture(const QPointF &scenePos, bool snap)
+{
+    if (drag_ == Drag::Scale) {
+        const double factor = selection::scaleFactor(gestureBounds_, gesturePress_, scenePos);
+        for (const GestureEntry &entry : gestureEntries_) {
+            SceneItem *view = entry.view;
+            const double scale = entry.startScale * factor;
+            selection::transformAroundAnchor(
+                view, gestureAnchor_, [view, scale]() { view->item()->scale = scale; });
+        }
+        return;
+    }
+
+    if (drag_ == Drag::Rotate) {
+        double delta = selection::rotationAngle(gestureAnchor_, scenePos) - gestureStartAngle_;
+        if (snap) {
+            const double target = selection::snapAngle(gestureSnapBase_ + delta, 15.0);
+            delta = target - gestureSnapBase_;
+        }
+        for (const GestureEntry &entry : gestureEntries_) {
+            SceneItem *view = entry.view;
+            // A flipped item's visual rotation runs the other way.
+            const double rotation = entry.startRotation + delta * view->item()->flip;
+            selection::transformAroundAnchor(
+                view, gestureAnchor_, [view, rotation]() { view->item()->rotation = rotation; });
+        }
+    }
+}
+
+void View::finishTransformGesture()
+{
+    setGestureFrozen(false);
+    if (!undoStack_ || gestureEntries_.isEmpty()) {
+        gestureEntries_.clear();
+        return;
+    }
+
+    const QString text = drag_ == Drag::Scale ? QStringLiteral("Scale items")
+                                              : QStringLiteral("Rotate items");
+    QVector<QPair<SceneItem *, doc::ChangeItemCommand::State>> changed;
+    for (const GestureEntry &entry : gestureEntries_) {
+        const doc::ChangeItemCommand::State after =
+            doc::ChangeItemCommand::State::capture(*entry.view->item());
+        if (after != entry.before)
+            changed.append({entry.view, entry.before});
+    }
+    gestureEntries_.clear();
+    if (changed.isEmpty())
+        return;
+
+    undoStack_->beginMacro(text);
+    for (const auto &pair : changed) {
+        const doc::ChangeItemCommand::State after =
+            doc::ChangeItemCommand::State::capture(*pair.first->item());
+        undoStack_->push(std::make_unique<doc::ChangeItemCommand>(pair.first->item(), pair.second,
+                                                                  after, text));
+    }
+    undoStack_->endMacro();
+
+    if (boardScene_ && boardScene_->document())
+        boardScene_->document()->setModified(true);
+    recalculateSceneRect();
+    lod_->schedule();
+    emit documentModified();
+}
+
+void View::updateHoverCursor(const QPoint &viewportPos)
+{
+    if (!boardScene_) {
+        viewport()->unsetCursor();
+        return;
+    }
+    const QRectF bounds = boardScene_->selectionBounds();
+    if (bounds.isEmpty()) {
+        viewport()->unsetCursor();
+        return;
+    }
+    const selection::Hit hit = selection::hitTest(bounds, transform().m11(),
+                                                  mapToScene(viewportPos));
+    switch (hit.part) {
+    case selection::Part::Scale: {
+        double rotation = 0;
+        bool flipped = false;
+        const QVector<SceneItem *> items = transformableSelection();
+        if (!items.isEmpty()) {
+            rotation = items.first()->item()->rotation;
+            flipped = items.first()->item()->flip < 0;
+        }
+        viewport()->setCursor(selection::scaleCursor(hit.corner, rotation, flipped));
+        return;
+    }
+    case selection::Part::Rotate:
+        viewport()->setCursor(cursors::rotate());
+        return;
+    case selection::Part::FlipHorizontal:
+        viewport()->setCursor(cursors::flipHorizontal());
+        return;
+    case selection::Part::FlipVertical:
+        viewport()->setCursor(cursors::flipVertical());
+        return;
+    case selection::Part::None:
+        break;
+    }
+    viewport()->unsetCursor();
+}
+
+void View::leaveEvent(QEvent *event)
+{
+    if (drag_ == Drag::None && !panning_)
+        viewport()->unsetCursor();
+    QGraphicsView::leaveEvent(event);
+}
+
+void View::drawForeground(QPainter *painter, const QRectF &rect)
+{
+    Q_UNUSED(rect);
+    if (!boardScene_)
+        return;
+    const QRectF bounds = boardScene_->selectionBounds();
+    if (bounds.isEmpty())
+        return;
+
+    painter->save();
+    QPen pen(theme::selection, selection::kLineWidth);
+    pen.setCosmetic(true);
+    painter->setPen(pen);
+    painter->setBrush(Qt::NoBrush);
+    painter->drawRect(bounds);
+
+    // Corner handles, drawn as round dots; cosmetic pen widths keep
+    // them at a constant screen size at any zoom.
+    pen.setWidthF(selection::kHandleSize);
+    pen.setCapStyle(Qt::RoundCap);
+    painter->setPen(pen);
+    for (int index = 0; index < 4; ++index)
+        painter->drawPoint(selection::corner(bounds, index));
+    painter->restore();
+}
+
 
 void View::resizeEvent(QResizeEvent *event)
 {
