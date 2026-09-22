@@ -83,7 +83,6 @@ void View::recalculateSceneRect()
     const QRectF items = boardScene_->itemsBoundingRect();
     if (items.isEmpty()) {
         boardScene_->setSceneRect(QRectF());
-        sceneRectValid_ = false;
         return;
     }
     const QSize size = viewport()->size();
@@ -97,14 +96,10 @@ void View::recalculateSceneRect()
         return;
     }
 
-    // Changing the scene rect re-maps the scrollbars, which would jump
-    // the view; keep looking at the same scene point.
-    const QPointF centre = mapToScene(viewport()->rect().center());
-    const bool keepCentre = sceneRectValid_;
+    // Qt keeps the view anchored when the scene rect changes, so the
+    // canvas does not jump; re-centring here would drift it instead
+    // (scrollbar quantization, compounding over a gesture).
     boardScene_->setSceneRect(rect);
-    sceneRectValid_ = true;
-    if (keepCentre)
-        centerOn(centre);
 }
 
 void View::setLodSettings(const LodSettings &settings)
@@ -248,6 +243,7 @@ void View::mousePressEvent(QMouseEvent *event)
     if (event->button() == Qt::LeftButton) {
         const QPoint viewportPos = event->position().toPoint();
         const QPointF scenePos = mapToScene(viewportPos);
+        gestureInverse_ = viewportTransform().inverted();
 
         // Selection handles first: the rotation and flip areas lie
         // partly outside the items, so they are hit-tested against the
@@ -277,6 +273,7 @@ void View::mousePressEvent(QMouseEvent *event)
                                         hit.part == selection::Part::FlipVertical);
                         if (const auto &document = boardScene_->document())
                             document->setModified(true);
+                        recalculateSceneRect();
                         lod_->evaluateNow();
                         emit documentModified();
                         event->accept();
@@ -337,7 +334,7 @@ void View::mouseMoveEvent(QMouseEvent *event)
     if (drag_ == Drag::Scale || drag_ == Drag::Rotate) {
         const bool snap = event->modifiers().testFlag(Qt::ControlModifier)
             || event->modifiers().testFlag(Qt::ShiftModifier);
-        applyTransformGesture(mapToScene(position), snap);
+        applyTransformGesture(gestureInverse_.map(QPointF(position)), snap);
         event->accept();
         return;
     }
@@ -355,13 +352,14 @@ void View::mouseMoveEvent(QMouseEvent *event)
             lod_->setGestureItems(gesture);
         }
         moveStarted_ = true;
-        const QPointF delta = mapToScene(position) - pressScenePos_;
+        const QPointF delta = gestureInverse_.map(QPointF(position)) - pressScenePos_;
         for (const MoveEntry &entry : moveStarts_) {
             entry.view->setPos(entry.startPosition + delta);
             entry.view->update();
         }
         // Dragging an item past the current area grows the scrollable
-        // rect, as the reference does on every scene change.
+        // rect, as the reference does on every scene change; Qt keeps
+        // the view anchored so the canvas does not move under the item.
         recalculateSceneRect();
         event->accept();
         return;
@@ -522,6 +520,7 @@ void View::applyTransformGesture(const QPointF &scenePos, bool snap)
                 view, gestureAnchor_, [view, rotation]() { view->item()->rotation = rotation; });
         }
     }
+    recalculateSceneRect();
 }
 
 void View::finishTransformGesture()

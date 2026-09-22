@@ -283,6 +283,7 @@ void MainWindow::afterSelectionAction()
 {
     if (document_)
         document_->setModified(true);
+    view_->refreshSceneRect();
     view_->lodManager()->evaluateNow();
     updateTitle();
 }

@@ -181,6 +181,26 @@ public:
             QTest::qWait(800);
             out() << "scale after undo: " << QString::number(target->item()->scale, 'f', 3) << "\n";
             snapshot(QStringLiteral("08-scale-undone"));
+
+            // Drag the item and confirm the canvas does not move.
+            const QPointF centreBefore = view->mapToScene(viewport->rect().center());
+            const QPoint grab =
+                view->mapFromScene(window_.scene()->selectionBounds().center());
+            sendMouse(viewport, QEvent::MouseButtonPress, grab, Qt::LeftButton, Qt::LeftButton);
+            for (int step = 1; step <= 40; ++step) {
+                sendMouse(viewport, QEvent::MouseMove, grab + QPoint(step, step / 2), Qt::NoButton,
+                          Qt::LeftButton);
+            }
+            sendMouse(viewport, QEvent::MouseButtonRelease, grab + QPoint(40, 20), Qt::LeftButton,
+                      Qt::NoButton);
+            QTest::qWait(800);
+            const QPointF centreAfter = view->mapToScene(viewport->rect().center());
+            const double scale = view->transform().m11();
+            out() << "view drift during item drag: "
+                  << QString::number((centreAfter.x() - centreBefore.x()) * scale, 'f', 3) << ","
+                  << QString::number((centreAfter.y() - centreBefore.y()) * scale, 'f', 3)
+                  << " device px\n";
+            snapshot(QStringLiteral("09-moved"));
         }
 
         const ui::LodManager::Stats stats = view->lodManager()->stats();

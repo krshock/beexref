@@ -93,6 +93,7 @@ private slots:
     void scaleHandleScalesAroundOppositeCorner();
     void rotateGestureRotatesAndUndoes();
     void flipActionMirrorsAroundTheCentre();
+    void movingAnItemDoesNotScrollTheView();
 };
 
 void TestUiScene::buildsItemsFromDocument()
@@ -577,6 +578,45 @@ void TestUiScene::flipActionMirrorsAroundTheCentre()
     QCOMPARE(item->rotation, 180.0);
     QVERIFY(stack.undo());
     QCOMPARE(item->rotation, 0.0);
+}
+
+void TestUiScene::movingAnItemDoesNotScrollTheView()
+{
+    auto document = std::make_shared<doc::Document>(doc::Document::create());
+    const doc::ItemPtr item = pixmapItem(200, 100, Qt::darkRed);
+    document->addItem(item);
+
+    ui::View view;
+    auto *scene = new ui::Scene(&view);
+    scene->setDocument(document);
+    view.setBoardScene(scene);
+    view.resize(400, 300);
+    view.fitScene();
+
+    const QPointF centreBefore = view.mapToScene(view.viewport()->rect().center());
+
+    SceneItem *viewItem = scene->pixmapItemViews().first();
+    const QPoint itemCentre = view.mapFromScene(viewItem->sceneBoundingRect().center());
+    sendMouse(view.viewport(), QEvent::MouseButtonPress, itemCentre, Qt::LeftButton,
+              Qt::LeftButton);
+    // Many small steps: a per-event view shift would compound here.
+    for (int step = 1; step <= 30; ++step) {
+        sendMouse(view.viewport(), QEvent::MouseMove, itemCentre + QPoint(step * 2, step),
+                  Qt::NoButton, Qt::LeftButton);
+    }
+    sendMouse(view.viewport(), QEvent::MouseButtonRelease, itemCentre + QPoint(60, 30),
+              Qt::LeftButton, Qt::NoButton);
+
+    // Dragging an item must not pan the canvas: the visible centre may
+    // only move by scrollbar rounding, under half a device pixel.
+    const QPointF centreAfter = view.mapToScene(view.viewport()->rect().center());
+    const double scale = view.transform().m11();
+    const double driftX = std::abs(centreAfter.x() - centreBefore.x()) * scale;
+    const double driftY = std::abs(centreAfter.y() - centreBefore.y()) * scale;
+    QVERIFY2(driftX <= 0.5 + 1.0e-6 && driftY <= 0.5 + 1.0e-6,
+             qPrintable(QStringLiteral("view drifted by %1,%2 device px")
+                            .arg(driftX)
+                            .arg(driftY)));
 }
 
 QTEST_MAIN(TestUiScene)

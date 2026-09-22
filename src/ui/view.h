@@ -9,6 +9,7 @@
 #include <QGraphicsView>
 #include <QPoint>
 #include <QPointF>
+#include <QTransform>
 #include <QVector>
 
 #include <functional>
@@ -38,6 +39,9 @@ public:
 
     void setLodSettings(const LodSettings &settings);
     LodManager *lodManager() const { return lod_; }
+    // Refreshes the scrollable area after the items changed shape, as
+    // the reference does on every scene change.
+    void refreshSceneRect() { recalculateSceneRect(); }
     // Commands for completed gestures (moves) are pushed here.
     void setUndoStack(doc::UndoStack *stack) { undoStack_ = stack; }
 
@@ -110,10 +114,13 @@ private:
 
     bool panning_ = false;
     QPoint panStart_;
-    bool sceneRectValid_ = false;
     bool moving_ = false;
     bool moveStarted_ = false;
     Drag drag_ = Drag::None;
+    // The view transform at press: gesture coordinates are mapped
+    // through this, so a view shift mid-gesture (the scene rect grows
+    // while dragging) cannot feed back into the item positions.
+    QTransform gestureInverse_;
 
     // Scale/rotate gesture state.
     QRectF gestureBounds_;
