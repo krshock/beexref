@@ -15,6 +15,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 find_package(Qt6 6.8 REQUIRED COMPONENTS Core Gui Widgets Svg Network Test)
+find_package(Threads REQUIRED)
 qt_standard_project_setup()
 
 # Vendored SQLite amalgamation. The flags match the behavior of the
@@ -24,10 +25,16 @@ target_include_directories(beexref_sqlite3 SYSTEM PUBLIC third_party/sqlite3)
 target_compile_definitions(beexref_sqlite3 PRIVATE
     SQLITE_THREADSAFE=1
     SQLITE_DEFAULT_MEMSTATUS=0
-    SQLITE_OMIT_DEPRECATED)
+    SQLITE_OMIT_DEPRECATED
+    SQLITE_OMIT_LOAD_EXTENSION)
 set_target_properties(beexref_sqlite3 PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 qt_add_library(beexref_core STATIC
+    src/board/error.h
+    src/board/schema.cpp
+    src/board/schema.h
+    src/board/sqlite.cpp
+    src/board/sqlite.h
     src/constants.h
     src/logging.cpp
     src/logging.h
@@ -36,7 +43,7 @@ qt_add_library(beexref_core STATIC
 target_include_directories(beexref_core PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>)
 target_link_libraries(beexref_core
-    PUBLIC Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Svg Qt6::Network
+    PUBLIC Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Svg Qt6::Network Threads::Threads
     PRIVATE beexref_sqlite3)
 beexref_set_warnings(beexref_core)
 
