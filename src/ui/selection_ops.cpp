@@ -65,6 +65,81 @@ void transformAroundAnchor(SceneItem *view, const QPointF &anchorScene,
     view->syncPositionToModel();
 }
 
+QVector<SceneItem *> imageSelection(const Scene &scene)
+{
+    QVector<SceneItem *> items;
+    for (SceneItem *view : scene.selectedItemViews()) {
+        if (view->isPixmap() && !view->isError())
+            items.append(view);
+    }
+    return items;
+}
+
+void applyOpacity(const Scene &scene, double opacity)
+{
+    for (SceneItem *view : imageSelection(scene)) {
+        view->item()->setOpacity(opacity);
+        view->applyModelState();
+    }
+}
+
+namespace {
+
+// Applies a data change (opacity, grayscale) to the selected images and
+// records one undo step per changed item, collected in a macro. An
+// action that changes nothing leaves no history entry.
+void applyDataChange(const Scene &scene, doc::UndoStack &stack, const QString &text,
+                     const std::function<void(doc::Item &)> &mutate)
+{
+    const QVector<SceneItem *> items = imageSelection(scene);
+    if (items.isEmpty())
+        return;
+
+    QVector<doc::ChangeItemCommand::State> before;
+    before.reserve(items.size());
+    for (SceneItem *view : items)
+        before.append(doc::ChangeItemCommand::State::capture(*view->item()));
+
+    QVector<QPair<SceneItem *, doc::ChangeItemCommand::State>> changed;
+    for (qsizetype i = 0; i < items.size(); ++i) {
+        mutate(*items.at(i)->item());
+        const doc::ChangeItemCommand::State after =
+            doc::ChangeItemCommand::State::capture(*items.at(i)->item());
+        if (after != before.at(i))
+            changed.append({items.at(i), before.at(i)});
+    }
+
+    if (!changed.isEmpty()) {
+        stack.beginMacro(text);
+        for (const auto &pair : changed) {
+            const doc::ChangeItemCommand::State after =
+                doc::ChangeItemCommand::State::capture(*pair.first->item());
+            stack.push(std::make_unique<doc::ChangeItemCommand>(
+                pair.first->item(), pair.second, after, text));
+        }
+        stack.endMacro();
+    }
+
+    // The models are already in their final state; bring the views in
+    // line (the grayscale copy is rebuilt here).
+    for (SceneItem *view : items)
+        view->applyModelState();
+}
+
+} // namespace
+
+void setOpacity(const Scene &scene, doc::UndoStack &stack, double opacity)
+{
+    applyDataChange(scene, stack, QStringLiteral("Change opacity"),
+                    [opacity](doc::Item &item) { item.setOpacity(opacity); });
+}
+
+void setGrayscale(const Scene &scene, doc::UndoStack &stack, bool grayscale)
+{
+    applyDataChange(scene, stack, QStringLiteral("Grayscale"),
+                    [grayscale](doc::Item &item) { item.setGrayscale(grayscale); });
+}
+
 void flip(const Scene &scene, doc::UndoStack &stack, bool vertical)
 {
     const QRectF bounds = scene.selectionBounds();

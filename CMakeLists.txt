@@ -58,6 +58,10 @@ qt_add_library(beexref_core STATIC
     src/settings.h
     src/ui/downloader.cpp
     src/ui/downloader.h
+    src/ui/grayscale.cpp
+    src/ui/grayscale.h
+    src/ui/opacity_dialog.cpp
+    src/ui/opacity_dialog.h
     src/ui/cursors.cpp
     src/ui/cursors.h
     src/ui/selection_ops.cpp

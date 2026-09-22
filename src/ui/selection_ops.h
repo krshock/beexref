@@ -27,5 +27,17 @@ void resetRotation(const Scene &scene, doc::UndoStack &stack);
 void resetFlip(const Scene &scene, doc::UndoStack &stack);
 void resetTransforms(const Scene &scene, doc::UndoStack &stack);
 
+// The images (pixmap items) of the current selection: the reference's
+// ChangeOpacity and ToggleGrayscale only act on those.
+QVector<SceneItem *> imageSelection(const Scene &scene);
+
+// Live opacity preview for the dialog: model and view, no undo step.
+void applyOpacity(const Scene &scene, double opacity);
+
+// Opacity and grayscale, applied to the selected images; the caller
+// pushes nothing itself, these record one step when something changed.
+void setOpacity(const Scene &scene, doc::UndoStack &stack, double opacity);
+void setGrayscale(const Scene &scene, doc::UndoStack &stack, bool grayscale);
+
 } // namespace selection
 } // namespace ui

@@ -6,6 +6,7 @@
 #include "levels.h"
 #include "lod_manager.h"
 #include "logging.h"
+#include "opacity_dialog.h"
 #include "selection_ops.h"
 #include "settings.h"
 #include "util/format.h"
@@ -181,6 +182,20 @@ MainWindow::MainWindow(bool cacheDisabled, QWidget *parent)
     fitSelectionAction->setShortcut(QKeySequence(Qt::SHIFT | Qt::Key_F));
     connect(fitSelectionAction, &QAction::triggered, view_, &View::fitSelection);
 
+    auto *imagesMenu = menuBar()->addMenu(QStringLiteral("&Images"));
+    auto *changeOpacityAction = imagesMenu->addAction(QStringLiteral("Change &Opacity..."));
+    connect(changeOpacityAction, &QAction::triggered, this, &MainWindow::changeOpacity);
+    grayscaleAction_ = imagesMenu->addAction(QStringLiteral("&Grayscale"));
+    grayscaleAction_->setShortcut(QKeySequence(Qt::Key_G));
+    grayscaleAction_->setCheckable(true);
+    connect(grayscaleAction_, &QAction::triggered, this, [this](bool checked) {
+        selection::setGrayscale(*scene_, undoStack_, checked);
+        afterSelectionAction();
+    });
+    connect(scene_, &QGraphicsScene::selectionChanged, this,
+            &MainWindow::updateSelectionActions);
+    updateSelectionActions();
+
     setMinimumSize(400, 300);
     resize(500, 300);
     updateTitle();
@@ -276,6 +291,7 @@ void MainWindow::applyHistoryStep(bool undo)
     if (document_)
         document_->setModified(!undoStack_.isClean());
     view_->lodManager()->evaluateNow();
+    updateSelectionActions();
     updateTitle();
 }
 
@@ -285,7 +301,47 @@ void MainWindow::afterSelectionAction()
         document_->setModified(true);
     view_->refreshSceneRect();
     view_->lodManager()->evaluateNow();
+    updateSelectionActions();
     updateTitle();
+}
+
+void MainWindow::changeOpacity()
+{
+    const QVector<SceneItem *> images = selection::imageSelection(*scene_);
+    if (images.isEmpty())
+        return;
+
+    QVector<doc::ChangeItemCommand::State> before;
+    before.reserve(images.size());
+    for (SceneItem *view : images)
+        before.append(doc::ChangeItemCommand::State::capture(*view->item()));
+
+    OpacityDialog dialog(this, qRound(images.first()->item()->opacity() * 100.0));
+    connect(&dialog, &OpacityDialog::percentChanged, this, [this](int percent) {
+        selection::applyOpacity(*scene_, percent / 100.0);
+    });
+
+    const bool accepted = dialog.exec() == QDialog::Accepted;
+    const int percent = dialog.percent();
+
+    // Undo the live preview, then commit the chosen value as one step,
+    // so undo returns to the opacity from before the dialog.
+    for (qsizetype i = 0; i < images.size(); ++i)
+        before.at(i).apply(*images.at(i)->item());
+    for (SceneItem *view : images)
+        view->applyModelState();
+    if (accepted)
+        selection::setOpacity(*scene_, undoStack_, percent / 100.0);
+    afterSelectionAction();
+}
+
+void MainWindow::updateSelectionActions()
+{
+    if (!grayscaleAction_)
+        return;
+    const QVector<SceneItem *> images = selection::imageSelection(*scene_);
+    grayscaleAction_->setEnabled(!images.isEmpty());
+    grayscaleAction_->setChecked(!images.isEmpty() && images.first()->item()->grayscale());
 }
 
 void MainWindow::updateTitle()

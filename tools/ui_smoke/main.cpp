@@ -16,6 +16,7 @@
 #include <QDir>
 #include <QImage>
 #include <QMimeData>
+#include <QAction>
 #include <QMouseEvent>
 #include <QScrollBar>
 #include <QTextStream>
@@ -30,8 +31,11 @@
 #include "ui/lod_manager.h"
 #include "ui/main_window.h"
 #include "ui/scene.h"
+#include "ui/selection_ops.h"
 #include "ui/scene_item.h"
 #include "ui/view.h"
+
+#include "doc/undo.h"
 #include "util/memory.h"
 
 namespace {
@@ -201,6 +205,41 @@ public:
                   << QString::number((centreAfter.y() - centreBefore.y()) * scale, 'f', 3)
                   << " device px\n";
             snapshot(QStringLiteral("09-moved"));
+
+            // E2: grayscale and opacity on the same item, with the
+            // centre pixel read back from a real repaint.
+            doc::UndoStack localStack(window_.scene()->document().get());
+            auto centrePixel = [&]() {
+                const QImage shot = view->viewport()->grab().toImage();
+                return shot.pixelColor(view->mapFromScene(target->sceneBoundingRect().center()));
+            };
+
+            const QColor before = centrePixel();
+            ui::selection::setGrayscale(*window_.scene(), localStack, true);
+            QTest::qWait(600);
+            const QColor gray = centrePixel();
+            out() << "grayscale: model=" << target->item()->grayscale()
+                  << " grayLevel=" << (target->displayLevel().format() == QImage::Format_Grayscale8)
+                  << " pixel=" << gray.name()
+                  << " grey=" << (gray.red() == gray.green() && gray.green() == gray.blue()) << "\n";
+            snapshot(QStringLiteral("10-grayscale"));
+
+            ui::selection::setOpacity(*window_.scene(), localStack, 0.5);
+            QTest::qWait(600);
+            const QColor faded = centrePixel();
+            out() << "opacity: model=" << target->item()->opacity() << " pixel=" << faded.name()
+                  << "\n";
+            snapshot(QStringLiteral("11-opacity"));
+
+            localStack.undo();
+            localStack.undo();
+            window_.scene()->syncDocument();
+            QTest::qWait(600);
+            const QColor restored = centrePixel();
+            out() << "adjustments undone: model=" << target->item()->opacity() << "/"
+                  << target->item()->grayscale() << " pixel=" << restored.name()
+                  << " matches before=" << (restored == before) << "\n";
+            snapshot(QStringLiteral("12-adjustments-undone"));
         }
 
         const ui::LodManager::Stats stats = view->lodManager()->stats();

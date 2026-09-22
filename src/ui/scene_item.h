@@ -29,6 +29,9 @@ public:
     bool isError() const { return failed_ || item_->isError(); }
 
     const QImage &level() const { return level_; }
+    // The image actually painted: the grayscale copy when the document
+    // item asks for grayscale, the colour level otherwise.
+    const QImage &displayLevel() const;
     double levelFraction() const { return levelFraction_; }
     void setLevel(const QImage &image, double fraction);
 
@@ -82,11 +85,17 @@ private:
     QSize imageSize() const;
     QRectF imageBounds() const;
     QString errorText() const;
+    // Keeps the grayscale copy in step with the level and the flag; a
+    // no-op while both are unchanged.
+    void updateGrayscaleLevel();
 
     doc::ItemPtr item_;
     QImage level_;
     double levelFraction_ = 0;
     bool failed_ = false;
+    QImage grayscaleLevel_;
+    bool grayscaleCached_ = false;
+    bool grayscaleOn_ = false;
     QFont font_;
 
     QVector<Level> levels_;

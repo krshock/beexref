@@ -1,5 +1,6 @@
 #include "scene_item.h"
 
+#include "grayscale.h"
 #include "rendering.h"
 #include "theme.h"
 
@@ -77,6 +78,8 @@ void SceneItem::setLevel(const QImage &image, double fraction)
     failed_ = false;
     failures_ = 0;
     lastFailed_ = QDateTime();
+    grayscaleCached_ = false;
+    updateGrayscaleLevel();
     update();
 }
 
@@ -85,6 +88,8 @@ void SceneItem::setLevelUnavailable()
     prepareGeometryChange();
     failed_ = true;
     level_ = QImage();
+    grayscaleLevel_ = QImage();
+    grayscaleCached_ = false;
     update();
 }
 
@@ -143,7 +148,12 @@ qint64 SceneItem::displayedLevelBytes() const
 {
     if (level_.isNull())
         return 0;
-    return qint64(level_.width()) * level_.height() * 4;
+    qint64 bytes = qint64(level_.width()) * level_.height() * 4;
+    // The grayscale copy is one byte per pixel and lives as long as
+    // the level it was derived from.
+    if (grayscaleCached_)
+        bytes += qint64(grayscaleLevel_.width()) * grayscaleLevel_.height();
+    return bytes;
 }
 
 void SceneItem::rememberCoarsestLevel()
@@ -168,6 +178,32 @@ void SceneItem::applyCoarsestCopy()
         setLevel(coarsestLevel_, coarsestLevelFraction_);
 }
 
+const QImage &SceneItem::displayLevel() const
+{
+    return grayscaleCached_ ? grayscaleLevel_ : level_;
+}
+
+void SceneItem::updateGrayscaleLevel()
+{
+    const bool wanted = isPixmap() && grayscaleOn_ && !level_.isNull();
+    if (!wanted) {
+        // Release the copy (it is a byte per pixel) and repaint only if
+        // something was on screen.
+        if (!grayscaleLevel_.isNull()) {
+            grayscaleLevel_ = QImage();
+            update();
+        }
+        grayscaleCached_ = false;
+        return;
+    }
+    if (grayscaleCached_)
+        return;
+    grayscaleLevel_ = grayscaleImage(level_);
+    grayscaleCached_ = !grayscaleLevel_.isNull();
+    if (grayscaleCached_)
+        update();
+}
+
 void SceneItem::applyModelState()
 {
     setPos(item_->x, item_->y);
@@ -178,6 +214,10 @@ void SceneItem::applyModelState()
     transform.rotate(item_->rotation);
     setTransform(transform);
     setOpacity(qBound(0.0, item_->opacity(), 1.0));
+
+    if (item_->grayscale() != grayscaleOn_)
+        grayscaleOn_ = item_->grayscale();
+    updateGrayscaleLevel();
 }
 
 void SceneItem::syncPositionToModel()
@@ -207,7 +247,7 @@ void SceneItem::paint(QPainter *painter, const QStyleOptionGraphicsItem *option,
             const double fraction = levelFraction_ > 0 ? levelFraction_ : 1.0;
             const QRectF source(crop.x() * fraction, crop.y() * fraction,
                                 crop.width() * fraction, crop.height() * fraction);
-            painter->drawImage(crop, level_, source);
+            painter->drawImage(crop, displayLevel(), source);
         }
     } else if (isText()) {
         painter->setPen(theme::text);

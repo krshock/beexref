@@ -1,3 +1,4 @@
+#include <QAction>
 #include <QBuffer>
 #include <QColor>
 #include <QImage>
@@ -17,10 +18,13 @@
 #include "settings.h"
 #include "ui/input_controller.h"
 #include "ui/main_window.h"
+#include "ui/grayscale.h"
+#include "ui/opacity_dialog.h"
 #include "ui/rendering.h"
 #include "ui/selection_ops.h"
 #include "ui/scene.h"
 #include "ui/scene_item.h"
+#include "ui/theme.h"
 #include "ui/view.h"
 
 using ui::SceneItem;
@@ -44,6 +48,18 @@ public:
         return QObject::eventFilter(watched, event);
     }
 };
+
+// Paints one canvas item on its own, so tests can inspect the actual
+// pixels without a view or a scene.
+QImage renderItem(SceneItem *view, const QSize &size)
+{
+    QImage image(size, QImage::Format_ARGB32);
+    image.fill(ui::theme::canvas);
+    QPainter painter(&image);
+    view->paint(&painter, nullptr, nullptr);
+    painter.end();
+    return image;
+}
 
 QByteArray makePng(int width, int height, const QColor &color)
 {
@@ -113,6 +129,12 @@ private slots:
     void flipActionMirrorsAroundTheCentre();
     void movingAnItemDoesNotScrollTheView();
     void movingAnItemRepaintsTheSelectionHandles();
+    void grayscaleImageFlattensOntoTheCanvas();
+    void grayscaleIsPaintedAndUndone();
+    void grayscaleLevelsRebuildWhenTheLevelChanges();
+    void opacityAppliesToImagesOnlyAndUndoes();
+    void opacityDialogReportsAndEmits();
+    void grayscaleActionFollowsTheSelection();
 };
 
 void TestUiScene::buildsItemsFromDocument()
@@ -693,6 +715,203 @@ void TestUiScene::movingAnItemRepaintsTheSelectionHandles()
     // A targeted repaint, not a full viewport refresh: the far corner
     // was never part of the item or its overlay.
     QVERIFY2(!spy.region.contains(QPoint(5, 5)), "the whole viewport was repainted");
+}
+
+void TestUiScene::grayscaleImageFlattensOntoTheCanvas()
+{
+    QImage source(3, 2, QImage::Format_ARGB32);
+    source.fill(Qt::transparent);
+    source.setPixelColor(0, 0, QColor(255, 255, 255, 255)); // opaque white
+    source.setPixelColor(1, 0, QColor(255, 0, 0, 255));     // opaque red
+    source.setPixelColor(2, 0, QColor(0, 0, 255, 0));       // transparent blue
+    source.setPixelColor(0, 1, QColor(255, 255, 255, 128)); // half white
+    source.setPixelColor(1, 1, QColor(0, 0, 0, 255));       // opaque black
+
+    const QImage gray = ui::grayscaleImage(source);
+    QCOMPARE(gray.size(), source.size());
+    QCOMPARE(gray.format(), QImage::Format_Grayscale8);
+
+    const int canvas = qGray(ui::theme::canvas.rgb());
+    // Opaque white stays white, opaque black stays black.
+    QCOMPARE(gray.pixelColor(0, 0).red(), 255);
+    QCOMPARE(gray.pixelColor(1, 1).red(), 0);
+
+    // Transparent pixels take the canvas colour: the reference fills
+    // the grayscale image with it before drawing the colour image.
+    QCOMPARE(gray.pixelColor(2, 0).red(), canvas);
+
+    // A half transparent white blends from the canvas colour towards
+    // white.
+    const QColor blended = gray.pixelColor(0, 1);
+    QVERIFY(blended.red() > canvas);
+    QVERIFY(blended.red() < 255);
+
+    // Colour becomes gray: red is darker than white and all channels
+    // match.
+    const QColor red = gray.pixelColor(1, 0);
+    QCOMPARE(red.red(), red.green());
+    QCOMPARE(red.green(), red.blue());
+    QVERIFY(red.red() > 0);
+    QVERIFY(red.red() < 255);
+}
+
+void TestUiScene::grayscaleIsPaintedAndUndone()
+{
+    auto document = std::make_shared<doc::Document>(doc::Document::create());
+    const doc::ItemPtr image = pixmapItem(8, 8, Qt::red);
+    document->addItem(image);
+
+    ui::Scene scene;
+    scene.setDocument(document);
+    doc::UndoStack stack(document.get());
+    SceneItem *view = scene.pixmapItemViews().first();
+    QImage level(8, 8, QImage::Format_ARGB32);
+    level.fill(Qt::red);
+    view->setLevel(level, 1.0);
+    view->setSelected(true);
+
+    QCOMPARE(renderItem(view, QSize(8, 8)).pixelColor(4, 4), QColor(Qt::red));
+
+    ui::selection::setGrayscale(scene, stack, true);
+    QVERIFY(image->grayscale());
+    QCOMPARE(view->displayLevel().format(), QImage::Format_Grayscale8);
+    const QColor gray = renderItem(view, QSize(8, 8)).pixelColor(4, 4);
+    QCOMPARE(gray.red(), gray.green());
+    QCOMPARE(gray.green(), gray.blue());
+    QVERIFY(gray.red() < 255);
+    QVERIFY(stack.canUndo());
+
+    QVERIFY(stack.undo());
+    scene.syncDocument();
+    QVERIFY(!image->grayscale());
+    QCOMPARE(view->displayLevel().format(), QImage::Format_ARGB32);
+    QCOMPARE(renderItem(view, QSize(8, 8)).pixelColor(4, 4), QColor(Qt::red));
+}
+
+void TestUiScene::grayscaleLevelsRebuildWhenTheLevelChanges()
+{
+    auto document = std::make_shared<doc::Document>(doc::Document::create());
+    const doc::ItemPtr image = pixmapItem(8, 8, Qt::red);
+    document->addItem(image);
+
+    ui::Scene scene;
+    scene.setDocument(document);
+    doc::UndoStack stack(document.get());
+    SceneItem *view = scene.pixmapItemViews().first();
+    QImage red(8, 8, QImage::Format_ARGB32);
+    red.fill(Qt::red);
+    view->setLevel(red, 1.0);
+    view->setSelected(true);
+    ui::selection::setGrayscale(scene, stack, true);
+    const int redGray = renderItem(view, QSize(8, 8)).pixelColor(4, 4).red();
+
+    // A new level (the LOD manager swapping fractions) must be
+    // converted too, not just the first one.
+    QImage blue(8, 8, QImage::Format_ARGB32);
+    blue.fill(Qt::blue);
+    view->setLevel(blue, 0.5);
+    QCOMPARE(view->displayLevel().format(), QImage::Format_Grayscale8);
+    const QColor gray = renderItem(view, QSize(8, 8)).pixelColor(4, 4);
+    QCOMPARE(gray.red(), gray.green());
+    QCOMPARE(gray.green(), gray.blue());
+    QVERIFY(gray.red() != redGray);
+}
+
+void TestUiScene::opacityAppliesToImagesOnlyAndUndoes()
+{
+    auto document = std::make_shared<doc::Document>(doc::Document::create());
+    const doc::ItemPtr image = pixmapItem(8, 8, Qt::red);
+    const doc::ItemPtr note = textItem(QStringLiteral("note"));
+    document->addItem(image);
+    document->addItem(note);
+
+    ui::Scene scene;
+    scene.setDocument(document);
+    doc::UndoStack stack(document.get());
+    SceneItem *imageView = nullptr;
+    for (SceneItem *view : scene.itemViews()) {
+        view->setSelected(true);
+        if (view->isPixmap())
+            imageView = view;
+    }
+    QVERIFY(imageView);
+
+    ui::selection::setOpacity(scene, stack, 0.4);
+    QCOMPARE(image->opacity(), 0.4);
+    QCOMPARE(imageView->opacity(), 0.4);
+    // The reference's ChangeOpacity only touches images.
+    QCOMPARE(note->opacity(), 1.0);
+    QVERIFY(stack.canUndo());
+
+    QVERIFY(stack.undo());
+    scene.syncDocument();
+    QCOMPARE(image->opacity(), 1.0);
+    QCOMPARE(imageView->opacity(), 1.0);
+
+    // The dialog's live preview changes the model without recording
+    // history.
+    const int entries = stack.count();
+    ui::selection::applyOpacity(scene, 0.8);
+    QCOMPARE(image->opacity(), 0.8);
+    QCOMPARE(imageView->opacity(), 0.8);
+    QCOMPARE(note->opacity(), 1.0);
+    QCOMPARE(stack.count(), entries);
+
+    // Applying the value it already has changes nothing and records
+    // nothing.
+    ui::selection::setOpacity(scene, stack, 0.8);
+    QCOMPARE(stack.count(), entries);
+}
+
+void TestUiScene::opacityDialogReportsAndEmits()
+{
+    ui::OpacityDialog dialog(nullptr, 60);
+    QCOMPARE(dialog.percent(), 60);
+
+    QSignalSpy spy(&dialog, &ui::OpacityDialog::percentChanged);
+    dialog.setPercent(35);
+    QCOMPARE(dialog.percent(), 35);
+    QCOMPARE(spy.count(), 1);
+    QCOMPARE(spy.first().first().toInt(), 35);
+}
+
+void TestUiScene::grayscaleActionFollowsTheSelection()
+{
+    ui::MainWindow window;
+    QImage image(6, 4, QImage::Format_ARGB32);
+    image.fill(Qt::red);
+    QMimeData mime;
+    mime.setImageData(image);
+    window.input()->insertMimeData(mime, QPointF(10, 10));
+
+    QAction *grayscale = nullptr;
+    QAction *undo = nullptr;
+    for (QAction *action : window.findChildren<QAction *>()) {
+        if (action->text() == QStringLiteral("&Grayscale"))
+            grayscale = action;
+        else if (action->text() == QStringLiteral("&Undo"))
+            undo = action;
+    }
+    QVERIFY(grayscale);
+    QVERIFY(undo);
+
+    // Nothing selected: the action is off and disabled.
+    window.scene()->clearSelection();
+    QVERIFY(!grayscale->isEnabled());
+    QVERIFY(!grayscale->isChecked());
+
+    SceneItem *view = window.scene()->pixmapItemViews().first();
+    view->setSelected(true);
+    QVERIFY(grayscale->isEnabled());
+    QVERIFY(!grayscale->isChecked());
+
+    grayscale->trigger();
+    QVERIFY(view->item()->grayscale());
+    QVERIFY(window.scene()->document()->isModified());
+
+    // The check mark follows undo.
+    undo->trigger();
+    QVERIFY(!view->item()->grayscale());
 }
 
 QTEST_MAIN(TestUiScene)

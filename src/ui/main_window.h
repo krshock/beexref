@@ -9,6 +9,8 @@
 
 #include <memory>
 
+class QAction;
+
 namespace cache {
 class SessionCache;
 }
@@ -46,11 +48,18 @@ private:
     void applyHistoryStep(bool undo);
     // Refreshes the document state after a selection transformation.
     void afterSelectionAction();
+    // The reference's Change Opacity...: live preview in the dialog,
+    // one undo step on OK, nothing on Cancel.
+    void changeOpacity();
+    // Keeps the Grayscale action's enabled and checked state in step
+    // with the selection.
+    void updateSelectionActions();
 
     Scene *scene_ = nullptr;
     View *view_ = nullptr;
     LevelLoader *loader_ = nullptr;
     InputController *input_ = nullptr;
+    QAction *grayscaleAction_ = nullptr;
     doc::UndoStack undoStack_;
     std::shared_ptr<cache::SessionCache> sessionCache_;
     std::shared_ptr<doc::Document> document_;
