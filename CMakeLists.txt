@@ -56,6 +56,8 @@ qt_add_library(beexref_core STATIC
     src/logging.h
     src/settings.cpp
     src/settings.h
+    src/ui/crop_tools.cpp
+    src/ui/crop_tools.h
     src/ui/downloader.cpp
     src/ui/downloader.h
     src/ui/grayscale.cpp

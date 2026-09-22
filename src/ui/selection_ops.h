@@ -25,6 +25,7 @@ void flip(const Scene &scene, doc::UndoStack &stack, bool vertical);
 void resetScale(const Scene &scene, doc::UndoStack &stack);
 void resetRotation(const Scene &scene, doc::UndoStack &stack);
 void resetFlip(const Scene &scene, doc::UndoStack &stack);
+void resetCrop(const Scene &scene, doc::UndoStack &stack);
 void resetTransforms(const Scene &scene, doc::UndoStack &stack);
 
 // The images (pixmap items) of the current selection: the reference's

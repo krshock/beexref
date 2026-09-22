@@ -28,6 +28,27 @@ public:
     bool isText() const { return item_->isText(); }
     bool isError() const { return failed_ || item_->isError(); }
 
+    // The visible part in local coordinates: the crop when one is set,
+    // the whole image otherwise. Cached, so a model change never moves
+    // the item's geometry without prepareGeometryChange().
+    QRectF displayBounds() const { return displayBounds_; }
+
+    // The whole image in local coordinates.
+    QRectF imageBounds() const;
+
+    // Crop mode (the reference's CropEditor): the item shows the whole
+    // image with the editable rectangle on top; the model is untouched
+    // until commitCrop().
+    bool cropMode() const { return cropMode_; }
+    void enterCropMode();
+    void exitCropMode();
+    QRectF cropRect() const { return cropRect_; }
+    void setCropRect(const QRectF &rect);
+    // Applies a crop to the model with the geometry bookkeeping Qt
+    // needs; commitCrop() also leaves crop mode.
+    void setModelCrop(const QRectF &rect);
+    void commitCrop(const QRectF &rect);
+
     const QImage &level() const { return level_; }
     // The image actually painted: the grayscale copy when the document
     // item asks for grayscale, the colour level otherwise.
@@ -83,8 +104,11 @@ public:
 
 private:
     QSize imageSize() const;
-    QRectF imageBounds() const;
+    QRectF computedDisplayBounds() const;
     QString errorText() const;
+    void paintCropMode(QPainter *painter);
+    // The current view scale, for the screen-sized crop handles.
+    double viewportScale() const;
     // Keeps the grayscale copy in step with the level and the flag; a
     // no-op while both are unchanged.
     void updateGrayscaleLevel();
@@ -96,6 +120,9 @@ private:
     QImage grayscaleLevel_;
     bool grayscaleCached_ = false;
     bool grayscaleOn_ = false;
+    bool cropMode_ = false;
+    QRectF cropRect_;
+    QRectF displayBounds_;
     QFont font_;
 
     QVector<Level> levels_;

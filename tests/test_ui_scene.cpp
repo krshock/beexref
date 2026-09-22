@@ -135,6 +135,11 @@ private slots:
     void opacityAppliesToImagesOnlyAndUndoes();
     void opacityDialogReportsAndEmits();
     void grayscaleActionFollowsTheSelection();
+    void cropShrinksTheItemToTheCrop();
+    void cropModeDragsAndConfirms();
+    void cropModeCancelPaths();
+    void resetCropAndTransforms();
+    void cropActionStartsAndUndoCancels();
 };
 
 void TestUiScene::buildsItemsFromDocument()
@@ -912,6 +917,219 @@ void TestUiScene::grayscaleActionFollowsTheSelection()
     // The check mark follows undo.
     undo->trigger();
     QVERIFY(!view->item()->grayscale());
+}
+
+void TestUiScene::cropShrinksTheItemToTheCrop()
+{
+    auto document = std::make_shared<doc::Document>(doc::Document::create());
+    const doc::ItemPtr item = pixmapItem(4, 2, Qt::red);
+    document->addItem(item);
+
+    ui::Scene scene;
+    scene.setDocument(document);
+    SceneItem *view = scene.pixmapItemViews().first();
+
+    // Distinct pixels, so the crop's source mapping is checkable.
+    QImage level(4, 2, QImage::Format_ARGB32);
+    level.setPixelColor(0, 0, Qt::red);
+    level.setPixelColor(1, 0, Qt::green);
+    level.setPixelColor(2, 0, Qt::blue);
+    level.setPixelColor(3, 0, Qt::yellow);
+    level.setPixelColor(0, 1, Qt::cyan);
+    level.setPixelColor(1, 1, Qt::magenta);
+    level.setPixelColor(2, 1, Qt::white);
+    level.setPixelColor(3, 1, Qt::black);
+    view->setLevel(level, 1.0);
+
+    item->setCrop(QRectF(1, 0, 2, 2));
+    scene.syncDocument();
+    QCOMPARE(view->boundingRect(), QRectF(1, 0, 2, 2));
+    QCOMPARE(view->transformOriginPoint(), QRectF(1, 0, 2, 2).center());
+
+    // Painting starts at the crop's top-left.
+    QImage render(2, 2, QImage::Format_ARGB32);
+    render.fill(ui::theme::canvas);
+    QPainter painter(&render);
+    painter.translate(-view->boundingRect().topLeft());
+    view->paint(&painter, nullptr, nullptr);
+    painter.end();
+    QCOMPARE(render.pixelColor(0, 0), QColor(Qt::green));
+    QCOMPARE(render.pixelColor(1, 0), QColor(Qt::blue));
+    QCOMPARE(render.pixelColor(0, 1), QColor(Qt::magenta));
+    QCOMPARE(render.pixelColor(1, 1), QColor(Qt::white));
+}
+
+void TestUiScene::cropModeDragsAndConfirms()
+{
+    auto document = std::make_shared<doc::Document>(doc::Document::create());
+    const doc::ItemPtr item = pixmapItem(200, 100, Qt::red);
+    document->addItem(item);
+
+    ui::View view;
+    auto *scene = new ui::Scene(&view);
+    scene->setDocument(document);
+    view.setBoardScene(scene);
+    doc::UndoStack stack(document.get());
+    view.setUndoStack(&stack);
+    view.resize(600, 400);
+    view.setTransform(QTransform::fromScale(2.0, 2.0));
+
+    SceneItem *viewItem = scene->pixmapItemViews().first();
+    viewItem->setSelected(true);
+    view.cropSelection();
+    QVERIFY(view.cropActive());
+    QVERIFY(viewItem->cropMode());
+    QCOMPARE(viewItem->cropRect(), QRectF(0, 0, 200, 100));
+
+    // View scale 2: the handles are 7.5 item units. Drag the bottom-right
+    // one in by 40x20 item units (80x40 device pixels).
+    const QPointF handleCentre = viewItem->cropRect().bottomRight() - QPointF(3.75, 3.75);
+    const QPoint press = view.mapFromScene(viewItem->mapToScene(handleCentre));
+    const QPoint move = press + QPoint(-80, -40);
+    sendMouse(view.viewport(), QEvent::MouseButtonPress, press, Qt::LeftButton, Qt::LeftButton);
+    sendMouse(view.viewport(), QEvent::MouseMove, move, Qt::NoButton, Qt::LeftButton);
+    sendMouse(view.viewport(), QEvent::MouseButtonRelease, move, Qt::LeftButton, Qt::NoButton);
+    QCOMPARE(viewItem->cropRect(), QRectF(0, 0, 160, 80));
+
+    QTest::keyClick(&view, Qt::Key_Return);
+    QVERIFY(!view.cropActive());
+    QVERIFY(!viewItem->cropMode());
+    QVERIFY(item->hasCrop());
+    QCOMPARE(item->crop(), QRectF(0, 0, 160, 80));
+    QCOMPARE(viewItem->boundingRect(), QRectF(0, 0, 160, 80));
+    QVERIFY(stack.canUndo());
+
+    QVERIFY(stack.undo());
+    scene->syncDocument();
+    QVERIFY(!item->hasCrop());
+    QCOMPARE(viewItem->boundingRect(), QRectF(0, 0, 200, 100));
+}
+
+void TestUiScene::cropModeCancelPaths()
+{
+    auto document = std::make_shared<doc::Document>(doc::Document::create());
+    const doc::ItemPtr item = pixmapItem(200, 100, Qt::red);
+    document->addItem(item);
+
+    ui::View view;
+    auto *scene = new ui::Scene(&view);
+    scene->setDocument(document);
+    view.setBoardScene(scene);
+    doc::UndoStack stack(document.get());
+    view.setUndoStack(&stack);
+    view.resize(600, 400);
+    view.setTransform(QTransform::fromScale(2.0, 2.0));
+
+    SceneItem *viewItem = scene->pixmapItemViews().first();
+    viewItem->setSelected(true);
+    const auto dragBottomRightIn = [&]() {
+        const QPointF handleCentre = viewItem->cropRect().bottomRight() - QPointF(3.75, 3.75);
+        const QPoint press = view.mapFromScene(viewItem->mapToScene(handleCentre));
+        const QPoint move = press + QPoint(-140, -140);
+        sendMouse(view.viewport(), QEvent::MouseButtonPress, press, Qt::LeftButton,
+                  Qt::LeftButton);
+        sendMouse(view.viewport(), QEvent::MouseMove, move, Qt::NoButton, Qt::LeftButton);
+        sendMouse(view.viewport(), QEvent::MouseButtonRelease, move, Qt::LeftButton,
+                  Qt::NoButton);
+    };
+
+    // Escape cancels and leaves no history.
+    view.cropSelection();
+    dragBottomRightIn();
+    QCOMPARE(viewItem->cropRect(), QRectF(0, 0, 130, 30));
+    QTest::keyClick(&view, Qt::Key_Escape);
+    QVERIFY(!view.cropActive());
+    QVERIFY(!item->hasCrop());
+    QCOMPARE(stack.count(), 0);
+
+    // A click outside the rectangle cancels too.
+    view.cropSelection();
+    dragBottomRightIn();
+    const QPoint outside = view.mapFromScene(viewItem->mapToScene(QPointF(150, 80)));
+    sendMouse(view.viewport(), QEvent::MouseButtonPress, outside, Qt::LeftButton, Qt::LeftButton);
+    sendMouse(view.viewport(), QEvent::MouseButtonRelease, outside, Qt::LeftButton, Qt::NoButton);
+    QVERIFY(!view.cropActive());
+    QVERIFY(!item->hasCrop());
+    QCOMPARE(stack.count(), 0);
+
+    // A click inside confirms what was dragged.
+    view.cropSelection();
+    dragBottomRightIn();
+    const QPoint inside = view.mapFromScene(viewItem->mapToScene(QPointF(30, 15)));
+    sendMouse(view.viewport(), QEvent::MouseButtonPress, inside, Qt::LeftButton, Qt::LeftButton);
+    sendMouse(view.viewport(), QEvent::MouseButtonRelease, inside, Qt::LeftButton, Qt::NoButton);
+    QVERIFY(!view.cropActive());
+    QCOMPARE(item->crop(), QRectF(0, 0, 130, 30));
+    QCOMPARE(stack.count(), 1);
+}
+
+void TestUiScene::resetCropAndTransforms()
+{
+    auto document = std::make_shared<doc::Document>(doc::Document::create());
+    const doc::ItemPtr item = pixmapItem(200, 100, Qt::red);
+    item->setCrop(QRectF(10, 10, 50, 30));
+    item->scale = 2.0;
+    item->rotation = 30.0;
+    item->flip = -1.0;
+    document->addItem(item);
+
+    ui::Scene scene;
+    scene.setDocument(document);
+    doc::UndoStack stack(document.get());
+    SceneItem *view = scene.pixmapItemViews().first();
+    view->setSelected(true);
+
+    // Reset Crop puts the whole image back and is undoable.
+    ui::selection::resetCrop(scene, stack);
+    QCOMPARE(item->crop(), QRectF(0, 0, 200, 100));
+    QVERIFY(stack.undo());
+    scene.syncDocument();
+    QCOMPARE(item->crop(), QRectF(10, 10, 50, 30));
+
+    // Reset All also resets the crop, like the reference.
+    ui::selection::resetTransforms(scene, stack);
+    QCOMPARE(item->crop(), QRectF(0, 0, 200, 100));
+    QCOMPARE(item->scale, 1.0);
+    QCOMPARE(item->rotation, 0.0);
+    QCOMPARE(item->flip, 1.0);
+    QVERIFY(stack.undo());
+    scene.syncDocument();
+    QCOMPARE(item->crop(), QRectF(10, 10, 50, 30));
+    QCOMPARE(item->scale, 2.0);
+    QCOMPARE(item->rotation, 30.0);
+    QCOMPARE(item->flip, -1.0);
+}
+
+void TestUiScene::cropActionStartsAndUndoCancels()
+{
+    ui::MainWindow window;
+    QImage image(20, 10, QImage::Format_ARGB32);
+    image.fill(Qt::red);
+    QMimeData mime;
+    mime.setImageData(image);
+    window.input()->insertMimeData(mime, QPointF(10, 10));
+
+    QAction *cropAction = nullptr;
+    QAction *undo = nullptr;
+    for (QAction *action : window.findChildren<QAction *>()) {
+        if (action->text() == QStringLiteral("&Crop"))
+            cropAction = action;
+        else if (action->text() == QStringLiteral("&Undo"))
+            undo = action;
+    }
+    QVERIFY(cropAction);
+    QVERIFY(undo);
+
+    SceneItem *view = window.scene()->pixmapItemViews().first();
+    view->setSelected(true);
+    cropAction->trigger();
+    QVERIFY(window.view()->cropActive());
+    QVERIFY(view->cropMode());
+
+    // Undo cancels the crop session instead of editing under it.
+    undo->trigger();
+    QVERIFY(!window.view()->cropActive());
+    QVERIFY(!view->cropMode());
 }
 
 QTEST_MAIN(TestUiScene)

@@ -198,13 +198,31 @@ void resetFlip(const Scene &scene, doc::UndoStack &stack)
     }
 }
 
+void resetCrop(const Scene &scene, doc::UndoStack &stack)
+{
+    applyDataChange(scene, stack, QStringLiteral("Reset crop"), [](doc::Item &item) {
+        const QSize original = item.originalSize();
+        item.setCrop(original.isValid() && !original.isEmpty()
+                         ? QRectF(0, 0, original.width(), original.height())
+                         : QRectF());
+    });
+}
+
 void resetTransforms(const Scene &scene, doc::UndoStack &stack)
 {
     const QVector<SceneItem *> items = actionItems(scene);
     for (SceneItem *view : items) {
-        const QPointF anchor = itemAnchor(view);
         const doc::ChangeItemCommand::State before =
             doc::ChangeItemCommand::State::capture(*view->item());
+        // The reference resets the crop first and anchors the other
+        // transforms at the centre that leaves.
+        if (view->isPixmap()) {
+            const QSize original = view->item()->originalSize();
+            view->setModelCrop(original.isValid() && !original.isEmpty()
+                                   ? QRectF(0, 0, original.width(), original.height())
+                                   : QRectF());
+        }
+        const QPointF anchor = itemAnchor(view);
         transformAroundAnchor(view, anchor, [view]() {
             view->item()->scale = 1.0;
             view->item()->rotation = 0.0;

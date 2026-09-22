@@ -69,6 +69,9 @@ public:
     // item is not cropped.
     QRectF crop() const;
     void setCrop(const QRectF &crop);
+    // Whether the item carries a crop at all, so a degenerate one is
+    // still honoured instead of falling back to the whole image.
+    bool hasCrop() const { return data.contains(QStringLiteral("crop")); }
 
     bool hasSource() const { return source && source->isValid(); }
 

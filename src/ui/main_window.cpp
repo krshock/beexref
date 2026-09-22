@@ -119,6 +119,10 @@ MainWindow::MainWindow(bool cacheDisabled, QWidget *parent)
         afterSelectionAction();
     });
     editMenu->addSeparator();
+    auto *cropAction = editMenu->addAction(QStringLiteral("&Crop"));
+    cropAction->setShortcut(QKeySequence(Qt::SHIFT | Qt::Key_C));
+    connect(cropAction, &QAction::triggered, view_, &View::cropSelection);
+    editMenu->addSeparator();
     auto *resetScaleAction = editMenu->addAction(QStringLiteral("Reset &Scale"));
     connect(resetScaleAction, &QAction::triggered, this, [this]() {
         selection::resetScale(*scene_, undoStack_);
@@ -132,6 +136,11 @@ MainWindow::MainWindow(bool cacheDisabled, QWidget *parent)
     auto *resetFlipAction = editMenu->addAction(QStringLiteral("Reset &Flip"));
     connect(resetFlipAction, &QAction::triggered, this, [this]() {
         selection::resetFlip(*scene_, undoStack_);
+        afterSelectionAction();
+    });
+    auto *resetCropAction = editMenu->addAction(QStringLiteral("Reset Cro&p"));
+    connect(resetCropAction, &QAction::triggered, this, [this]() {
+        selection::resetCrop(*scene_, undoStack_);
         afterSelectionAction();
     });
     auto *resetTransformsAction = editMenu->addAction(QStringLiteral("Reset &All Transformations"));
@@ -284,6 +293,9 @@ void MainWindow::startMemoryAudit(int seconds)
 
 void MainWindow::applyHistoryStep(bool undo)
 {
+    // The reference cancels active modes (crop, sampling) before an
+    // undo or redo touches the items they edit.
+    view_->cancelCrop();
     const bool changed = undo ? undoStack_.undo() : undoStack_.redo();
     if (!changed)
         return;

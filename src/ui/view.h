@@ -1,5 +1,6 @@
 #pragma once
 
+#include "crop_tools.h"
 #include "levels.h"
 #include "scene.h"
 #include "selection_tools.h"
@@ -14,6 +15,7 @@
 
 #include <functional>
 
+class QKeyEvent;
 class QMimeData;
 
 namespace ui {
@@ -43,6 +45,14 @@ public:
     // Refreshes the scrollable area after the items changed shape, as
     // the reference does on every scene change.
     void refreshSceneRect() { recalculateSceneRect(); }
+
+    // Enters crop mode on the single selected image, as the reference's
+    // Crop action does; a second crop cannot start while one is active.
+    void cropSelection();
+    // Leaves crop mode without applying anything; the reference cancels
+    // active modes before undo/redo and before a scene is replaced.
+    void cancelCrop();
+    bool cropActive() const { return cropItem_ != nullptr; }
     // Commands for completed gestures (moves) are pushed here.
     void setUndoStack(doc::UndoStack *stack) { undoStack_ = stack; }
 
@@ -64,6 +74,7 @@ protected:
     void mousePressEvent(QMouseEvent *event) override;
     void mouseMoveEvent(QMouseEvent *event) override;
     void mouseReleaseEvent(QMouseEvent *event) override;
+    void keyPressEvent(QKeyEvent *event) override;
     void leaveEvent(QEvent *event) override;
     void resizeEvent(QResizeEvent *event) override;
     void scrollContentsBy(int dx, int dy) override;
@@ -109,6 +120,14 @@ private:
     void applyTransformGesture(const QPointF &scenePos, bool snap);
     void finishTransformGesture();
     void updateHoverCursor(const QPoint &viewportPos);
+
+    // Crop session (the reference's CropEditor, driven by the view).
+    void confirmCrop();
+    void finishCropSession(bool changed);
+    void updateCropHoverCursor(const QPoint &viewportPos);
+    // View scale times the item's scale: the reference's
+    // fixed_length_for_viewport denominator.
+    double cropScale() const;
     void setGestureFrozen(bool frozen);
     QVector<SceneItem *> transformableSelection() const;
 
@@ -130,6 +149,12 @@ private:
 
     // Last region the selection overlay was known to occupy.
     QRectF overlayRegion_;
+
+    // Crop session state.
+    SceneItem *cropItem_ = nullptr;
+    crop::Part cropDrag_ = crop::Part::None;
+    QPointF cropPressItem_;
+    QRectF cropDragStartRect_;
 
     // Scale/rotate gesture state.
     QRectF gestureBounds_;

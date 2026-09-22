@@ -17,6 +17,7 @@
 #include <QPainter>
 #include <QScrollBar>
 #include <QTimer>
+#include <QKeyEvent>
 #include <QWheelEvent>
 
 #include <cmath>
@@ -70,7 +71,15 @@ void View::setBoardScene(Scene *scene)
         // Drop scheduler state for a view before the scene deletes it,
         // so an in-flight decode can never touch freed memory.
         connect(boardScene_, &Scene::itemViewAboutToBeRemoved, this,
-                [this](SceneItem *view) { lod_->forgetItem(view); });
+                [this](SceneItem *view) {
+                    // Never keep a crop session pointing at a view the
+                    // scene is about to delete.
+                    if (view == cropItem_) {
+                        cropItem_ = nullptr;
+                        cropDrag_ = crop::Part::None;
+                    }
+                    lod_->forgetItem(view);
+                });
         // New or removed items change the scrollable area.
         connect(boardScene_, &Scene::itemsChanged, this, [this]() { recalculateSceneRect(); });
         // A pure selection change moves the overlay without changing
@@ -298,6 +307,25 @@ void View::mousePressEvent(QMouseEvent *event)
         return;
     }
 
+    if (cropItem_ && event->button() == Qt::LeftButton) {
+        const QPoint viewportPos = event->position().toPoint();
+        const QPointF itemPos = cropItem_->mapFromScene(mapToScene(viewportPos));
+        const crop::Part part = crop::hitTest(cropItem_->cropRect(), cropScale(), itemPos);
+        if (part != crop::Part::None) {
+            cropDrag_ = part;
+            cropPressItem_ = itemPos;
+            cropDragStartRect_ = cropItem_->cropRect();
+        } else if (cropItem_->cropRect().contains(itemPos)) {
+            // Clicking inside confirms, outside cancels, as the
+            // reference's crop editor does.
+            confirmCrop();
+        } else {
+            cancelCrop();
+        }
+        event->accept();
+        return;
+    }
+
     if (event->button() == Qt::LeftButton) {
         const QPoint viewportPos = event->position().toPoint();
         const QPointF scenePos = mapToScene(viewportPos);
@@ -389,6 +417,20 @@ void View::mouseMoveEvent(QMouseEvent *event)
         return;
     }
 
+    if (cropItem_) {
+        if (cropDrag_ != crop::Part::None && (event->buttons() & Qt::LeftButton)) {
+            const QPointF itemPos =
+                cropItem_->mapFromScene(mapToScene(position));
+            const QPointF delta = itemPos - cropPressItem_;
+            cropItem_->setCropRect(crop::draggedRect(cropDragStartRect_, cropDrag_, delta,
+                                                     cropItem_->imageBounds()));
+        } else {
+            updateCropHoverCursor(position);
+        }
+        event->accept();
+        return;
+    }
+
     if (drag_ == Drag::Scale || drag_ == Drag::Rotate) {
         const bool snap = event->modifiers().testFlag(Qt::ControlModifier)
             || event->modifiers().testFlag(Qt::ShiftModifier);
@@ -436,6 +478,13 @@ void View::mouseReleaseEvent(QMouseEvent *event)
 
     if (panning_ && event->button() == Qt::MiddleButton) {
         panning_ = false;
+        event->accept();
+        return;
+    }
+
+    if (cropItem_) {
+        if (event->button() == Qt::LeftButton)
+            cropDrag_ = crop::Part::None;
         event->accept();
         return;
     }
@@ -661,6 +710,130 @@ void View::updateHoverCursor(const QPoint &viewportPos)
     viewport()->unsetCursor();
 }
 
+double View::cropScale() const
+{
+    if (cropItem_)
+        return transform().m11() * cropItem_->item()->scale;
+    return transform().m11();
+}
+
+void View::cropSelection()
+{
+    if (cropItem_)
+        return;
+    SceneItem *target = nullptr;
+    if (boardScene_) {
+        const QVector<SceneItem *> selected = boardScene_->selectedItemViews();
+        if (selected.size() == 1 && selected.first()->isPixmap() && !selected.first()->isError())
+            target = selected.first();
+    }
+    if (!target)
+        return;
+
+    cropItem_ = target;
+    cropDrag_ = crop::Part::None;
+    cropItem_->enterCropMode();
+    setFocus();
+    recalculateSceneRect();
+    refreshSelectionOverlay();
+    updateViewState();
+    lod_->evaluateNow();
+}
+
+void View::confirmCrop()
+{
+    if (!cropItem_)
+        return;
+    SceneItem *view = cropItem_;
+    cropItem_ = nullptr;
+    cropDrag_ = crop::Part::None;
+
+    const QRectF current =
+        view->item()->hasCrop() ? view->item()->crop() : view->imageBounds();
+    const QRectF rect = view->cropRect();
+    const bool changed = rect != current;
+    if (!changed) {
+        view->exitCropMode();
+        finishCropSession(false);
+        return;
+    }
+
+    const doc::ChangeItemCommand::State before =
+        doc::ChangeItemCommand::State::capture(*view->item());
+    view->commitCrop(rect);
+    if (undoStack_) {
+        undoStack_->push(std::make_unique<doc::ChangeItemCommand>(
+            view->item(), before, doc::ChangeItemCommand::State::capture(*view->item()),
+            QStringLiteral("Crop item")));
+    }
+    finishCropSession(true);
+}
+
+void View::cancelCrop()
+{
+    if (!cropItem_)
+        return;
+    cropItem_->exitCropMode();
+    cropItem_ = nullptr;
+    cropDrag_ = crop::Part::None;
+    finishCropSession(false);
+}
+
+void View::finishCropSession(bool changed)
+{
+    recalculateSceneRect();
+    refreshSelectionOverlay();
+    updateViewState();
+    lod_->evaluateNow();
+    if (!changed)
+        return;
+    if (boardScene_ && boardScene_->document())
+        boardScene_->document()->setModified(true);
+    emit documentModified();
+}
+
+void View::updateCropHoverCursor(const QPoint &viewportPos)
+{
+    if (!cropItem_) {
+        viewport()->unsetCursor();
+        return;
+    }
+    const QPointF itemPos = cropItem_->mapFromScene(mapToScene(viewportPos));
+    const crop::Part part = crop::hitTest(cropItem_->cropRect(), cropScale(), itemPos);
+    switch (part) {
+    case crop::Part::None:
+        viewport()->unsetCursor();
+        return;
+    case crop::Part::Top:
+    case crop::Part::Left:
+    case crop::Part::Bottom:
+    case crop::Part::Right:
+        viewport()->setCursor(crop::edgeCursor(part, cropItem_->item()->rotation));
+        return;
+    default:
+        viewport()->setCursor(crop::handleCursor(part, cropItem_->item()->rotation,
+                                                 cropItem_->item()->flip < 0));
+        return;
+    }
+}
+
+void View::keyPressEvent(QKeyEvent *event)
+{
+    if (cropItem_) {
+        if (event->key() == Qt::Key_Return || event->key() == Qt::Key_Enter) {
+            confirmCrop();
+            event->accept();
+            return;
+        }
+        if (event->key() == Qt::Key_Escape) {
+            cancelCrop();
+            event->accept();
+            return;
+        }
+    }
+    QGraphicsView::keyPressEvent(event);
+}
+
 void View::leaveEvent(QEvent *event)
 {
     if (drag_ == Drag::None && !panning_)
@@ -671,7 +844,9 @@ void View::leaveEvent(QEvent *event)
 void View::drawForeground(QPainter *painter, const QRectF &rect)
 {
     Q_UNUSED(rect);
-    if (!boardScene_)
+    // The crop editor brings its own frame; the selection handles would
+    // only get in the way.
+    if (!boardScene_ || cropItem_)
         return;
     const QRectF bounds = boardScene_->selectionBounds();
     if (bounds.isEmpty())

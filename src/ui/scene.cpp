@@ -30,6 +30,8 @@ void Scene::rebuild()
 {
     // Invalidate scheduler state before views are deleted.
     emit itemsChanged();
+    for (SceneItem *view : itemViews())
+        emit itemViewAboutToBeRemoved(view);
     clear();
     syncDocument();
 }

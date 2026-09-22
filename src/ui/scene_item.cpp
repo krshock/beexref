@@ -1,11 +1,14 @@
 #include "scene_item.h"
 
+#include "crop_tools.h"
 #include "grayscale.h"
 #include "rendering.h"
 #include "theme.h"
 
 #include <QFontMetricsF>
+#include <QGraphicsView>
 #include <QPainter>
+#include <QPainterPath>
 #include <QStyle>
 #include <QStyleOptionGraphicsItem>
 
@@ -28,6 +31,7 @@ SceneItem::SceneItem(doc::ItemPtr item, QGraphicsItem *parent)
 {
     setFlag(QGraphicsItem::ItemIsSelectable, true);
     setAcceptedMouseButtons(Qt::LeftButton);
+    displayBounds_ = computedDisplayBounds();
 }
 
 QSize SceneItem::imageSize() const
@@ -54,10 +58,17 @@ QString SceneItem::errorText() const
     return item_->text().isEmpty() ? QStringLiteral("Cannot load image") : item_->text();
 }
 
+QRectF SceneItem::computedDisplayBounds() const
+{
+    if (isPixmap() && !failed_ && item_->hasCrop())
+        return item_->crop();
+    return imageBounds();
+}
+
 QRectF SceneItem::boundingRect() const
 {
     if (isPixmap() && !failed_)
-        return imageBounds();
+        return cropMode_ ? imageBounds() : displayBounds_;
     if (isText()) {
         const QFontMetricsF metrics(font_);
         const QRectF bounds =
@@ -206,9 +217,18 @@ void SceneItem::updateGrayscaleLevel()
 
 void SceneItem::applyModelState()
 {
+    // The crop can arrive from outside (undo, board reload): announce
+    // the geometry change before the cached bounds move.
+    const QRectF bounds = computedDisplayBounds();
+    if (bounds != displayBounds_) {
+        prepareGeometryChange();
+        displayBounds_ = bounds;
+        setTransformOriginPoint(displayBounds_.center());
+    }
+
     setPos(item_->x, item_->y);
     setZValue(item_->z);
-    setTransformOriginPoint(imageBounds().center());
+    setTransformOriginPoint(displayBounds().center());
     QTransform transform;
     transform.scale(item_->flip * item_->scale, item_->scale);
     transform.rotate(item_->rotation);
@@ -218,6 +238,58 @@ void SceneItem::applyModelState()
     if (item_->grayscale() != grayscaleOn_)
         grayscaleOn_ = item_->grayscale();
     updateGrayscaleLevel();
+}
+
+void SceneItem::enterCropMode()
+{
+    if (cropMode_)
+        return;
+    prepareGeometryChange();
+    cropMode_ = true;
+    cropRect_ = item_->hasCrop() ? item_->crop() : imageBounds();
+    update();
+}
+
+void SceneItem::exitCropMode()
+{
+    if (!cropMode_)
+        return;
+    prepareGeometryChange();
+    cropMode_ = false;
+    update();
+}
+
+void SceneItem::setCropRect(const QRectF &rect)
+{
+    if (cropRect_ == rect)
+        return;
+    cropRect_ = rect;
+    update();
+}
+
+void SceneItem::setModelCrop(const QRectF &rect)
+{
+    prepareGeometryChange();
+    item_->setCrop(rect);
+    displayBounds_ = computedDisplayBounds();
+    setTransformOriginPoint(displayBounds_.center());
+    update();
+}
+
+void SceneItem::commitCrop(const QRectF &rect)
+{
+    setModelCrop(rect);
+    cropMode_ = false;
+    update();
+}
+
+double SceneItem::viewportScale() const
+{
+    const QList<QGraphicsView *> views =
+        scene() ? scene()->views() : QList<QGraphicsView *>();
+    if (views.isEmpty())
+        return 1.0;
+    return std::abs(views.first()->transform().m11());
 }
 
 void SceneItem::syncPositionToModel()
@@ -237,13 +309,17 @@ void SceneItem::paint(QPainter *painter, const QStyleOptionGraphicsItem *option,
     painter->setRenderHint(QPainter::SmoothPixmapTransform, smooth);
 
     if (isPixmap() && !failed_) {
+        if (cropMode_) {
+            paintCropMode(painter);
+            return;
+        }
         const QRectF bounds = imageBounds();
         if (level_.isNull()) {
             painter->setPen(QPen(theme::placeholder, 0, Qt::DashLine));
             painter->setBrush(Qt::NoBrush);
             painter->drawRect(bounds);
         } else {
-            const QRectF crop = item_->crop().isValid() ? item_->crop() : bounds;
+            const QRectF crop = item_->hasCrop() ? item_->crop() : bounds;
             const double fraction = levelFraction_ > 0 ? levelFraction_ : 1.0;
             const QRectF source(crop.x() * fraction, crop.y() * fraction,
                                 crop.width() * fraction, crop.height() * fraction);
@@ -270,6 +346,54 @@ void SceneItem::paint(QPainter *painter, const QStyleOptionGraphicsItem *option,
         painter->setBrush(Qt::NoBrush);
         painter->drawRect(boundingRect());
     }
+}
+
+void SceneItem::paintCropMode(QPainter *painter)
+{
+    // The whole image, so the user sees what is being cut away.
+    const QRectF image = imageBounds();
+    if (!level_.isNull()) {
+        const double fraction = levelFraction_ > 0 ? levelFraction_ : 1.0;
+        const QRectF source(image.x() * fraction, image.y() * fraction,
+                            image.width() * fraction, image.height() * fraction);
+        painter->drawImage(image, displayLevel(), source);
+    } else {
+        painter->setPen(QPen(theme::placeholder, 0, Qt::DashLine));
+        painter->setBrush(Qt::NoBrush);
+        painter->drawRect(image);
+    }
+
+    // Darken everything outside the editable rectangle: the reference
+    // fills the image shape plus the crop rectangle with the odd-even
+    // rule, which leaves exactly that ring.
+    QPainterPath path;
+    path.setFillRule(Qt::OddEvenFill);
+    path.addRect(image);
+    path.addRect(cropRect_);
+    QColor dim(0, 0, 0);
+    dim.setAlpha(100);
+    painter->fillPath(path, dim);
+
+    // The rectangle and its handles: a solid white outline with a black
+    // dotted line on top of it, both cosmetic (screen-sized).
+    const double scale = viewportScale() * item_->scale;
+    const crop::Part handles[] = {crop::Part::TopLeft, crop::Part::BottomLeft,
+                                  crop::Part::BottomRight, crop::Part::TopRight};
+    painter->setBrush(Qt::NoBrush);
+
+    QPen pen(QColor(255, 255, 255), 2);
+    pen.setCosmetic(true);
+    painter->setPen(pen);
+    for (crop::Part part : handles)
+        painter->drawRect(crop::handleRect(cropRect_, part, scale));
+    painter->drawRect(cropRect_);
+
+    pen.setColor(QColor(0, 0, 0));
+    pen.setStyle(Qt::DotLine);
+    painter->setPen(pen);
+    for (crop::Part part : handles)
+        painter->drawRect(crop::handleRect(cropRect_, part, scale));
+    painter->drawRect(cropRect_);
 }
 
 } // namespace ui

@@ -240,6 +240,40 @@ public:
                   << target->item()->grayscale() << " pixel=" << restored.name()
                   << " matches before=" << (restored == before) << "\n";
             snapshot(QStringLiteral("12-adjustments-undone"));
+
+            // E3: crop with the bottom-right handle, confirm with
+            // Enter, then undo.
+            window_.view()->cropSelection();
+            out() << "crop mode: " << window_.view()->cropActive() << "\n";
+            const QRectF cropStart = target->cropRect();
+            const double cropScale = view->transform().m11() * target->item()->scale;
+            const QPointF handle =
+                cropStart.bottomRight() - QPointF(7.5 / cropScale, 7.5 / cropScale);
+            const QPoint cropPress = view->mapFromScene(target->mapToScene(handle));
+            const QPoint cropMove = cropPress + QPoint(-200, -140);
+            sendMouse(viewport, QEvent::MouseButtonPress, cropPress, Qt::LeftButton,
+                      Qt::LeftButton);
+            sendMouse(viewport, QEvent::MouseMove, cropMove, Qt::NoButton, Qt::LeftButton);
+            sendMouse(viewport, QEvent::MouseButtonRelease, cropMove, Qt::LeftButton,
+                      Qt::NoButton);
+            QTest::qWait(400);
+            snapshot(QStringLiteral("13-crop-drag"));
+
+            QTest::keyClick(view, Qt::Key_Return);
+            QTest::qWait(600);
+            const QRectF crop = target->item()->crop();
+            out() << "crop: has=" << target->item()->hasCrop() << " rect=" << crop.x() << ","
+                  << crop.y() << " " << crop.width() << "x" << crop.height()
+                  << " bounds=" << target->boundingRect().width() << "x"
+                  << target->boundingRect().height() << "\n";
+            snapshot(QStringLiteral("14-cropped"));
+
+            QTest::keyClick(&window_, Qt::Key_Z, Qt::ControlModifier);
+            QTest::qWait(600);
+            out() << "crop undone: has=" << target->item()->hasCrop()
+                  << " bounds=" << target->boundingRect().width() << "x"
+                  << target->boundingRect().height() << "\n";
+            snapshot(QStringLiteral("15-crop-undone"));
         }
 
         const ui::LodManager::Stats stats = view->lodManager()->stats();
