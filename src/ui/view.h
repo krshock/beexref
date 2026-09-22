@@ -32,6 +32,7 @@ public:
     using MimeFilter = std::function<bool(const QMimeData &)>;
 
     explicit View(QWidget *parent = nullptr);
+    ~View() override;
 
     void setLevelLoader(LevelLoader *loader);
     void setBoardScene(Scene *scene);
@@ -93,6 +94,11 @@ private:
     // Items bbox expanded by one viewport per side: the scrollable
     // area that makes the canvas feel infinite.
     void recalculateSceneRect();
+    // The selection outline and handles are drawn in drawForeground(),
+    // whose output the scene's dirty regions do not track; moving them
+    // needs an explicit repaint of where they were.
+    QRectF selectionOverlayRegion() const;
+    void refreshSelectionOverlay();
     void beginInteraction();
     void restoreSmoothing();
     double zoomExtent(bool maximum) const;
@@ -121,6 +127,9 @@ private:
     // through this, so a view shift mid-gesture (the scene rect grows
     // while dragging) cannot feed back into the item positions.
     QTransform gestureInverse_;
+
+    // Last region the selection overlay was known to occupy.
+    QRectF overlayRegion_;
 
     // Scale/rotate gesture state.
     QRectF gestureBounds_;

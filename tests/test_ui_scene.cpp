@@ -27,6 +27,24 @@ using ui::SceneItem;
 
 namespace {
 
+// Captures the regions Qt asks the viewport to repaint. The selection
+// overlay's output is not tracked by the scene, so this is what proves
+// the old outline and handles get erased instead of trailing.
+class PaintRegionSpy : public QObject
+{
+public:
+    QRegion region;
+
+    bool eventFilter(QObject *watched, QEvent *event) override
+    {
+        if (event->type() == QEvent::Paint) {
+            if (auto *paint = static_cast<QPaintEvent *>(event))
+                region += paint->region();
+        }
+        return QObject::eventFilter(watched, event);
+    }
+};
+
 QByteArray makePng(int width, int height, const QColor &color)
 {
     QImage image(width, height, QImage::Format_ARGB32);
@@ -94,6 +112,7 @@ private slots:
     void rotateGestureRotatesAndUndoes();
     void flipActionMirrorsAroundTheCentre();
     void movingAnItemDoesNotScrollTheView();
+    void movingAnItemRepaintsTheSelectionHandles();
 };
 
 void TestUiScene::buildsItemsFromDocument()
@@ -617,6 +636,63 @@ void TestUiScene::movingAnItemDoesNotScrollTheView()
              qPrintable(QStringLiteral("view drifted by %1,%2 device px")
                             .arg(driftX)
                             .arg(driftY)));
+}
+
+void TestUiScene::movingAnItemRepaintsTheSelectionHandles()
+{
+    auto document = std::make_shared<doc::Document>(doc::Document::create());
+    // Rotated 45 degrees: the selection bounds, and with them the handle
+    // dots, then reach well outside the item's own painting area, which
+    // is what makes a missed repaint visible as a trail.
+    const doc::ItemPtr item = pixmapItem(100, 50, Qt::darkBlue);
+    item->rotation = 45.0;
+    document->addItem(item);
+
+    ui::View view;
+    auto *scene = new ui::Scene(&view);
+    scene->setDocument(document);
+    view.setBoardScene(scene);
+    view.resize(600, 400);
+    // Paint events only reach a visible widget.
+    view.show();
+    QTest::qWait(200);
+    view.setTransform(QTransform::fromScale(2.0, 2.0));
+    view.centerOn(QPointF(50, 25));
+    QTest::qWait(200);
+
+    SceneItem *viewItem = scene->pixmapItemViews().first();
+    viewItem->setSelected(true);
+    QTest::qWait(20);
+
+    // A point four device pixels outside the bottom-right corner of the
+    // selection bounds: the handle dot covers it, the item does not.
+    const QPoint corner = view.mapFromScene(scene->selectionBounds().bottomRight());
+    const QPoint oldHandle = corner + QPoint(4, 4);
+
+    PaintRegionSpy spy;
+    view.viewport()->installEventFilter(&spy);
+
+    const QPoint grab = view.mapFromScene(QPointF(50, 25));
+    sendMouse(view.viewport(), QEvent::MouseButtonPress, grab, Qt::LeftButton, Qt::LeftButton);
+    for (int step = 1; step <= 8; ++step) {
+        sendMouse(view.viewport(), QEvent::MouseMove, grab + QPoint(step * 10, step * 5),
+                  Qt::NoButton, Qt::LeftButton);
+    }
+    // Flush the repaint the drag asked for, before the release grows
+    // the scrollable rect (which repaints everything).
+    QCoreApplication::processEvents();
+    view.viewport()->removeEventFilter(&spy);
+    sendMouse(view.viewport(), QEvent::MouseButtonRelease, grab + QPoint(80, 40), Qt::LeftButton,
+              Qt::NoButton);
+    QTest::qWait(20);
+
+    QVERIFY2(spy.region.contains(oldHandle),
+             qPrintable(QStringLiteral("old handle at %1,%2 was not repainted")
+                            .arg(oldHandle.x())
+                            .arg(oldHandle.y())));
+    // A targeted repaint, not a full viewport refresh: the far corner
+    // was never part of the item or its overlay.
+    QVERIFY2(!spy.region.contains(QPoint(5, 5)), "the whole viewport was repainted");
 }
 
 QTEST_MAIN(TestUiScene)

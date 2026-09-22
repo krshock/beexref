@@ -18,6 +18,7 @@ class Scene : public QGraphicsScene
 
 public:
     explicit Scene(QObject *parent = nullptr);
+    ~Scene() override;
 
     void setDocument(std::shared_ptr<doc::Document> document);
     const std::shared_ptr<doc::Document> &document() const { return document_; }
@@ -39,6 +40,10 @@ public:
     QRectF selectionBounds() const;
 
 signals:
+    // Emitted first thing during destruction, before QGraphicsScene
+    // deletes the canvas items: observers drop their pointers while the
+    // scene and its items are still intact.
+    void aboutToBeDestroyed();
     // The set of canvas items changed (document replaced, items added or
     // removed by commands).
     void itemsChanged();

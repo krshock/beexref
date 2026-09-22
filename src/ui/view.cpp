@@ -44,6 +44,16 @@ View::View(QWidget *parent)
     setAcceptDrops(true);
 }
 
+View::~View()
+{
+    // The scene is usually a child of the view. During teardown the
+    // base class deletes it while the viewport is already gone, and
+    // its selectionChanged() would then reach a dead widget; cut the
+    // connections while both are still alive.
+    if (boardScene_)
+        disconnect(boardScene_, nullptr, this, nullptr);
+}
+
 void View::setLevelLoader(LevelLoader *loader)
 {
     loader_ = loader;
@@ -63,6 +73,17 @@ void View::setBoardScene(Scene *scene)
                 [this](SceneItem *view) { lod_->forgetItem(view); });
         // New or removed items change the scrollable area.
         connect(boardScene_, &Scene::itemsChanged, this, [this]() { recalculateSceneRect(); });
+        // A pure selection change moves the overlay without changing
+        // any item, so itemsChanged() does not fire for it.
+        connect(boardScene_, &QGraphicsScene::selectionChanged, this,
+                [this]() { refreshSelectionOverlay(); });
+        // The scene may be destroyed before the view (a window owns
+        // both). Drop every reference while both are still intact.
+        connect(boardScene_, &Scene::aboutToBeDestroyed, this, [this]() {
+            disconnect(boardScene_, nullptr, this, nullptr);
+            boardScene_ = nullptr;
+            lod_->setScene(nullptr);
+        });
     }
     lod_->setScene(scene);
     QGraphicsView::setScene(scene);
@@ -71,8 +92,43 @@ void View::setBoardScene(Scene *scene)
     lod_->schedule();
 }
 
+QRectF View::selectionOverlayRegion() const
+{
+    if (!boardScene_)
+        return QRectF();
+    const QRectF bounds = boardScene_->selectionBounds();
+    if (bounds.isEmpty())
+        return QRectF();
+    const double scale = transform().m11();
+    if (scale <= 0.0)
+        return QRectF();
+
+    // The outline sits on the bounds and the handle dots reach half a
+    // handle size beyond them; the hover-only scale, rotation and flip
+    // areas reach a little further, which this covers as well.
+    const double margin = selection::kResizeSize / scale;
+    return bounds.adjusted(-margin, -margin, margin, margin);
+}
+
+void View::refreshSelectionOverlay()
+{
+    const QRectF region = selectionOverlayRegion();
+    if (region == overlayRegion_)
+        return;
+
+    // Repaint where the overlay was as well as where it is now.
+    const QRectF dirty = overlayRegion_.isNull() ? region
+        : region.isNull()                      ? overlayRegion_
+                                               : overlayRegion_.united(region);
+    overlayRegion_ = region;
+    if (dirty.isNull() || !viewport())
+        return;
+    viewport()->update(mapFromScene(dirty).boundingRect().adjusted(-2, -2, 2, 2));
+}
+
 void View::recalculateSceneRect()
 {
+    refreshSelectionOverlay();
     // The scrollable area is the items' bounding box expanded by one
     // viewport on each side, so the canvas always offers room to pan
     // (the reference's "impression of an infinite canvas"). Clamping
@@ -112,6 +168,8 @@ void View::updateViewState()
     if (!scene())
         return;
     lod_->setViewState(mapToScene(viewport()->rect()).boundingRect(), transform().m11());
+    // The overlay's margins are scaled by the zoom.
+    refreshSelectionOverlay();
 }
 
 void View::beginInteraction()
@@ -357,10 +415,12 @@ void View::mouseMoveEvent(QMouseEvent *event)
             entry.view->setPos(entry.startPosition + delta);
             entry.view->update();
         }
-        // Dragging an item past the current area grows the scrollable
-        // rect, as the reference does on every scene change; Qt keeps
-        // the view anchored so the canvas does not move under the item.
-        recalculateSceneRect();
+        // The overlay moves with the item, so repaint where it was.
+        // The scrollable rect is deliberately only recomputed when the
+        // gesture ends: changing the scene rect makes Qt repaint the
+        // whole viewport, and the reference's per-change refresh would
+        // do that on every event.
+        refreshSelectionOverlay();
         event->accept();
         return;
     }
@@ -520,7 +580,8 @@ void View::applyTransformGesture(const QPointF &scenePos, bool snap)
                 view, gestureAnchor_, [view, rotation]() { view->item()->rotation = rotation; });
         }
     }
-    recalculateSceneRect();
+    // As with moves, the scrollable rect follows on release.
+    refreshSelectionOverlay();
 }
 
 void View::finishTransformGesture()

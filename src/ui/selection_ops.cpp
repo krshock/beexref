@@ -33,7 +33,6 @@ void applyAction(const Scene &scene, doc::UndoStack &stack, const QString &text,
     for (SceneItem *view : items)
         before.append(doc::ChangeItemCommand::State::capture(*view->item()));
 
-    anchorUnused:
     for (SceneItem *view : items) {
         transformAroundAnchor(view, anchorScene, [&]() { mutate(view); });
     }

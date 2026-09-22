@@ -37,6 +37,14 @@ void LodManager::setScene(Scene *scene)
     if (scene_) {
         connect(scene_, &Scene::itemsChanged, this, &LodManager::reset);
         connect(scene_, &Scene::destroyed, this, [this]() { scene_ = nullptr; });
+        // Before the scene deletes its items, forget every pointer to
+        // them; reset() must not run here, it reads the scene's items.
+        connect(scene_, &Scene::aboutToBeDestroyed, this, [this]() {
+            inFlight_.clear();
+            pending_.clear();
+            gestureItems_.clear();
+            scene_ = nullptr;
+        });
     }
     reset();
 }

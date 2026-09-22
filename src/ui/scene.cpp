@@ -15,6 +15,11 @@ Scene::Scene(QObject *parent)
 {
 }
 
+Scene::~Scene()
+{
+    emit aboutToBeDestroyed();
+}
+
 void Scene::setDocument(std::shared_ptr<doc::Document> document)
 {
     document_ = std::move(document);
