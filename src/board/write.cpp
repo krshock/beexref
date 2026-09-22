@@ -1,5 +1,6 @@
 #include "write.h"
 
+#include "constants.h"
 #include "schema.h"
 #include "sqlite.h"
 
@@ -24,7 +25,8 @@
 namespace board {
 namespace {
 
-constexpr int kThumbnailMaxSize = 128;
+// Shared with the runtime level policy; see constants.h.
+constexpr int kFloorLevelSize = constants::kFloorLevelSize;
 
 struct Thumbnail
 {
@@ -86,10 +88,10 @@ std::optional<Thumbnail> encodeThumbnail(const QByteArray &imageData)
         return std::nullopt;
 
     const int maxSide = std::max(originalSize.width(), originalSize.height());
-    if (maxSide <= kThumbnailMaxSize)
+    if (maxSide <= kFloorLevelSize)
         return std::nullopt;
 
-    const double fraction = static_cast<double>(kThumbnailMaxSize) / maxSide;
+    const double fraction = static_cast<double>(kFloorLevelSize) / maxSide;
     const QSize target(std::max(1, qRound(originalSize.width() * fraction)),
                        std::max(1, qRound(originalSize.height() * fraction)));
     const QImage image = decodeScaled(imageData, target);
@@ -250,7 +252,7 @@ Status writeThumbnail(Connection &db, qint64 id, const Record &record, const QBy
         std::max(thumbnail->originalSize.width(), thumbnail->originalSize.height());
     if (maxSide <= 0)
         return Status::ok();
-    return insertFloor(db, id, static_cast<double>(kThumbnailMaxSize) / maxSide,
+    return insertFloor(db, id, static_cast<double>(kFloorLevelSize) / maxSide,
                        thumbnail->format, thumbnail->originalSize.width(),
                        thumbnail->originalSize.height(), thumbnail->data);
 }

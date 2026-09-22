@@ -120,11 +120,11 @@ void TestBoardSave::savesAndReloads()
     QVERIFY(floors.isOk());
     QVERIFY(floors.value().contains(1));
     const board::FloorLevel &floor = floors.value().value(1);
-    QCOMPARE(floor.fraction, 128.0 / 300.0);
+    QCOMPARE(floor.fraction, 64.0 / 300.0);
     QVERIFY(floor.format == QStringLiteral("png") || floor.format == QStringLiteral("webp"));
     const QImage thumbnail = QImage::fromData(floor.data);
     QVERIFY(!thumbnail.isNull());
-    QCOMPARE(std::max(thumbnail.width(), thumbnail.height()), 128);
+    QCOMPARE(std::max(thumbnail.width(), thumbnail.height()), 64);
 }
 
 void TestBoardSave::streamsPixmapSourceOnce()
@@ -226,7 +226,7 @@ void TestBoardSave::skipsThumbnailsForSmallImages()
     QVERIFY(dir.isValid());
     const QString path = dir.filePath(QStringLiteral("board.beex"));
 
-    QVERIFY(board::save(path, {pixmapRecord(1, makePng(100, 80, Qt::red), QStringLiteral("s.png"))})
+    QVERIFY(board::save(path, {pixmapRecord(1, makePng(50, 40, Qt::red), QStringLiteral("s.png"))})
                 .isOk());
 
     auto board = board::Board::open(path, dir.filePath(QStringLiteral("cache")));
