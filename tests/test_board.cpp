@@ -34,7 +34,7 @@ QStringList dirEntries(const QString &path)
 // Creates a board with one pixmap item and matching sqlar row, plus a
 // lod row when requested. Old versions get the older shape.
 board::Status createBoard(const QString &path, int userVersion, bool withMeta, bool withUuid,
-                          bool withLod)
+                          bool withLod, int flip = 1)
 {
     auto db = board::Connection::open(path, board::Connection::OpenMode::Create);
     if (!db)
@@ -77,6 +77,8 @@ board::Status createBoard(const QString &path, int userVersion, bool withMeta, b
                               QStringLiteral("y"), QStringLiteral("data")};
     QStringList insertValues{QStringLiteral("1"), QStringLiteral("'pixmap'"), QStringLiteral("10"),
                              QStringLiteral("20"), QStringLiteral("'{\"filename\":\"a.png\"}'")};
+    insertColumns << QStringLiteral("flip");
+    insertValues << QString::number(flip);
     if (withMeta) {
         insertColumns << QStringLiteral("meta");
         insertValues << QStringLiteral("'{}'");
@@ -126,6 +128,7 @@ private slots:
     void missingBlobIsAnError();
     void sweepsStaleTempFiles();
     void readsConcurrentlyWithWorker();
+    void normalizesOddFlipValues();
 };
 
 void TestBoard::opensCurrentBoardInPlace()
@@ -376,6 +379,27 @@ void TestBoard::readsConcurrentlyWithWorker()
     }
     workerThread.join();
     QCOMPARE(mismatches.load(), 0);
+}
+
+void TestBoard::normalizesOddFlipValues()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+
+    // The reference flips an item unless the stored value is exactly 1
+    // (its loader calls do_flip() when it differs); a stored 0 would
+    // otherwise render the item zero-width.
+    const int storedValues[] = {1, -1, 0, 2};
+    for (int stored : storedValues) {
+        const QString path = dir.filePath(QStringLiteral("flip-%1.beex").arg(stored));
+        QVERIFY(createBoard(path, board::schema::kUserVersion, true, true, false, stored).isOk());
+        auto board = board::Board::open(path, dir.path());
+        QVERIFY(board.isOk());
+        auto items = board.value().items();
+        QVERIFY(items.isOk());
+        QCOMPARE(items.value().size(), 1);
+        QCOMPARE(items.value().first().flip, stored == 1 ? qint64(1) : qint64(-1));
+    }
 }
 
 QTEST_GUILESS_MAIN(TestBoard)

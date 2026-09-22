@@ -28,6 +28,10 @@ void resetFlip(const Scene &scene, doc::UndoStack &stack);
 void resetCrop(const Scene &scene, doc::UndoStack &stack);
 void resetTransforms(const Scene &scene, doc::UndoStack &stack);
 
+// The selected canvas items, error items excluded: the reference's
+// selectedItems(user_only=True).
+QVector<SceneItem *> selectionItems(const Scene &scene);
+
 // The images (pixmap items) of the current selection: the reference's
 // ChangeOpacity and ToggleGrayscale only act on those.
 QVector<SceneItem *> imageSelection(const Scene &scene);

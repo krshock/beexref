@@ -90,7 +90,7 @@ board::Result<Document> Document::open(const QString &path, const QString &tempD
         item->z = row.z;
         item->scale = row.scale;
         item->rotation = row.rotation;
-        item->flip = static_cast<double>(row.flip);
+        item->flip = row.flip == 1 ? 1.0 : -1.0;
         item->data = parseJsonObject(row.data);
         item->meta = parseJsonObject(row.meta);
 

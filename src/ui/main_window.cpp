@@ -3,6 +3,7 @@
 #include "cache/session_cache.h"
 #include "constants.h"
 #include "input_controller.h"
+#include "layout_ops.h"
 #include "levels.h"
 #include "lod_manager.h"
 #include "logging.h"
@@ -191,6 +192,32 @@ MainWindow::MainWindow(bool cacheDisabled, QWidget *parent)
     fitSelectionAction->setShortcut(QKeySequence(Qt::SHIFT | Qt::Key_F));
     connect(fitSelectionAction, &QAction::triggered, view_, &View::fitSelection);
 
+    auto *itemsMenu = menuBar()->addMenu(QStringLiteral("&Items"));
+    auto *normalizeHeightAction = itemsMenu->addAction(QStringLiteral("&Height"));
+    normalizeHeightAction->setShortcut(QKeySequence(Qt::SHIFT | Qt::Key_H));
+    connect(normalizeHeightAction, &QAction::triggered, this, [this]() { normalizeSelection(0); });
+    auto *normalizeWidthAction = itemsMenu->addAction(QStringLiteral("&Width"));
+    normalizeWidthAction->setShortcut(QKeySequence(Qt::SHIFT | Qt::Key_W));
+    connect(normalizeWidthAction, &QAction::triggered, this, [this]() { normalizeSelection(1); });
+    auto *normalizeSizeAction = itemsMenu->addAction(QStringLiteral("&Size"));
+    normalizeSizeAction->setShortcut(QKeySequence(Qt::SHIFT | Qt::Key_S));
+    connect(normalizeSizeAction, &QAction::triggered, this, [this]() { normalizeSelection(2); });
+
+    auto *arrangeMenu = menuBar()->addMenu(QStringLiteral("&Arrange"));
+    auto *arrangeHorizontalAction = arrangeMenu->addAction(QStringLiteral("&Horizontal (by filename)"));
+    connect(arrangeHorizontalAction, &QAction::triggered, this, [this]() { arrangeSelection(0); });
+    auto *arrangeVerticalAction = arrangeMenu->addAction(QStringLiteral("&Vertical (by filename)"));
+    connect(arrangeVerticalAction, &QAction::triggered, this, [this]() { arrangeSelection(1); });
+    auto *arrangeSquareAction = arrangeMenu->addAction(QStringLiteral("&Square (by filename)"));
+    connect(arrangeSquareAction, &QAction::triggered, this, [this]() { arrangeSelection(2); });
+    arrangeMenu->addSeparator();
+    // The reference triggers this on import; until imports exist it is
+    // reachable here. "optimal" in Items/arrange_default maps to
+    // square: optimal packing is not ported.
+    auto *arrangeDefaultAction = arrangeMenu->addAction(QStringLiteral("Arrange &Default"));
+    connect(arrangeDefaultAction, &QAction::triggered, this,
+            &MainWindow::arrangeSelectionDefault);
+
     auto *imagesMenu = menuBar()->addMenu(QStringLiteral("&Images"));
     auto *changeOpacityAction = imagesMenu->addAction(QStringLiteral("Change &Opacity..."));
     connect(changeOpacityAction, &QAction::triggered, this, &MainWindow::changeOpacity);
@@ -309,12 +336,61 @@ void MainWindow::applyHistoryStep(bool undo)
 
 void MainWindow::afterSelectionAction()
 {
+    // Scene-wide edits cancel an active crop, like the reference's
+    // cancel_active_modes().
+    view_->cancelCrop();
     if (document_)
         document_->setModified(true);
     view_->refreshSceneRect();
     view_->lodManager()->evaluateNow();
     updateSelectionActions();
     updateTitle();
+}
+
+void MainWindow::normalizeSelection(int mode)
+{
+    layout::Normalize normalizeMode = layout::Normalize::Height;
+    if (mode == 1)
+        normalizeMode = layout::Normalize::Width;
+    else if (mode == 2)
+        normalizeMode = layout::Normalize::Size;
+    layout::normalize(*scene_, undoStack_, normalizeMode);
+    afterSelectionAction();
+}
+
+void MainWindow::arrangeSelection(int mode)
+{
+    layout::Arrange arrangeMode = layout::Arrange::Horizontal;
+    if (mode == 1)
+        arrangeMode = layout::Arrange::Vertical;
+    else if (mode == 2)
+        arrangeMode = layout::Arrange::Square;
+
+    // Settings are read at use time, like the reference.
+    settings::File file(settings::iniPath());
+    file.load();
+    bool ok = false;
+    const int gap =
+        file.value(QStringLiteral("Items"), QStringLiteral("arrange_gap"), QStringLiteral("0"))
+            .toInt(&ok);
+    layout::arrange(*scene_, undoStack_, arrangeMode, ok ? qBound(0, gap, 200) : 0);
+    afterSelectionAction();
+}
+
+void MainWindow::arrangeSelectionDefault()
+{
+    settings::File file(settings::iniPath());
+    file.load();
+    const QString configured =
+        file.value(QStringLiteral("Items"), QStringLiteral("arrange_default"),
+                   QStringLiteral("optimal"));
+    bool ok = false;
+    const int gap =
+        file.value(QStringLiteral("Items"), QStringLiteral("arrange_gap"), QStringLiteral("0"))
+            .toInt(&ok);
+    layout::arrange(*scene_, undoStack_, layout::arrangeModeFromSetting(configured),
+                    ok ? qBound(0, gap, 200) : 0);
+    afterSelectionAction();
 }
 
 void MainWindow::changeOpacity()

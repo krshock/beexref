@@ -10,13 +10,7 @@ namespace {
 
 QVector<SceneItem *> actionItems(const Scene &scene)
 {
-    QVector<SceneItem *> items;
-    for (SceneItem *view : scene.selectedItemViews()) {
-        if (view->isError())
-            continue;
-        items.append(view);
-    }
-    return items;
+    return selectionItems(scene);
 }
 
 // Captures the before state, applies `mutate` to the model of each item
@@ -63,6 +57,17 @@ void transformAroundAnchor(SceneItem *view, const QPointF &anchorScene,
     const QPointF diff = view->mapToScene(anchorItem) - before;
     view->setPos(view->pos() - diff);
     view->syncPositionToModel();
+}
+
+QVector<SceneItem *> selectionItems(const Scene &scene)
+{
+    QVector<SceneItem *> items;
+    for (SceneItem *view : scene.selectedItemViews()) {
+        if (view->isError())
+            continue;
+        items.append(view);
+    }
+    return items;
 }
 
 QVector<SceneItem *> imageSelection(const Scene &scene)

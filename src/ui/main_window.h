@@ -54,6 +54,13 @@ private:
     // Keeps the Grayscale action's enabled and checked state in step
     // with the selection.
     void updateSelectionActions();
+    // Items and Arrange menu handlers (Items/* settings are read at use
+    // time, like the reference's valueOrDefault calls).
+    void normalizeSelection(int mode); // 0 height, 1 width, 2 size
+    void arrangeSelection(int mode);   // 0 horizontal, 1 vertical, 2 square
+    // The reference's arrange_default: the Items/arrange_default
+    // setting picks between the three arrangements above.
+    void arrangeSelectionDefault();
 
     Scene *scene_ = nullptr;
     View *view_ = nullptr;

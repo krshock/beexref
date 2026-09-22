@@ -274,6 +274,55 @@ public:
                   << " bounds=" << target->boundingRect().width() << "x"
                   << target->boundingRect().height() << "\n";
             snapshot(QStringLiteral("15-crop-undone"));
+
+            // E4: normalize and arrange the three topmost items through
+            // the menu actions, then undo both.
+            QVector<ui::SceneItem *> picked;
+            const QVector<ui::SceneItem *> all = window_.scene()->pixmapItemViews();
+            for (int i = 0; i < 3 && i < all.size(); ++i)
+                picked.append(all.at(i));
+            window_.scene()->clearSelection();
+            for (ui::SceneItem *view : picked)
+                view->setSelected(true);
+
+            QAction *normalizeHeight = nullptr;
+            QAction *arrangeHorizontal = nullptr;
+            const QList<QAction *> actions = window_.findChildren<QAction *>();
+            for (QAction *action : actions) {
+                if (action->text() == QStringLiteral("&Height"))
+                    normalizeHeight = action;
+                else if (action->text() == QStringLiteral("&Horizontal (by filename)"))
+                    arrangeHorizontal = action;
+            }
+            auto layoutBoxes = [&]() {
+                QStringList out;
+                for (ui::SceneItem *view : picked) {
+                    const QRectF box = view->sceneBoundingRect();
+                    out << QStringLiteral("%1,%2 %3x%4")
+                               .arg(box.x(), 0, 'f', 1)
+                               .arg(box.y(), 0, 'f', 1)
+                               .arg(box.width(), 0, 'f', 1)
+                               .arg(box.height(), 0, 'f', 1);
+                }
+                return out.join(QStringLiteral(" | "));
+            };
+
+            const QString layoutBefore = layoutBoxes();
+            normalizeHeight->trigger();
+            QTest::qWait(500);
+            snapshot(QStringLiteral("16-normalized"));
+            arrangeHorizontal->trigger();
+            QTest::qWait(500);
+            snapshot(QStringLiteral("17-arranged"));
+            out() << "layout before: " << layoutBefore << "\n";
+            out() << "layout after:  " << layoutBoxes() << "\n";
+
+            QTest::keyClick(&window_, Qt::Key_Z, Qt::ControlModifier);
+            QTest::keyClick(&window_, Qt::Key_Z, Qt::ControlModifier);
+            QTest::qWait(800);
+            snapshot(QStringLiteral("18-layout-undone"));
+            out() << "layout undone: " << layoutBoxes() << "\n";
+            out() << "layout restored: " << (layoutBoxes() == layoutBefore) << "\n";
         }
 
         const ui::LodManager::Stats stats = view->lodManager()->stats();

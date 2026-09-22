@@ -225,7 +225,10 @@ Result<QVector<ItemRow>> Board::items()
         item.z = stmt.columnDouble(4);
         item.scale = stmt.columnDouble(5);
         item.rotation = stmt.columnDouble(6);
-        item.flip = stmt.columnInt64(7);
+        // The reference treats "1" as normal and anything else as
+        // flipped (its loader calls do_flip() when the stored value
+        // differs from 1); a 0 would otherwise zero the item's width.
+        item.flip = stmt.columnInt64(7) == 1 ? 1 : -1;
         item.data = stmt.columnText(8);
         item.meta = stmt.columnText(9);
         item.uuid = stmt.columnText(10);
