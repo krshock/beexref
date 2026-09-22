@@ -39,6 +39,8 @@ qt_add_library(beexref_core STATIC
     src/board/sqlite.h
     src/board/write.cpp
     src/board/write.h
+    src/cache/session_cache.cpp
+    src/cache/session_cache.h
     src/constants.h
     src/doc/document.cpp
     src/doc/document.h
@@ -78,7 +80,9 @@ qt_add_library(beexref_core STATIC
     src/util/format.cpp
     src/util/format.h
     src/util/memory.cpp
-    src/util/memory.h)
+    src/util/memory.h
+    src/util/process.cpp
+    src/util/process.h)
 target_include_directories(beexref_core PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>)
 target_link_libraries(beexref_core

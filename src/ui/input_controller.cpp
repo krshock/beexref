@@ -1,5 +1,6 @@
 #include "input_controller.h"
 
+#include "cache/session_cache.h"
 #include "downloader.h"
 #include "drop.h"
 #include "logging.h"
@@ -224,6 +225,35 @@ void InputController::copy()
     }
 }
 
+void InputController::setSessionCache(std::shared_ptr<cache::SessionCache> cache)
+{
+    sessionCache_ = std::move(cache);
+}
+
+void InputController::spillToCache(const doc::ItemPtr &item)
+{
+    if (!sessionCache_ || !sessionCache_->isAvailable() || !item->isPixmap() || !item->source)
+        return;
+    // Board-backed sources hold nothing in RAM and stay readable from
+    // the open file; only in-memory payloads are worth moving out.
+    if (item->source->residentBytes() == 0)
+        return;
+
+    const QByteArray bytes = item->source->bytes();
+    if (bytes.isEmpty())
+        return;
+    const QString key = item->ensureUuid();
+    if (key.isEmpty())
+        return;
+    const QString format = item->format.isEmpty() ? QStringLiteral("png") : item->format;
+    if (!sessionCache_->put(QStringLiteral("undo"), key, format, bytes))
+        return;
+
+    const auto cache = sessionCache_;
+    item->source = std::make_shared<doc::ProviderSource>(
+        [cache, key]() { return cache->get(QStringLiteral("undo"), key).value_or(QByteArray()); });
+}
+
 void InputController::removeSelection()
 {
     const QVector<SceneItem *> selected = scene_->selectedItemViews();
@@ -234,7 +264,10 @@ void InputController::removeSelection()
     for (SceneItem *view : selected)
         items.append(view->item());
 
-    undoStack_->push(std::make_unique<doc::RemoveItemsCommand>(items, QStringLiteral("Delete")));
+    auto command = std::make_unique<doc::RemoveItemsCommand>(
+        items, [this](const doc::ItemPtr &item) { spillToCache(item); },
+        QStringLiteral("Delete"));
+    undoStack_->push(std::move(command));
     scene_->syncDocument();
     if (const auto &document = scene_->document())
         document->setModified(true);

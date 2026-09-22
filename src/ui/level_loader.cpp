@@ -1,11 +1,15 @@
 #include "level_loader.h"
 
+#include "cache/session_cache.h"
+#include "doc/image_io.h"
 #include "util/memory.h"
 
 #include <QBuffer>
 #include <QCoreApplication>
 #include <QImageReader>
 #include <QMetaObject>
+
+#include <utility>
 
 namespace ui {
 namespace {
@@ -71,15 +75,42 @@ LevelLoader::~LevelLoader()
     shutdown();
 }
 
+void LevelLoader::setLevelCache(std::shared_ptr<cache::SessionCache> cache)
+{
+    cache_ = std::move(cache);
+}
+
 void LevelLoader::request(quint64 requestId, doc::SourcePtr source, const QSize &targetSize,
-                          const QString &quality)
+                          const QString &quality, const QString &cacheKey)
 {
     if (shutdown_)
         return;
+    const auto cache = cache_;
     QMetaObject::invokeMethod(
         &worker_,
-        [this, requestId, source = std::move(source), targetSize, quality]() {
-            const QImage image = decodeLevel(source, targetSize, quality);
+        [this, requestId, source = std::move(source), targetSize, quality, cacheKey, cache]() {
+            QImage image;
+            const bool cacheable =
+                cache && cache->isAvailable() && !cacheKey.isEmpty() && targetSize.isValid()
+                && !targetSize.isEmpty();
+            if (cacheable) {
+                if (auto cached = cache->get(QStringLiteral("lod"), cacheKey)) {
+                    const QImage fromCache = QImage::fromData(*cached);
+                    if (!fromCache.isNull() && fromCache.size() == targetSize) {
+                        image = fromCache;
+                    } else {
+                        // A stale or corrupt entry: drop it.
+                        cache->remove(QStringLiteral("lod"), cacheKey);
+                    }
+                }
+            }
+            if (image.isNull()) {
+                image = decodeLevel(source, targetSize, quality);
+                if (!image.isNull() && cacheable) {
+                    cache->put(QStringLiteral("lod"), cacheKey, QStringLiteral("png"),
+                               doc::encodePng(image));
+                }
+            }
             if (image.isNull())
                 emit levelFailed(requestId);
             else

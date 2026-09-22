@@ -1,6 +1,7 @@
 #include "board.h"
 
 #include "schema.h"
+#include "util/process.h"
 
 #include <QCoreApplication>
 #include <QDateTime>
@@ -11,33 +12,10 @@
 #include <atomic>
 #include <utility>
 
-#include <cerrno>
-#include <csignal>
-
-#if defined(Q_OS_UNIX)
-#include <unistd.h>
-#endif
-
 namespace board {
 namespace {
 
 constexpr int kStaleTempDays = 7;
-
-bool isProcessAlive(qint64 pid)
-{
-#if defined(Q_OS_WIN)
-    Q_UNUSED(pid);
-    // Liveness cannot be checked cheaply; the age limit handles stale
-    // copies on Windows.
-    return true;
-#else
-    if (pid <= 0)
-        return false;
-    if (::kill(static_cast<pid_t>(pid), 0) == 0)
-        return true;
-    return errno == EPERM;
-#endif
-}
 
 QString nextTempPath(const QString &dir)
 {
@@ -365,7 +343,7 @@ void sweepStaleTempFiles(const QString &tempDir)
         const qint64 pid = parts.size() > 1 ? parts.at(1).toLongLong(&parsed) : 0;
         const bool old =
             QFileInfo(dir.filePath(name)).lastModified().daysTo(now) > kStaleTempDays;
-        if (!parsed || !isProcessAlive(pid) || old)
+        if (!parsed || !util::isProcessAlive(pid) || old)
             QFile::remove(dir.filePath(name));
     }
 }

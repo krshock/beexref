@@ -1,5 +1,6 @@
 #include "main_window.h"
 
+#include "cache/session_cache.h"
 #include "constants.h"
 #include "input_controller.h"
 #include "levels.h"
@@ -38,7 +39,7 @@ LodSettings loadLodSettings()
 
 } // namespace
 
-MainWindow::MainWindow(QWidget *parent)
+MainWindow::MainWindow(bool cacheDisabled, QWidget *parent)
     : QMainWindow(parent)
 {
     scene_ = new Scene(this);
@@ -49,6 +50,30 @@ MainWindow::MainWindow(QWidget *parent)
     view_->setLevelLoader(loader_);
     view_->setLodSettings(loadLodSettings());
     view_->setUndoStack(&undoStack_);
+
+    // Session disk cache (decoded levels, detached payloads). The
+    // Go ports' Items/disk_cache wins, then the Python key, then the
+    // default; --no-cache forces it off for this run.
+    {
+        settings::File file(settings::iniPath());
+        file.load();
+        bool enabled = file.contains(QStringLiteral("Items"), QStringLiteral("disk_cache"))
+            ? file.boolValue(QStringLiteral("Items"), QStringLiteral("disk_cache"), true)
+            : file.boolValue(QStringLiteral("Items"), QStringLiteral("undo_cache"), true);
+        if (cacheDisabled)
+            enabled = false;
+        if (enabled) {
+            cache::SessionCache::sweepStale(settings::cacheDir());
+            sessionCache_ = cache::SessionCache::create(settings::cacheDir());
+            logging::info(QStringLiteral("Session cache"),
+                          {{QStringLiteral("path"), sessionCache_->path()},
+                           {QStringLiteral("available"), sessionCache_->isAvailable()}});
+        } else {
+            logging::info(QStringLiteral("Session cache: disabled"));
+        }
+        view_->lodManager()->setLevelCache(sessionCache_);
+        input_->setSessionCache(sessionCache_);
+    }
     view_->setMimeFilter([this](const QMimeData &data) { return input_->acceptsMimeData(data); });
     connect(view_, &View::mimeDropped, this, [this](const QMimeData *data, const QPointF &pos) {
         input_->insertMimeData(*data, pos, view_->transform().m11());
@@ -150,12 +175,14 @@ MainWindow::MainWindow(QWidget *parent)
 MainWindow::~MainWindow()
 {
     // Order matters: stop workers before the document (and its board
-    // connection and temp copy) goes away.
+    // connection and temp copy) goes away; the cache file goes last,
+    // after the workers that read and write it.
     view_->setLevelLoader(nullptr);
     loader_->shutdown();
     scene_->setDocument(nullptr);
     undoStack_.setDocument(nullptr);
     document_.reset();
+    sessionCache_.reset();
 }
 
 bool MainWindow::openBoard(const QString &path)

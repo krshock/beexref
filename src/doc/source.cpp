@@ -51,4 +51,24 @@ qint64 BoardSource::residentBytes() const
     return 0;
 }
 
+ProviderSource::ProviderSource(Provider provider)
+    : provider_(std::move(provider))
+{
+}
+
+bool ProviderSource::isValid() const
+{
+    return static_cast<bool>(provider_);
+}
+
+QByteArray ProviderSource::bytes() const
+{
+    return provider_ ? provider_() : QByteArray();
+}
+
+qint64 ProviderSource::residentBytes() const
+{
+    return 0;
+}
+
 } // namespace doc

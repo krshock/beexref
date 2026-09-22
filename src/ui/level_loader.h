@@ -7,6 +7,12 @@
 #include <QSize>
 #include <QThread>
 
+#include <memory>
+
+namespace cache {
+class SessionCache;
+}
+
 namespace ui {
 
 // Decodes item levels on a dedicated worker thread. Requests carry the
@@ -15,9 +21,10 @@ namespace ui {
 // delivered on the loader's thread (the UI thread) through queued
 // signal delivery.
 //
-// This is the seam the memory phase grows into the full LOD manager:
-// the policy here is deliberately simple (visible items, one level
-// each, re-requested when the zoom needs more).
+// When a session cache is attached, decoded levels are read from it
+// first and written back after a decode, so repeat levels (culling
+// back to the floor, reopening the same board) cost a small read
+// instead of a full decode.
 class LevelLoader : public QObject
 {
     Q_OBJECT
@@ -26,11 +33,14 @@ public:
     explicit LevelLoader(QObject *parent = nullptr);
     ~LevelLoader() override;
 
+    void setLevelCache(std::shared_ptr<cache::SessionCache> cache);
+
     // requestId is the caller's token; it is echoed back with the
     // result. targetSize is the wanted pixel size (aspect preserved);
     // quality is "fast" (single step) or "smooth" (progressive halving).
+    // cacheKey names the level in the session cache; empty disables it.
     void request(quint64 requestId, doc::SourcePtr source, const QSize &targetSize,
-                 const QString &quality);
+                 const QString &quality, const QString &cacheKey = {});
 
     // Stops the worker thread and drops pending requests. Must be
     // called before the documents the sources read from are closed.
@@ -49,6 +59,7 @@ signals:
 private:
     QThread thread_;
     QObject worker_;
+    std::shared_ptr<cache::SessionCache> cache_;
     bool shutdown_ = false;
 };
 

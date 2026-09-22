@@ -147,8 +147,9 @@ void AddItemsCommand::undo(Document &document)
         document.removeItem(item);
 }
 
-RemoveItemsCommand::RemoveItemsCommand(QVector<ItemPtr> items, QString text)
+RemoveItemsCommand::RemoveItemsCommand(QVector<ItemPtr> items, Spill spill, QString text)
     : items_(std::move(items))
+    , spill_(std::move(spill))
     , text_(std::move(text))
 {
 }
@@ -160,8 +161,11 @@ void RemoveItemsCommand::redo(Document &document)
         for (const ItemPtr &item : items_)
             indices_.append(qMax(qsizetype(0), document.indexOf(item)));
     }
-    for (const ItemPtr &item : items_)
+    for (const ItemPtr &item : items_) {
+        if (spill_)
+            spill_(item);
         document.removeItem(item);
+    }
 }
 
 void RemoveItemsCommand::undo(Document &document)

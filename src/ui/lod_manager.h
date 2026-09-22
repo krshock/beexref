@@ -10,6 +10,12 @@
 
 #include <QObject>
 
+#include <memory>
+
+namespace cache {
+class SessionCache;
+}
+
 namespace doc {
 class Item;
 }
@@ -41,6 +47,8 @@ public:
     void setLoader(LevelLoader *loader);
     void setSettings(const LodSettings &settings);
     const LodSettings &settings() const { return settings_; }
+    // Decoded levels are cached in this session cache when set.
+    void setLevelCache(std::shared_ptr<cache::SessionCache> cache);
 
     // Viewport state the policy runs against: the visible rect in scene
     // coordinates and the view's transform scale.
@@ -66,6 +74,7 @@ public:
     {
         double levelMB = 0;
         double encodedMB = 0;
+        double cacheMB = 0;
         int items = 0;
         int decodes = 0;
         int requests = 0;
@@ -98,6 +107,7 @@ private:
     double desiredFraction(const SceneItem *item) const;
     bool visible(const SceneItem *item, double margin) const;
     bool transforming(const SceneItem *item) const;
+    QString cacheKey(const SceneItem *item, double fraction) const;
     void scheduleRelease();
     void releaseMemory();
     void onLevelReady(quint64 requestId, const QImage &image);
@@ -105,6 +115,7 @@ private:
 
     Scene *scene_ = nullptr;
     LevelLoader *loader_ = nullptr;
+    std::shared_ptr<cache::SessionCache> levelCache_;
     LodSettings settings_ = normalized(LodSettings());
 
     QRectF visibleRect_;

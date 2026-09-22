@@ -9,6 +9,10 @@
 
 #include <memory>
 
+namespace cache {
+class SessionCache;
+}
+
 namespace ui {
 
 class InputController;
@@ -20,7 +24,8 @@ class MainWindow : public QMainWindow
     Q_OBJECT
 
 public:
-    explicit MainWindow(QWidget *parent = nullptr);
+    // cacheDisabled is the --no-cache override.
+    explicit MainWindow(bool cacheDisabled = false, QWidget *parent = nullptr);
     ~MainWindow() override;
 
     // Opens a board, replacing the current document. Reports failures
@@ -45,6 +50,7 @@ private:
     LevelLoader *loader_ = nullptr;
     InputController *input_ = nullptr;
     doc::UndoStack undoStack_;
+    std::shared_ptr<cache::SessionCache> sessionCache_;
     std::shared_ptr<doc::Document> document_;
 };
 

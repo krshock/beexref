@@ -1,8 +1,11 @@
 #include <QBuffer>
 #include <QColor>
 #include <QImage>
+#include <QSignalSpy>
+#include <QTemporaryDir>
 #include <QtTest>
 
+#include "cache/session_cache.h"
 #include "doc/document.h"
 #include "doc/undo.h"
 #include "ui/level_loader.h"
@@ -53,6 +56,7 @@ private slots:
     void failedDecodesBackOff();
     void singleMethodLoadsFullSize();
     void undoWhileLevelDecodes();
+    void cacheServesLevelsWithoutDecoding();
 };
 
 void TestLodManager::defersUpgradesUntilInteraction()
@@ -223,6 +227,35 @@ void TestLodManager::undoWhileLevelDecodes()
     QCOMPARE(scene.pixmapItemViews().size(), 0);
     QTest::qWait(400); // any queued decode result arrives here
     QCOMPARE(scene.itemViews().size(), 0);
+}
+
+void TestLodManager::cacheServesLevelsWithoutDecoding()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    auto cache = cache::SessionCache::create(dir.path());
+    QVERIFY(cache->isAvailable());
+
+    // A cached level is served even when the source cannot be decoded:
+    // that is what makes culling and reopening cheap.
+    const QByteArray png = makePng(20, 10, Qt::red);
+    QVERIFY(cache->put(QStringLiteral("lod"), QStringLiteral("key1"), QStringLiteral("png"), png));
+
+    ui::LevelLoader loader;
+    loader.setLevelCache(cache);
+    QSignalSpy ready(&loader, &ui::LevelLoader::levelReady);
+    QSignalSpy failed(&loader, &ui::LevelLoader::levelFailed);
+
+    auto emptySource = std::make_shared<doc::BytesSource>(QByteArray());
+    loader.request(1, emptySource, QSize(20, 10), QStringLiteral("smooth"),
+                   QStringLiteral("key1"));
+    QTRY_COMPARE_WITH_TIMEOUT(ready.count(), 1, 5000);
+    QCOMPARE(failed.count(), 0);
+
+    // Without a cache entry the same request fails.
+    loader.request(2, emptySource, QSize(20, 10), QStringLiteral("smooth"),
+                   QStringLiteral("missing"));
+    QTRY_COMPARE_WITH_TIMEOUT(failed.count(), 1, 5000);
 }
 
 QTEST_MAIN(TestLodManager)

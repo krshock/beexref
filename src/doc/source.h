@@ -3,6 +3,7 @@
 #include <QByteArray>
 #include <QString>
 
+#include <functional>
 #include <memory>
 
 namespace board {
@@ -64,6 +65,24 @@ public:
 private:
     const std::shared_ptr<board::Board> board_;
     const qint64 itemId_ = 0;
+};
+
+// Bytes produced on demand, e.g. from the session disk cache. Holds no
+// payload in RAM, which is what lets a detached item keep its bytes
+// outside the process.
+class ProviderSource final : public Source
+{
+public:
+    using Provider = std::function<QByteArray()>;
+
+    explicit ProviderSource(Provider provider);
+
+    bool isValid() const override;
+    QByteArray bytes() const override;
+    qint64 residentBytes() const override;
+
+private:
+    Provider provider_;
 };
 
 } // namespace doc

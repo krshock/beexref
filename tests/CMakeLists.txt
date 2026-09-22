@@ -93,3 +93,8 @@ qt_add_executable(test_lod_manager test_lod_manager.cpp)
 target_link_libraries(test_lod_manager PRIVATE beexref_core Qt6::Test)
 beexref_set_warnings(test_lod_manager)
 add_test(NAME lod_manager COMMAND test_lod_manager)
+
+qt_add_executable(test_session_cache test_session_cache.cpp)
+target_link_libraries(test_session_cache PRIVATE beexref_core Qt6::Test)
+beexref_set_warnings(test_session_cache)
+add_test(NAME session_cache COMMAND test_session_cache)

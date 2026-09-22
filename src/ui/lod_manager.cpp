@@ -1,5 +1,6 @@
 #include "lod_manager.h"
 
+#include "cache/session_cache.h"
 #include "level_loader.h"
 #include "logging.h"
 #include "scene.h"
@@ -7,6 +8,8 @@
 #include "util/memory.h"
 
 #include <QImage>
+
+#include <utility>
 
 namespace ui {
 namespace {
@@ -44,6 +47,7 @@ void LodManager::setLoader(LevelLoader *loader)
         disconnect(loader_, nullptr, this, nullptr);
     loader_ = loader;
     if (loader_) {
+        loader_->setLevelCache(levelCache_);
         connect(loader_, &LevelLoader::levelReady, this, &LodManager::onLevelReady);
         connect(loader_, &LevelLoader::levelFailed, this, &LodManager::onLevelFailed);
     }
@@ -53,6 +57,26 @@ void LodManager::setSettings(const LodSettings &settings)
 {
     settings_ = normalized(settings);
     reset();
+}
+
+void LodManager::setLevelCache(std::shared_ptr<cache::SessionCache> cache)
+{
+    levelCache_ = std::move(cache);
+    if (loader_)
+        loader_->setLevelCache(levelCache_);
+}
+
+QString LodManager::cacheKey(const SceneItem *item, double fraction) const
+{
+    if (!levelCache_ || !levelCache_->isAvailable())
+        return {};
+    // Stable identity, independent of the board row: a level stays
+    // cached across saves and reopens.
+    const QString uuid = item->item()->ensureUuid();
+    if (uuid.isEmpty())
+        return {};
+    return QStringLiteral("%1|%2|%3").arg(uuid, settings_.quality,
+                                          QString::number(fraction, 'g', 17));
 }
 
 void LodManager::setViewState(const QRectF &visibleSceneRect, double viewScale)
@@ -271,7 +295,7 @@ void LodManager::requestLevel(SceneItem *item, double fraction)
     inFlight_.insert(item, requestId);
 
     loader_->request(requestId, item->item()->source, item->levelSizeFor(fraction),
-                     settings_.quality);
+                     settings_.quality, cacheKey(item, fraction));
 }
 
 void LodManager::cancelLevel(SceneItem *item)
@@ -361,6 +385,8 @@ LodManager::Stats LodManager::stats() const
         if (source)
             stats.encodedMB += source->residentBytes() / kBytesPerMB;
     }
+    if (levelCache_)
+        stats.cacheMB = levelCache_->fileBytes() / kBytesPerMB;
     return stats;
 }
 
@@ -379,6 +405,7 @@ void LodManager::logAudit(const QString &label)
         {QStringLiteral("rss_mb"), QString::number(rssMB, 'f', 1)},
         {QStringLiteral("level_mb"), QString::number(sample.levelMB, 'f', 1)},
         {QStringLiteral("encoded_mb"), QString::number(sample.encodedMB, 'f', 1)},
+        {QStringLiteral("cache_mb"), QString::number(sample.cacheMB, 'f', 1)},
         {QStringLiteral("items"), sample.items},
         {QStringLiteral("decodes"), sample.decodes},
         {QStringLiteral("requests"), sample.requests},

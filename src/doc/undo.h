@@ -92,11 +92,17 @@ private:
     QString text_;
 };
 
-// Removes items; undo reinserts them at their original indices.
+// Removes items; undo reinserts them at their original indices. The
+// optional spill callback runs for each item before it leaves the
+// document, which is where the session cache takes over the payload of
+// an item that only lives in RAM.
 class RemoveItemsCommand final : public Command
 {
 public:
-    explicit RemoveItemsCommand(QVector<ItemPtr> items, QString text = {});
+    using Spill = std::function<void(const ItemPtr &)>;
+
+    explicit RemoveItemsCommand(QVector<ItemPtr> items, Spill spill = {},
+                                QString text = QString());
     void redo(Document &document) override;
     void undo(Document &document) override;
     QString text() const override { return text_; }
@@ -104,6 +110,7 @@ public:
 private:
     QVector<ItemPtr> items_;
     QVector<qsizetype> indices_;
+    Spill spill_;
     QString text_;
 };
 

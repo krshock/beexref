@@ -9,6 +9,7 @@
 #include <QTemporaryDir>
 #include <QtTest>
 
+#include "cache/session_cache.h"
 #include "doc/document.h"
 #include "ui/drop.h"
 #include "ui/input_controller.h"
@@ -54,6 +55,7 @@ private slots:
     void internalCopyPasteCreatesCopies();
     void pasteSystemClipboardText();
     void cutAndUndoRestores();
+    void removingAnImageSpillsItsBytes();
 };
 
 void TestInput::dropsImageMimeData()
@@ -249,6 +251,51 @@ void TestInput::cutAndUndoRestores()
     scene.syncDocument();
     QCOMPARE(document->items().size(), 1);
     QCOMPARE(scene.itemViews().size(), 1);
+}
+
+void TestInput::removingAnImageSpillsItsBytes()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    auto cache = cache::SessionCache::create(dir.path());
+    QVERIFY(cache->isAvailable());
+
+    auto document = std::make_shared<doc::Document>(doc::Document::create());
+    ui::Scene scene;
+    scene.setDocument(document);
+    doc::UndoStack stack(document.get());
+    ui::InputController controller(&scene, &stack);
+    controller.setSessionCache(cache);
+
+    const QByteArray png = makePng(400, 300, Qt::red);
+    QImage image;
+    image.loadFromData(png);
+    QMimeData mime;
+    mime.setImageData(image);
+    controller.insertMimeData(mime, QPointF(0, 0));
+    QCOMPARE(document->items().size(), 1);
+
+    const doc::ItemPtr item = document->items().first();
+    const QString uuid = item->ensureUuid();
+    QVERIFY(item->source->residentBytes() > 0);
+
+    scene.itemViewFor(item)->setSelected(true);
+    controller.cut();
+    QCOMPARE(document->items().size(), 0);
+
+    // The payload left RAM for the cache, and undo still restores it.
+    QCOMPARE(item->source->residentBytes(), qint64(0));
+    QVERIFY(item->source->isValid());
+    const auto spilled = cache->get(QStringLiteral("undo"), uuid);
+    QVERIFY(spilled.has_value());
+    QCOMPARE(*spilled, png);
+
+    QVERIFY(stack.undo());
+    scene.syncDocument();
+    QCOMPARE(document->items().size(), 1);
+    auto blob = document->blob(*document->items().first());
+    QVERIFY(blob.isOk());
+    QCOMPARE(blob.value(), png);
 }
 
 QTEST_MAIN(TestInput)

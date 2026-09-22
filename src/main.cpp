@@ -61,6 +61,11 @@ int main(int argc, char *argv[])
         QStringLiteral("seconds"), QStringLiteral("0"));
     parser.addOption(memAuditOption);
 
+    QCommandLineOption noCacheOption(
+        QStringLiteral("no-cache"),
+        QStringLiteral("Disable the undo-history and level disk cache for this session."));
+    parser.addOption(noCacheOption);
+
     parser.process(app);
 
     settings::setSettingsDir(parser.value(settingsDirOption));
@@ -70,7 +75,7 @@ int main(int argc, char *argv[])
                    {QStringLiteral("version"), QString::fromLatin1(constants::Version)}});
     board::sweepStaleTempFiles(settings::cacheDir());
 
-    ui::MainWindow window;
+    ui::MainWindow window(parser.isSet(noCacheOption));
     window.show();
     window.startMemoryAudit(parser.value(memAuditOption).toInt());
 

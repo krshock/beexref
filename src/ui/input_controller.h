@@ -9,7 +9,13 @@
 #include <QPointF>
 #include <QVector>
 
+#include <memory>
+
 class QMimeData;
+
+namespace cache {
+class SessionCache;
+}
 
 namespace ui {
 
@@ -39,6 +45,10 @@ public:
 
     bool hasInternalClipboard() const { return !internalClipboard_.isEmpty(); }
 
+    // Payloads of items that leave the board are moved here, so a
+    // deleted image's bytes do not stay in RAM for undo.
+    void setSessionCache(std::shared_ptr<cache::SessionCache> cache);
+
 signals:
     void message(const QString &text);
     // One or more items were inserted (for the memory audit).
@@ -50,11 +60,13 @@ private:
     void insertUrls(const QList<QUrl> &urls, const QPointF &scenePos);
     void insertText(const QString &text, const QPointF &scenePos, double viewScale);
     void removeSelection();
+    void spillToCache(const doc::ItemPtr &item);
     void arrangeInserted(const QVector<doc::ItemPtr> &items, const QPointF &scenePos);
 
     Scene *scene_;
     doc::UndoStack *undoStack_;
     Downloader *downloader_;
+    std::shared_ptr<cache::SessionCache> sessionCache_;
     QVector<doc::ItemPtr> internalClipboard_;
     QHash<quint64, QPointF> pendingDrops_;
     quint64 nextRequestId_ = 1;
