@@ -42,6 +42,8 @@ qt_add_library(beexref_core STATIC
     src/constants.h
     src/doc/document.cpp
     src/doc/document.h
+    src/doc/image_io.cpp
+    src/doc/image_io.h
     src/doc/item.cpp
     src/doc/item.h
     src/doc/source.cpp
@@ -52,6 +54,12 @@ qt_add_library(beexref_core STATIC
     src/logging.h
     src/settings.cpp
     src/settings.h
+    src/ui/downloader.cpp
+    src/ui/downloader.h
+    src/ui/drop.cpp
+    src/ui/drop.h
+    src/ui/input_controller.cpp
+    src/ui/input_controller.h
     src/ui/level_loader.cpp
     src/ui/level_loader.h
     src/ui/main_window.cpp

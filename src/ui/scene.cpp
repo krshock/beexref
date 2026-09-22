@@ -1,6 +1,7 @@
 #include "scene.h"
 
 #include <QImage>
+#include <QSet>
 
 #include <utility>
 
@@ -25,27 +26,52 @@ void Scene::setDocument(std::shared_ptr<doc::Document> document)
 void Scene::rebuild()
 {
     clear();
-    if (!document_)
+    syncDocument();
+}
+
+void Scene::syncDocument()
+{
+    if (!document_) {
+        clear();
         return;
+    }
 
-    for (const doc::ItemPtr &item : document_->items()) {
-        auto *view = new SceneItem(item);
-        addItem(view);
-        view->applyModelState();
+    QSet<const doc::Item *> live;
+    for (const doc::ItemPtr &item : document_->items())
+        live.insert(item.get());
 
-        if (item->isPixmap()) {
-            if (!item->floorData.isEmpty()) {
-                const QImage floor = QImage::fromData(item->floorData);
-                if (!floor.isNull()) {
-                    view->setLevel(floor,
-                                   item->floorFraction > 0 ? item->floorFraction : 1.0);
-                }
-            }
-            if (!item->hasSource())
-                view->setLevelUnavailable();
+    const QVector<SceneItem *> views = itemViews();
+    for (SceneItem *view : views) {
+        if (!live.contains(view->item().get())) {
+            removeItem(view);
+            delete view;
         }
     }
+
+    for (const doc::ItemPtr &item : document_->items()) {
+        SceneItem *view = itemViewFor(item);
+        if (!view) {
+            view = new SceneItem(item);
+            addItem(view);
+            applyPlaceholder(view);
+        }
+        view->applyModelState();
+    }
     updateSceneRect();
+}
+
+void Scene::applyPlaceholder(SceneItem *view)
+{
+    const doc::ItemPtr &item = view->item();
+    if (!item->isPixmap())
+        return;
+    if (!item->floorData.isEmpty()) {
+        const QImage floor = QImage::fromData(item->floorData);
+        if (!floor.isNull())
+            view->setLevel(floor, item->floorFraction > 0 ? item->floorFraction : 1.0);
+    }
+    if (!item->hasSource())
+        view->setLevelUnavailable();
 }
 
 QVector<SceneItem *> Scene::itemViews() const
@@ -66,6 +92,25 @@ QVector<SceneItem *> Scene::pixmapItemViews() const
             views.append(view);
     }
     return views;
+}
+
+QVector<SceneItem *> Scene::selectedItemViews() const
+{
+    QVector<SceneItem *> views;
+    for (QGraphicsItem *item : selectedItems()) {
+        if (auto *view = dynamic_cast<SceneItem *>(item))
+            views.append(view);
+    }
+    return views;
+}
+
+SceneItem *Scene::itemViewFor(const doc::ItemPtr &item) const
+{
+    for (SceneItem *view : itemViews()) {
+        if (view->item() == item)
+            return view;
+    }
+    return nullptr;
 }
 
 QRectF Scene::selectionBounds() const

@@ -8,20 +8,28 @@
 #include <QPointF>
 #include <QVector>
 
+#include <functional>
+
+class QMimeData;
+
 namespace ui {
 
 // Canvas view: pan, zoom, fit, rubber-band selection and
 // threshold-based moving of the selected items. Requests display
-// levels for the visible items through the loader.
+// levels for the visible items through the loader. Drags are
+// classified with a filter and forwarded as mimeDropped.
 class View : public QGraphicsView
 {
     Q_OBJECT
 
 public:
+    using MimeFilter = std::function<bool(const QMimeData &)>;
+
     explicit View(QWidget *parent = nullptr);
 
     void setLevelLoader(LevelLoader *loader);
     void setBoardScene(Scene *scene);
+    void setMimeFilter(MimeFilter filter) { mimeFilter_ = std::move(filter); }
 
     void fitScene();
     void fitSelection();
@@ -33,6 +41,11 @@ public:
     // coarse for the current zoom.
     void requestVisibleLevels();
 
+signals:
+    // A drop the filter accepted, with its position in scene
+    // coordinates. The mime data stays owned by the event.
+    void mimeDropped(const QMimeData *data, const QPointF &scenePos);
+
 protected:
     void wheelEvent(QWheelEvent *event) override;
     void mousePressEvent(QMouseEvent *event) override;
@@ -40,6 +53,9 @@ protected:
     void mouseReleaseEvent(QMouseEvent *event) override;
     void resizeEvent(QResizeEvent *event) override;
     void scrollContentsBy(int dx, int dy) override;
+    void dragEnterEvent(QDragEnterEvent *event) override;
+    void dragMoveEvent(QDragMoveEvent *event) override;
+    void dropEvent(QDropEvent *event) override;
 
 private:
     void panBy(const QPoint &delta);
@@ -48,6 +64,7 @@ private:
 
     LevelLoader *loader_ = nullptr;
     Scene *boardScene_ = nullptr;
+    MimeFilter mimeFilter_;
     quint64 nextRequestId_ = 1;
     bool levelRequestScheduled_ = false;
 

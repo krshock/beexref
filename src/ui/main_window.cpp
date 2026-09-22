@@ -1,16 +1,19 @@
 #include "main_window.h"
 
 #include "constants.h"
+#include "input_controller.h"
 #include "logging.h"
 #include "settings.h"
 #include "util/format.h"
 #include "util/memory.h"
 
 #include <QAction>
+#include <QCursor>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QMenuBar>
 #include <QMessageBox>
+#include <QMimeData>
 #include <QTimer>
 
 namespace ui {
@@ -21,9 +24,40 @@ MainWindow::MainWindow(QWidget *parent)
     scene_ = new Scene(this);
     view_ = new View(this);
     loader_ = new LevelLoader(this);
+    input_ = new InputController(scene_, &undoStack_, this);
     view_->setBoardScene(scene_);
     view_->setLevelLoader(loader_);
+    view_->setMimeFilter([this](const QMimeData &data) { return input_->acceptsMimeData(data); });
+    connect(view_, &View::mimeDropped, this, [this](const QMimeData *data, const QPointF &pos) {
+        input_->insertMimeData(*data, pos, view_->transform().m11());
+    });
+    connect(input_, &InputController::message, this, [](const QString &text) {
+        logging::info(text);
+    });
     setCentralWidget(view_);
+
+    auto *editMenu = menuBar()->addMenu(QStringLiteral("&Edit"));
+    auto *undoAction = editMenu->addAction(QStringLiteral("&Undo"));
+    undoAction->setShortcut(QKeySequence::Undo);
+    connect(undoAction, &QAction::triggered, this, [this]() { applyHistoryStep(true); });
+    auto *redoAction = editMenu->addAction(QStringLiteral("&Redo"));
+    redoAction->setShortcut(QKeySequence::Redo);
+    connect(redoAction, &QAction::triggered, this, [this]() { applyHistoryStep(false); });
+    editMenu->addSeparator();
+    auto *cutAction = editMenu->addAction(QStringLiteral("Cu&t"));
+    cutAction->setShortcut(QKeySequence::Cut);
+    connect(cutAction, &QAction::triggered, input_, &InputController::cut);
+    auto *copyAction = editMenu->addAction(QStringLiteral("&Copy"));
+    copyAction->setShortcut(QKeySequence::Copy);
+    connect(copyAction, &QAction::triggered, input_, &InputController::copy);
+    auto *pasteAction = editMenu->addAction(QStringLiteral("&Paste"));
+    pasteAction->setShortcut(QKeySequence::Paste);
+    connect(pasteAction, &QAction::triggered, this, [this]() {
+        QPoint position = view_->viewport()->mapFromGlobal(QCursor::pos());
+        if (!view_->viewport()->rect().contains(position))
+            position = view_->viewport()->rect().center();
+        input_->paste(view_->mapToScene(position), view_->transform().m11());
+    });
 
     auto *fileMenu = menuBar()->addMenu(QStringLiteral("&File"));
     auto *openAction = fileMenu->addAction(QStringLiteral("&Open..."));
@@ -70,6 +104,7 @@ MainWindow::~MainWindow()
     view_->setLevelLoader(nullptr);
     loader_->shutdown();
     scene_->setDocument(nullptr);
+    undoStack_.setDocument(nullptr);
     document_.reset();
 }
 
@@ -86,6 +121,8 @@ bool MainWindow::openBoard(const QString &path)
     }
 
     document_ = std::make_shared<doc::Document>(std::move(opened.take()));
+    undoStack_.setDocument(document_.get());
+    undoStack_.clear();
     scene_->setDocument(document_);
     view_->fitScene();
     updateTitle();
@@ -102,6 +139,17 @@ void MainWindow::openFileDialog()
         QStringLiteral("BeeXRef board (*.beex *.bee)"));
     if (!path.isEmpty())
         openBoard(path);
+}
+
+void MainWindow::applyHistoryStep(bool undo)
+{
+    const bool changed = undo ? undoStack_.undo() : undoStack_.redo();
+    if (!changed)
+        return;
+    scene_->syncDocument();
+    if (document_)
+        document_->setModified(!undoStack_.isClean());
+    updateTitle();
 }
 
 void MainWindow::updateTitle()

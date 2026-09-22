@@ -53,7 +53,7 @@ void UndoStack::insertEntry(Entry entry)
 
 void UndoStack::push(std::unique_ptr<Command> command)
 {
-    if (!command)
+    if (!command || !document_)
         return;
     const QString text = command->text();
     command->redo(*document_);
@@ -66,7 +66,7 @@ void UndoStack::push(std::unique_ptr<Command> command)
 
 bool UndoStack::undo()
 {
-    if (!canUndo())
+    if (!document_ || !canUndo())
         return false;
     --index_;
     entries_[static_cast<size_t>(index_)].command->undo(*document_);
@@ -75,7 +75,7 @@ bool UndoStack::undo()
 
 bool UndoStack::redo()
 {
-    if (!canRedo())
+    if (!document_ || !canRedo())
         return false;
     entries_[static_cast<size_t>(index_)].command->redo(*document_);
     ++index_;

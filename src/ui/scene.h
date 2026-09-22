@@ -25,8 +25,15 @@ public:
     // Recreates every canvas item from the document.
     void rebuild();
 
+    // Brings the views in line with the document after commands ran:
+    // removes views for dropped items, adds views for new ones, and
+    // reapplies model state to the rest.
+    void syncDocument();
+
     QVector<SceneItem *> itemViews() const;
     QVector<SceneItem *> pixmapItemViews() const;
+    QVector<SceneItem *> selectedItemViews() const;
+    SceneItem *itemViewFor(const doc::ItemPtr &item) const;
 
     // Bounding rect of the selected items, in scene coordinates.
     QRectF selectionBounds() const;
@@ -35,6 +42,10 @@ public:
     void updateSceneRect();
 
 private:
+    // Applies the saved floor thumbnail, or the unavailable marker, to
+    // a newly created view.
+    void applyPlaceholder(SceneItem *view);
+
     std::shared_ptr<doc::Document> document_;
 };
 

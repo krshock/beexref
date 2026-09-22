@@ -27,6 +27,7 @@ private slots:
     void cleanStateTracksIndex();
     void pushClearsRedoBranch();
     void undoRedoText();
+    void stackWithoutDocumentIsInert();
 };
 
 void TestUndo::addUndoRedo()
@@ -182,6 +183,19 @@ void TestUndo::undoRedoText()
     QVERIFY(stack.undo());
     QCOMPARE(stack.redoText(), QStringLiteral("Insert"));
     QCOMPARE(stack.undoText(), QString());
+}
+
+void TestUndo::stackWithoutDocumentIsInert()
+{
+    // A stack that was never given a document must not crash; the
+    // window wires it up when a board opens.
+    doc::UndoStack stack;
+    QVERIFY(!stack.document());
+    stack.push(std::make_unique<doc::AddItemsCommand>(
+        QVector<doc::ItemPtr>{makeItem(QStringLiteral("a"))}));
+    QCOMPARE(stack.count(), 0);
+    QVERIFY(!stack.undo());
+    QVERIFY(!stack.redo());
 }
 
 QTEST_GUILESS_MAIN(TestUndo)

@@ -59,3 +59,27 @@ qt_add_executable(test_util test_util.cpp)
 target_link_libraries(test_util PRIVATE beexref_core Qt6::Test)
 beexref_set_warnings(test_util)
 add_test(NAME util COMMAND test_util)
+
+qt_add_executable(test_image_io test_image_io.cpp)
+target_link_libraries(test_image_io PRIVATE beexref_core Qt6::Test)
+target_compile_definitions(test_image_io PRIVATE
+    ASSETS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/assets")
+beexref_set_warnings(test_image_io)
+add_test(NAME image_io COMMAND test_image_io)
+
+qt_add_executable(test_drop test_drop.cpp)
+target_link_libraries(test_drop PRIVATE beexref_core Qt6::Test)
+beexref_set_warnings(test_drop)
+add_test(NAME drop COMMAND test_drop)
+
+qt_add_executable(test_downloader test_downloader.cpp)
+target_link_libraries(test_downloader PRIVATE beexref_core Qt6::Test)
+beexref_set_warnings(test_downloader)
+add_test(NAME downloader COMMAND test_downloader)
+
+qt_add_executable(test_input test_input.cpp)
+target_link_libraries(test_input PRIVATE beexref_core Qt6::Test)
+target_compile_definitions(test_input PRIVATE
+    ASSETS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/assets")
+beexref_set_warnings(test_input)
+add_test(NAME input COMMAND test_input)

@@ -2,6 +2,10 @@
 
 #include "theme.h"
 
+#include <QDragEnterEvent>
+#include <QDragMoveEvent>
+#include <QDropEvent>
+#include <QMimeData>
 #include <QMouseEvent>
 #include <QScrollBar>
 #include <QTimer>
@@ -26,6 +30,7 @@ View::View(QWidget *parent)
     setBackgroundBrush(theme::canvas);
     setFrameShape(QFrame::NoFrame);
     setMouseTracking(true);
+    setAcceptDrops(true);
 }
 
 void View::setLevelLoader(LevelLoader *loader)
@@ -300,6 +305,32 @@ void View::scrollContentsBy(int dx, int dy)
 {
     QGraphicsView::scrollContentsBy(dx, dy);
     scheduleLevelRequest();
+}
+
+void View::dragEnterEvent(QDragEnterEvent *event)
+{
+    if (mimeFilter_ && mimeFilter_(*event->mimeData()))
+        event->acceptProposedAction();
+    else
+        event->ignore();
+}
+
+void View::dragMoveEvent(QDragMoveEvent *event)
+{
+    if (mimeFilter_ && mimeFilter_(*event->mimeData()))
+        event->acceptProposedAction();
+    else
+        event->ignore();
+}
+
+void View::dropEvent(QDropEvent *event)
+{
+    if (!mimeFilter_ || !mimeFilter_(*event->mimeData())) {
+        event->ignore();
+        return;
+    }
+    emit mimeDropped(event->mimeData(), mapToScene(event->position().toPoint()));
+    event->acceptProposedAction();
 }
 
 } // namespace ui
