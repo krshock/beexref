@@ -140,6 +140,7 @@ private slots:
     void cropModeCancelPaths();
     void resetCropAndTransforms();
     void cropActionStartsAndUndoCancels();
+    void resetActionsAreSingleUndoSteps();
 };
 
 void TestUiScene::buildsItemsFromDocument()
@@ -1130,6 +1131,88 @@ void TestUiScene::cropActionStartsAndUndoCancels()
     undo->trigger();
     QVERIFY(!window.view()->cropActive());
     QVERIFY(!view->cropMode());
+}
+
+void TestUiScene::resetActionsAreSingleUndoSteps()
+{
+    auto document = std::make_shared<doc::Document>(doc::Document::create());
+    QVector<doc::ItemPtr> items;
+    for (int i = 0; i < 3; ++i) {
+        const doc::ItemPtr item = pixmapItem(40, 30, Qt::red);
+        item->x = i * 100.0;
+        item->scale = 2.0 + i;
+        item->rotation = 15.0 * (i + 1);
+        item->flip = -1.0;
+        document->addItem(item);
+        items.append(item);
+    }
+
+    ui::Scene scene;
+    scene.setDocument(document);
+    doc::UndoStack stack(document.get());
+    for (SceneItem *view : scene.itemViews())
+        view->setSelected(true);
+
+    // Reset All is one history entry, and one undo brings every item
+    // back: the reference pushes a single ResetTransforms command.
+    ui::selection::resetTransforms(scene, stack);
+    QCOMPARE(stack.count(), 1);
+    for (const doc::ItemPtr &item : items) {
+        QCOMPARE(item->scale, 1.0);
+        QCOMPARE(item->rotation, 0.0);
+        QCOMPARE(item->flip, 1.0);
+    }
+    QVERIFY(stack.undo());
+    scene.syncDocument();
+    for (int i = 0; i < items.size(); ++i) {
+        QCOMPARE(items.at(i)->scale, 2.0 + i);
+        QCOMPARE(items.at(i)->rotation, 15.0 * (i + 1));
+        QCOMPARE(items.at(i)->flip, -1.0);
+    }
+
+    // Reset Scale: one entry for all three items.
+    {
+        doc::UndoStack fresh(document.get());
+        ui::selection::resetScale(scene, fresh);
+        QCOMPARE(fresh.count(), 1);
+        for (const doc::ItemPtr &item : items)
+            QCOMPARE(item->scale, 1.0);
+        QVERIFY(fresh.undo());
+        scene.syncDocument();
+        for (int i = 0; i < items.size(); ++i)
+            QCOMPARE(items.at(i)->scale, 2.0 + i);
+    }
+
+    // Reset Rotation: one entry as well.
+    {
+        doc::UndoStack fresh(document.get());
+        ui::selection::resetRotation(scene, fresh);
+        QCOMPARE(fresh.count(), 1);
+        QVERIFY(fresh.undo());
+        scene.syncDocument();
+        for (int i = 0; i < items.size(); ++i)
+            QCOMPARE(items.at(i)->rotation, 15.0 * (i + 1));
+    }
+
+    // Reset Flip: one entry, and nothing at all when every item is
+    // already unflipped.
+    {
+        doc::UndoStack fresh(document.get());
+        ui::selection::resetFlip(scene, fresh);
+        QCOMPARE(fresh.count(), 1);
+        QVERIFY(fresh.undo());
+        scene.syncDocument();
+        for (const doc::ItemPtr &item : items)
+            QCOMPARE(item->flip, -1.0);
+    }
+    {
+        for (const doc::ItemPtr &item : items)
+            item->flip = 1.0;
+        scene.syncDocument();
+        doc::UndoStack fresh(document.get());
+        ui::selection::resetFlip(scene, fresh);
+        QCOMPARE(fresh.count(), 0);
+    }
 }
 
 QTEST_MAIN(TestUiScene)

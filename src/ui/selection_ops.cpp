@@ -162,6 +162,9 @@ void flip(const Scene &scene, doc::UndoStack &stack, bool vertical)
 void resetScale(const Scene &scene, doc::UndoStack &stack)
 {
     const QVector<SceneItem *> items = actionItems(scene);
+    // One history entry for the whole selection, like the reference's
+    // single ResetScale command.
+    stack.beginMacro(QStringLiteral("Reset scale"));
     for (SceneItem *view : items) {
         const QPointF anchor = itemAnchor(view);
         const doc::ChangeItemCommand::State before =
@@ -171,11 +174,13 @@ void resetScale(const Scene &scene, doc::UndoStack &stack)
             view->item(), before, doc::ChangeItemCommand::State::capture(*view->item()),
             QStringLiteral("Reset scale")));
     }
+    stack.endMacro();
 }
 
 void resetRotation(const Scene &scene, doc::UndoStack &stack)
 {
     const QVector<SceneItem *> items = actionItems(scene);
+    stack.beginMacro(QStringLiteral("Reset rotation"));
     for (SceneItem *view : items) {
         const QPointF anchor = itemAnchor(view);
         const doc::ChangeItemCommand::State before =
@@ -185,11 +190,15 @@ void resetRotation(const Scene &scene, doc::UndoStack &stack)
             view->item(), before, doc::ChangeItemCommand::State::capture(*view->item()),
             QStringLiteral("Reset rotation")));
     }
+    stack.endMacro();
 }
 
 void resetFlip(const Scene &scene, doc::UndoStack &stack)
 {
     const QVector<SceneItem *> items = actionItems(scene);
+    // Items that are not flipped are skipped; if that leaves nothing to
+    // do, endMacro() records no entry at all.
+    stack.beginMacro(QStringLiteral("Reset flip"));
     for (SceneItem *view : items) {
         if (view->item()->flip > 0)
             continue;
@@ -201,6 +210,7 @@ void resetFlip(const Scene &scene, doc::UndoStack &stack)
             view->item(), before, doc::ChangeItemCommand::State::capture(*view->item()),
             QStringLiteral("Reset flip")));
     }
+    stack.endMacro();
 }
 
 void resetCrop(const Scene &scene, doc::UndoStack &stack)
@@ -216,6 +226,9 @@ void resetCrop(const Scene &scene, doc::UndoStack &stack)
 void resetTransforms(const Scene &scene, doc::UndoStack &stack)
 {
     const QVector<SceneItem *> items = actionItems(scene);
+    // One history entry for the whole selection, like the reference's
+    // single ResetTransforms command.
+    stack.beginMacro(QStringLiteral("Reset transformations"));
     for (SceneItem *view : items) {
         const doc::ChangeItemCommand::State before =
             doc::ChangeItemCommand::State::capture(*view->item());
@@ -237,6 +250,7 @@ void resetTransforms(const Scene &scene, doc::UndoStack &stack)
             view->item(), before, doc::ChangeItemCommand::State::capture(*view->item()),
             QStringLiteral("Reset transformations")));
     }
+    stack.endMacro();
 }
 
 } // namespace ui::selection

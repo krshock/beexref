@@ -323,6 +323,31 @@ public:
             snapshot(QStringLiteral("18-layout-undone"));
             out() << "layout undone: " << layoutBoxes() << "\n";
             out() << "layout restored: " << (layoutBoxes() == layoutBefore) << "\n";
+
+            // Reset All on three items must be a single undo step: set
+            // up transforms without history, reset through the menu,
+            // then one Ctrl+Z must bring all of them back.
+            for (int i = 0; i < picked.size(); ++i) {
+                picked.at(i)->item()->rotation = 20.0 * (i + 1);
+                picked.at(i)->item()->scale = 1.5;
+            }
+            window_.scene()->syncDocument();
+            QTest::qWait(200);
+            const QString resetBefore = layoutBoxes();
+
+            QAction *resetAll = nullptr;
+            for (QAction *action : actions) {
+                if (action->text() == QStringLiteral("Reset &All Transformations"))
+                    resetAll = action;
+            }
+            resetAll->trigger();
+            QTest::qWait(500);
+            snapshot(QStringLiteral("19-reset-all"));
+            QTest::keyClick(&window_, Qt::Key_Z, Qt::ControlModifier);
+            QTest::qWait(700);
+            snapshot(QStringLiteral("20-reset-undone"));
+            out() << "reset all, one undo restores everything: "
+                  << (layoutBoxes() == resetBefore) << "\n";
         }
 
         const ui::LodManager::Stats stats = view->lodManager()->stats();
