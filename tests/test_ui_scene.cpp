@@ -85,6 +85,8 @@ private slots:
     void windowOpensBoardAndLoadsLevel();
     void newWindowHasUnsavedDocument();
     void smoothingSuspendsDuringInteraction();
+    void sceneRectLeavesRoomToPan();
+    void pansBeyondTheItemsWhenZoomedIn();
 };
 
 void TestUiScene::buildsItemsFromDocument()
@@ -401,6 +403,72 @@ void TestUiScene::smoothingSuspendsDuringInteraction()
     sendMouse(view.viewport(), QEvent::MouseButtonRelease, center, Qt::MiddleButton,
               Qt::NoButton);
     QVERIFY(!ui::rendering::smoothingSuspended());
+}
+
+void TestUiScene::sceneRectLeavesRoomToPan()
+{
+    // The reference expands the scrollable area by one viewport per
+    // side, so panning works even when every item is on screen.
+    auto document = std::make_shared<doc::Document>(doc::Document::create());
+    document->addItem(pixmapItem(100, 50, Qt::red));
+
+    ui::View view;
+    auto *scene = new ui::Scene(&view);
+    scene->setDocument(document);
+    view.setBoardScene(scene);
+    view.resize(400, 300);
+    view.fitScene();
+
+    const QRectF items = scene->itemsBoundingRect();
+    const QRectF rect = scene->sceneRect();
+    QVERIFY(rect.width() > items.width());
+    QVERIFY(rect.height() > items.height());
+    QVERIFY(rect.contains(items));
+
+    // The scrollbars have range, so a middle drag can move the view.
+    QVERIFY(view.horizontalScrollBar()->maximum() > 0);
+    const int before = view.horizontalScrollBar()->value();
+    const QPoint start = view.viewport()->rect().center();
+    sendMouse(view.viewport(), QEvent::MouseButtonPress, start, Qt::MiddleButton,
+              Qt::MiddleButton);
+    sendMouse(view.viewport(), QEvent::MouseMove, start - QPoint(60, 0), Qt::NoButton,
+              Qt::MiddleButton);
+    sendMouse(view.viewport(), QEvent::MouseButtonRelease, start - QPoint(60, 0), Qt::MiddleButton,
+              Qt::NoButton);
+    QVERIFY(view.horizontalScrollBar()->value() > before);
+}
+
+void TestUiScene::pansBeyondTheItemsWhenZoomedIn()
+{
+    auto document = std::make_shared<doc::Document>(doc::Document::create());
+    document->addItem(pixmapItem(2000, 1000, Qt::darkBlue));
+
+    ui::View view;
+    auto *scene = new ui::Scene(&view);
+    scene->setDocument(document);
+    view.setBoardScene(scene);
+    view.resize(400, 300);
+    view.fitScene();
+    view.zoomAt(800, view.viewport()->rect().center());
+
+    // Pan to the scroll limit; the viewport centre may then leave the
+    // items' bounding box, because the scene rect extends a full
+    // viewport beyond it.
+    const QPoint start = view.viewport()->rect().center();
+    for (int i = 0; i < 8; ++i) {
+        sendMouse(view.viewport(), QEvent::MouseButtonPress, start, Qt::MiddleButton,
+                  Qt::MiddleButton);
+        sendMouse(view.viewport(), QEvent::MouseMove, start - QPoint(300, 0), Qt::NoButton,
+                  Qt::MiddleButton);
+        sendMouse(view.viewport(), QEvent::MouseButtonRelease, start - QPoint(300, 0),
+                  Qt::MiddleButton, Qt::NoButton);
+    }
+
+    const QPointF centre = view.mapToScene(view.viewport()->rect().center());
+    QVERIFY2(centre.x() > scene->itemsBoundingRect().right(),
+             qPrintable(QStringLiteral("centre=%1 right=%2")
+                            .arg(centre.x())
+                            .arg(scene->itemsBoundingRect().right())));
 }
 
 QTEST_MAIN(TestUiScene)

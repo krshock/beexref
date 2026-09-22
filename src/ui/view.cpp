@@ -49,19 +49,59 @@ void View::setLevelLoader(LevelLoader *loader)
 
 void View::setBoardScene(Scene *scene)
 {
-    if (boardScene_)
-        disconnect(boardScene_, &Scene::itemViewAboutToBeRemoved, this, nullptr);
+    if (boardScene_) {
+        disconnect(boardScene_, nullptr, this, nullptr);
+    }
     boardScene_ = scene;
     if (boardScene_) {
         // Drop scheduler state for a view before the scene deletes it,
         // so an in-flight decode can never touch freed memory.
         connect(boardScene_, &Scene::itemViewAboutToBeRemoved, this,
                 [this](SceneItem *view) { lod_->forgetItem(view); });
+        // New or removed items change the scrollable area.
+        connect(boardScene_, &Scene::itemsChanged, this, [this]() { recalculateSceneRect(); });
     }
     lod_->setScene(scene);
     QGraphicsView::setScene(scene);
     updateViewState();
+    recalculateSceneRect();
     lod_->schedule();
+}
+
+void View::recalculateSceneRect()
+{
+    // The scrollable area is the items' bounding box expanded by one
+    // viewport on each side, so the canvas always offers room to pan
+    // (the reference's "impression of an infinite canvas"). Clamping
+    // the scene rect to the items instead makes panning impossible
+    // when everything fits.
+    if (!boardScene_)
+        return;
+    const QRectF items = boardScene_->itemsBoundingRect();
+    if (items.isEmpty()) {
+        boardScene_->setSceneRect(QRectF());
+        sceneRectValid_ = false;
+        return;
+    }
+    const QSize size = viewport()->size();
+    const QPointF topLeft =
+        mapToScene(mapFromScene(items.topLeft()) - QPoint(size.width(), size.height()));
+    const QPointF bottomRight =
+        mapToScene(mapFromScene(items.bottomRight()) + QPoint(size.width(), size.height()));
+    const QRectF rect(topLeft, bottomRight);
+    if (!std::isfinite(rect.x()) || !std::isfinite(rect.y()) || rect.width() > 1.0e9
+        || rect.height() > 1.0e9) {
+        return;
+    }
+
+    // Changing the scene rect re-maps the scrollbars, which would jump
+    // the view; keep looking at the same scene point.
+    const QPointF centre = mapToScene(viewport()->rect().center());
+    const bool keepCentre = sceneRectValid_;
+    boardScene_->setSceneRect(rect);
+    sceneRectValid_ = true;
+    if (keepCentre)
+        centerOn(centre);
 }
 
 void View::setLodSettings(const LodSettings &settings)
@@ -132,6 +172,7 @@ void View::zoomAt(int delta, const QPoint &anchor)
     }
     panBy(mapFromScene(sceneAnchor) - anchor);
     updateViewState();
+    recalculateSceneRect();
     lod_->evaluateNow();
 }
 
@@ -141,6 +182,7 @@ void View::fitScene()
         return;
     const QRectF rect = scene()->itemsBoundingRect();
     fitInView(rect, Qt::KeepAspectRatio);
+    recalculateSceneRect();
     fitInView(rect, Qt::KeepAspectRatio);
     updateViewState();
     lod_->evaluateNow();
@@ -154,6 +196,7 @@ void View::fitSelection()
     if (rect.isEmpty())
         return;
     fitInView(rect, Qt::KeepAspectRatio);
+    recalculateSceneRect();
     fitInView(rect, Qt::KeepAspectRatio);
     updateViewState();
     lod_->evaluateNow();
@@ -263,6 +306,9 @@ void View::mouseMoveEvent(QMouseEvent *event)
             entry.view->setPos(entry.startPosition + delta);
             entry.view->update();
         }
+        // Dragging an item past the current area grows the scrollable
+        // rect, as the reference does on every scene change.
+        recalculateSceneRect();
         event->accept();
         return;
     }
@@ -283,10 +329,9 @@ void View::mouseReleaseEvent(QMouseEvent *event)
         if (moveStarted_) {
             for (const MoveEntry &entry : moveStarts_)
                 entry.view->syncPositionToModel();
-            if (boardScene_ && boardScene_->document()) {
+            if (boardScene_ && boardScene_->document())
                 boardScene_->document()->setModified(true);
-                boardScene_->updateSceneRect();
-            }
+            recalculateSceneRect();
             // One undo step for the whole gesture.
             if (undoStack_ && !moveStarts_.isEmpty()) {
                 undoStack_->beginMacro(QStringLiteral("Move"));
@@ -315,6 +360,7 @@ void View::resizeEvent(QResizeEvent *event)
 {
     QGraphicsView::resizeEvent(event);
     updateViewState();
+    recalculateSceneRect();
     lod_->schedule();
 }
 

@@ -1,0 +1,230 @@
+// Offscreen UI smoke harness.
+//
+// Opens a board in the real MainWindow, drives it with in-process Qt
+// events (no window system, no X server) and writes screenshots to an
+// output directory for inspection. This replaces driving the app with
+// xdotool on the user's desktop: nothing here can reach other
+// applications.
+//
+//   QT_QPA_PLATFORM=offscreen ./beexref-ui-smoke [board] [outdir]
+//
+// Defaults: no board (new untitled document), /tmp/opencode/ui-smoke.
+#include <QApplication>
+#include <QBuffer>
+#include <QClipboard>
+#include <QColor>
+#include <QDir>
+#include <QImage>
+#include <QMimeData>
+#include <QMouseEvent>
+#include <QScrollBar>
+#include <QTextStream>
+#include <QWheelEvent>
+#include <QtTest>
+
+#include "doc/document.h"
+#include "settings.h"
+#include "ui/input_controller.h"
+#include "ui/lod_manager.h"
+#include "ui/main_window.h"
+#include "ui/scene.h"
+#include "ui/scene_item.h"
+#include "ui/view.h"
+#include "util/memory.h"
+
+namespace {
+
+QTextStream &out()
+{
+    static QTextStream stream(stdout);
+    return stream;
+}
+
+void sendMouse(QWidget *widget, QEvent::Type type, const QPoint &position, Qt::MouseButton button,
+               Qt::MouseButtons buttons)
+{
+    QMouseEvent event(type, QPointF(position), QPointF(widget->mapToGlobal(position)), button,
+                      buttons, Qt::NoModifier);
+    QApplication::sendEvent(widget, &event);
+}
+
+void sendWheel(QWidget *widget, const QPoint &position, int delta)
+{
+    QWheelEvent event(QPointF(position), QPointF(widget->mapToGlobal(position)), QPoint(),
+                      QPoint(0, delta), Qt::NoButton, Qt::NoModifier, Qt::NoScrollPhase, false);
+    QApplication::sendEvent(widget, &event);
+}
+
+void middleDrag(QWidget *widget, const QPoint &from, const QPoint &to)
+{
+    sendMouse(widget, QEvent::MouseButtonPress, from, Qt::MiddleButton, Qt::MiddleButton);
+    sendMouse(widget, QEvent::MouseMove, from + (to - from) / 2, Qt::NoButton, Qt::MiddleButton);
+    sendMouse(widget, QEvent::MouseMove, to, Qt::NoButton, Qt::MiddleButton);
+    sendMouse(widget, QEvent::MouseButtonRelease, to, Qt::MiddleButton, Qt::NoButton);
+}
+
+QByteArray makePng(int width, int height, const QColor &color)
+{
+    QImage image(width, height, QImage::Format_ARGB32);
+    image.fill(color);
+    QByteArray bytes;
+    QBuffer buffer(&bytes);
+    buffer.open(QIODevice::WriteOnly);
+    image.save(&buffer, "PNG");
+    return bytes;
+}
+
+class Smoke
+{
+public:
+    Smoke(ui::MainWindow &window, QString outputDir)
+        : window_(window)
+        , outputDir_(std::move(outputDir))
+    {
+    }
+
+    bool run()
+    {
+        if (!QDir().mkpath(outputDir_))
+            return false;
+
+        const QSize size(1000, 700);
+        window_.resize(size);
+        window_.show();
+        QTest::qWait(1500); // let the initial levels settle
+        snapshot(QStringLiteral("01-open"));
+
+        ui::View *view = window_.view();
+        QWidget *viewport = view->viewport();
+        const QPoint centre = viewport->rect().center();
+
+        // Zoom in with the wheel, anchored at the centre.
+        for (int i = 0; i < 14; ++i) {
+            sendWheel(viewport, centre, 120);
+            QTest::qWait(30);
+        }
+        QTest::qWait(2000);
+        snapshot(QStringLiteral("02-zoomed"));
+
+        // Pan with the middle button.
+        middleDrag(viewport, centre, centre + QPoint(250, 150));
+        QTest::qWait(1000);
+        snapshot(QStringLiteral("03-panned"));
+
+        // Back to the whole board, then paste there: a realistic paste
+        // lands among the content, where undo does not have to shrink
+        // the scrollable area out from under the view.
+        view->fitScene();
+        QTest::qWait(800);
+
+        // Paste an image from the offscreen clipboard.
+        const QByteArray png = makePng(600, 400, Qt::magenta);
+        QImage pasted;
+        pasted.loadFromData(png);
+        QApplication::clipboard()->setImage(pasted);
+        QTest::keyClick(&window_, Qt::Key_V, Qt::ControlModifier);
+        QTest::qWait(1500);
+        reportPastedItem();
+        // A pasted 600x400 item is about a pixel wide at the board's fit
+        // zoom; frame it as a user would (the inserted items are
+        // selected, so fit-selection shows them).
+        window_.view()->fitSelection();
+        QTest::qWait(800);
+        reportPastedItem();
+        snapshot(QStringLiteral("04-pasted"));
+
+        // Undo and redo it. The reference binds redo to Ctrl+Shift+Z.
+        QTest::keyClick(&window_, Qt::Key_Z, Qt::ControlModifier);
+        QTest::qWait(800);
+        snapshot(QStringLiteral("05-undo-paste"));
+        const int afterUndo = window_.scene()->itemViews().size();
+        QTest::keyClick(&window_, Qt::Key_Z, Qt::ControlModifier | Qt::ShiftModifier);
+        QTest::qWait(800);
+        const int afterRedo = window_.scene()->itemViews().size();
+        if (afterRedo == afterUndo) {
+            out() << "ERROR: redo did not restore the item (" << afterUndo << " -> " << afterRedo
+                  << ")\n";
+            return false;
+        }
+        out() << "items after redo: " << afterRedo << "\n";
+        snapshot(QStringLiteral("06-redo-paste"));
+
+        const ui::LodManager::Stats stats = view->lodManager()->stats();
+        out() << "items=" << window_.scene()->itemViews().size()
+              << " pixmaps=" << window_.scene()->pixmapItemViews().size()
+              << " level_mb=" << QString::number(stats.levelMB, 'f', 1)
+              << " cache_mb=" << QString::number(stats.cacheMB, 'f', 1)
+              << " decodes=" << stats.decodes << " cancelled=" << stats.cancelled
+              << " rss_mb=" << QString::number(util::processRssBytes() / 1024.0 / 1024.0, 'f', 1)
+              << "\n";
+        out() << "screenshots in " << outputDir_ << "\n";
+        out().flush();
+        return true;
+    }
+
+private:
+    // Prints where a freshly pasted (selected) item sits relative to the
+    // visible area, so a screenshot that does not show it is explained.
+    void reportPastedItem()
+    {
+        ui::View *view = window_.view();
+        const QRectF visible = view->mapToScene(view->viewport()->rect()).boundingRect();
+        out() << "visible scene rect: " << visible.x() << "," << visible.y() << " "
+              << visible.width() << "x" << visible.height() << "\n";
+        for (ui::SceneItem *item : window_.scene()->selectedItemViews()) {
+            const QRectF rect = item->sceneBoundingRect();
+            out() << "selected item rect: " << rect.x() << "," << rect.y() << " "
+                  << rect.width() << "x" << rect.height()
+                  << " intersects=" << (rect.intersects(visible) ? "yes" : "no")
+                  << " z=" << item->zValue() << "\n";
+        }
+        out().flush();
+    }
+
+    void snapshot(const QString &name)
+    {
+        const QString path = outputDir_ + QLatin1Char('/') + name + QStringLiteral(".png");
+        const ui::View *view = window_.view();
+        const QRectF visible = view->mapToScene(view->viewport()->rect()).boundingRect();
+        const QRectF sceneRect = view->scene()->sceneRect();
+        out() << name << " scale=" << QString::number(view->transform().m11(), 'f', 4)
+              << " centre=" << QString::number(visible.center().x(), 'f', 0) << ","
+              << QString::number(visible.center().y(), 'f', 0)
+              << " sceneRect=" << QString::number(sceneRect.x(), 'f', 0) << ","
+              << QString::number(sceneRect.y(), 'f', 0) << " "
+              << QString::number(sceneRect.width(), 'f', 0) << "x"
+              << QString::number(sceneRect.height(), 'f', 0)
+              << " hscroll=" << view->horizontalScrollBar()->value() << "/"
+              << view->horizontalScrollBar()->maximum() << " -> " << path << "\n";
+        window_.grab().save(path);
+        out().flush();
+    }
+
+    ui::MainWindow &window_;
+    QString outputDir_;
+};
+
+} // namespace
+
+int main(int argc, char *argv[])
+{
+    util::configureAllocator();
+    QApplication app(argc, argv);
+    QCoreApplication::setApplicationName(QStringLiteral("BeeXRef"));
+
+    const QStringList arguments = QCoreApplication::arguments().mid(1);
+    const QString board = arguments.value(0);
+    const QString outputDir = arguments.value(1, QStringLiteral("/tmp/opencode/ui-smoke"));
+
+    // Keep the run out of the user's real settings and cache.
+    settings::setSettingsDir(outputDir + QStringLiteral("/settings"));
+
+    ui::MainWindow window;
+    if (!board.isEmpty() && !window.openBoard(board)) {
+        out() << "could not open " << board << "\n";
+        return 1;
+    }
+
+    Smoke smoke(window, outputDir);
+    return smoke.run() ? 0 : 1;
+}

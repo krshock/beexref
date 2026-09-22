@@ -38,9 +38,6 @@ public:
     // Bounding rect of the selected items, in scene coordinates.
     QRectF selectionBounds() const;
 
-    // Keeps the scene rect in sync with the item bounds.
-    void updateSceneRect();
-
 signals:
     // The set of canvas items changed (document replaced, items added or
     // removed by commands).

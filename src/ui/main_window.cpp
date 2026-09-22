@@ -100,7 +100,8 @@ MainWindow::MainWindow(bool cacheDisabled, QWidget *parent)
     undoAction->setShortcut(QKeySequence::Undo);
     connect(undoAction, &QAction::triggered, this, [this]() { applyHistoryStep(true); });
     auto *redoAction = editMenu->addAction(QStringLiteral("&Redo"));
-    redoAction->setShortcut(QKeySequence::Redo);
+    // The reference binds redo to Ctrl+Shift+Z on every platform.
+    redoAction->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_Z));
     connect(redoAction, &QAction::triggered, this, [this]() { applyHistoryStep(false); });
     editMenu->addSeparator();
     auto *cutAction = editMenu->addAction(QStringLiteral("Cu&t"));

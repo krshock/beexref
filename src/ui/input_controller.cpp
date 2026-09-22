@@ -20,6 +20,8 @@ namespace ui {
 namespace {
 
 constexpr double kInsertGap = 0.0;
+// Inserted items go above everything, as the reference does.
+constexpr double kZStep = 0.001;
 
 bool isRemote(const QUrl &url)
 {
@@ -157,6 +159,16 @@ void InputController::insertItems(QVector<doc::ItemPtr> items, const QPointF &sc
     logging::info(QStringLiteral("Inserted items"),
                   {{QStringLiteral("count"), items.size()},
                    {QStringLiteral("reason"), text}});
+
+    // Bring the new items to the front (stored on the items, so undo
+    // and redo keep the stacking).
+    double maxZ = 0;
+    for (const SceneItem *view : scene_->itemViews())
+        maxZ = qMax(maxZ, view->item()->z);
+    for (const doc::ItemPtr &item : items) {
+        maxZ += kZStep;
+        item->z = maxZ;
+    }
 
     undoStack_->beginMacro(text);
     undoStack_->push(std::make_unique<doc::AddItemsCommand>(items, text));

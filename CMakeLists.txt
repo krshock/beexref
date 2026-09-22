@@ -106,6 +106,12 @@ qt_add_executable(beexref-boardcheck tools/boardcheck/main.cpp)
 target_link_libraries(beexref-boardcheck PRIVATE beexref_core)
 beexref_set_warnings(beexref-boardcheck)
 
+# Offscreen UI smoke harness: drives the real window with in-process
+# events and writes screenshots; never touches the window system.
+qt_add_executable(beexref-ui-smoke tools/ui_smoke/main.cpp)
+target_link_libraries(beexref-ui-smoke PRIVATE beexref_core Qt6::Test)
+beexref_set_warnings(beexref-ui-smoke)
+
 include(CheckIPOSupported)
 check_ipo_supported(RESULT beexref_ipo_supported OUTPUT beexref_ipo_error)
 if(beexref_ipo_supported)

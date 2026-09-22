@@ -67,6 +67,9 @@ protected:
 private:
     void panBy(const QPoint &delta);
     void updateViewState();
+    // Items bbox expanded by one viewport per side: the scrollable
+    // area that makes the canvas feel infinite.
+    void recalculateSceneRect();
     void beginInteraction();
     void restoreSmoothing();
     double zoomExtent(bool maximum) const;
@@ -79,6 +82,7 @@ private:
 
     bool panning_ = false;
     QPoint panStart_;
+    bool sceneRectValid_ = false;
     bool moving_ = false;
     bool moveStarted_ = false;
     QPoint pressPos_;

@@ -8,8 +8,6 @@
 namespace ui {
 namespace {
 
-constexpr double kSceneMargin = 100.0;
-
 } // namespace
 
 Scene::Scene(QObject *parent)
@@ -61,7 +59,6 @@ void Scene::syncDocument()
         }
         view->applyModelState();
     }
-    updateSceneRect();
     emit itemsChanged();
 }
 
@@ -128,16 +125,6 @@ QRectF Scene::selectionBounds() const
                                  : bounds.united(item->sceneBoundingRect());
     }
     return bounds;
-}
-
-void Scene::updateSceneRect()
-{
-    const QRectF bounds = itemsBoundingRect();
-    if (bounds.isEmpty()) {
-        setSceneRect(QRectF());
-        return;
-    }
-    setSceneRect(bounds.adjusted(-kSceneMargin, -kSceneMargin, kSceneMargin, kSceneMargin));
 }
 
 } // namespace ui
