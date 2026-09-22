@@ -1,5 +1,6 @@
 #include "scene_item.h"
 
+#include "rendering.h"
 #include "theme.h"
 
 #include <QFontMetricsF>
@@ -7,6 +8,7 @@
 #include <QStyle>
 #include <QStyleOptionGraphicsItem>
 
+#include <cmath>
 #include <utility>
 
 namespace ui {
@@ -185,7 +187,13 @@ void SceneItem::syncPositionToModel()
 
 void SceneItem::paint(QPainter *painter, const QStyleOptionGraphicsItem *option, QWidget *)
 {
-    painter->setRenderHint(QPainter::SmoothPixmapTransform, true);
+    // Stated unconditionally: painter state leaks between items in a
+    // paint pass. Smoothing is off during interactions (repaints skip
+    // the filter) and when zoomed in past 2x, so pixel sprites stay
+    // crisp, as in the reference.
+    const bool smooth = rendering::smoothPixmaps() && !rendering::smoothingSuspended()
+        && std::abs(painter->combinedTransform().m11()) < 2.0;
+    painter->setRenderHint(QPainter::SmoothPixmapTransform, smooth);
 
     if (isPixmap() && !failed_) {
         const QRectF bounds = imageBounds();

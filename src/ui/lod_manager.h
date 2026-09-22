@@ -81,6 +81,7 @@ public:
         int evals = 0;
         int releases = 0;
         int pending = 0;
+        int cancelled = 0;
     };
     Stats stats() const;
 
@@ -112,6 +113,7 @@ private:
     void releaseMemory();
     void onLevelReady(quint64 requestId, const QImage &image);
     void onLevelFailed(quint64 requestId);
+    void onLevelCancelled(quint64 requestId);
 
     Scene *scene_ = nullptr;
     LevelLoader *loader_ = nullptr;
@@ -134,6 +136,7 @@ private:
     int requests_ = 0;
     int evals_ = 0;
     int releases_ = 0;
+    int cancelled_ = 0;
 };
 
 } // namespace ui

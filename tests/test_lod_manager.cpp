@@ -57,6 +57,7 @@ private slots:
     void singleMethodLoadsFullSize();
     void undoWhileLevelDecodes();
     void cacheServesLevelsWithoutDecoding();
+    void coalescesBurstsPerItem();
 };
 
 void TestLodManager::defersUpgradesUntilInteraction()
@@ -256,6 +257,30 @@ void TestLodManager::cacheServesLevelsWithoutDecoding()
     loader.request(2, emptySource, QSize(20, 10), QStringLiteral("smooth"),
                    QStringLiteral("missing"));
     QTRY_COMPARE_WITH_TIMEOUT(failed.count(), 1, 5000);
+}
+
+void TestLodManager::coalescesBurstsPerItem()
+{
+    // A zoom burst posts one request per step; the worker must decode
+    // only the latest one, as the reference worker does.
+    ui::LevelLoader loader;
+    QSignalSpy ready(&loader, &ui::LevelLoader::levelReady);
+    QSignalSpy failed(&loader, &ui::LevelLoader::levelFailed);
+    QSignalSpy cancelled(&loader, &ui::LevelLoader::levelCancelled);
+
+    auto source = std::make_shared<doc::BytesSource>(makePng(400, 300, Qt::darkBlue));
+    for (quint64 requestId = 1; requestId <= 6; ++requestId) {
+        loader.request(requestId, source, QSize(40 * int(requestId), 30 * int(requestId)),
+                       QStringLiteral("fast"), QString(), QStringLiteral("item-uuid"));
+    }
+
+    QTRY_COMPARE_WITH_TIMEOUT(ready.count() + failed.count() + cancelled.count(), 6, 15000);
+    QCOMPARE(failed.count(), 0);
+    // The final request always runs; earlier ones are dropped, except
+    // for one that may already have been decoding when the burst began.
+    QVERIFY(ready.count() >= 1);
+    QCOMPARE(ready.last().at(0).toULongLong(), quint64(6));
+    QVERIFY(cancelled.count() >= 4);
 }
 
 QTEST_MAIN(TestLodManager)

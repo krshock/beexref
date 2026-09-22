@@ -50,6 +50,7 @@ void LodManager::setLoader(LevelLoader *loader)
         loader_->setLevelCache(levelCache_);
         connect(loader_, &LevelLoader::levelReady, this, &LodManager::onLevelReady);
         connect(loader_, &LevelLoader::levelFailed, this, &LodManager::onLevelFailed);
+        connect(loader_, &LevelLoader::levelCancelled, this, &LodManager::onLevelCancelled);
     }
 }
 
@@ -295,7 +296,8 @@ void LodManager::requestLevel(SceneItem *item, double fraction)
     inFlight_.insert(item, requestId);
 
     loader_->request(requestId, item->item()->source, item->levelSizeFor(fraction),
-                     settings_.quality, cacheKey(item, fraction));
+                     settings_.quality, cacheKey(item, fraction),
+                     item->item()->ensureUuid());
 }
 
 void LodManager::cancelLevel(SceneItem *item)
@@ -347,6 +349,19 @@ void LodManager::onLevelFailed(quint64 requestId)
                         {QStringLiteral("fraction"), pending.fraction}});
 }
 
+void LodManager::onLevelCancelled(quint64 requestId)
+{
+    // Superseded by a newer request for the same item: drop the state
+    // without counting a failure.
+    const auto it = pending_.find(requestId);
+    if (it == pending_.end())
+        return;
+    const Pending pending = it.value();
+    pending_.erase(it);
+    inFlight_.remove(pending.item);
+    ++cancelled_;
+}
+
 void LodManager::scheduleRelease()
 {
     releaseTimer_.start();
@@ -375,6 +390,7 @@ LodManager::Stats LodManager::stats() const
     stats.evals = evals_;
     stats.releases = releases_;
     stats.pending = static_cast<int>(pending_.size());
+    stats.cancelled = cancelled_;
     stats.items = scene_ ? scene_->pixmapItemViews().size() : 0;
     if (!scene_)
         return stats;
@@ -412,6 +428,7 @@ void LodManager::logAudit(const QString &label)
         {QStringLiteral("evals"), sample.evals},
         {QStringLiteral("releases"), sample.releases},
         {QStringLiteral("pending"), sample.pending},
+        {QStringLiteral("cancelled"), sample.cancelled},
     };
     if (previousAt.isValid()) {
         attrs.append({QStringLiteral("since_ms"),

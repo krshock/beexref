@@ -67,6 +67,8 @@ protected:
 private:
     void panBy(const QPoint &delta);
     void updateViewState();
+    void beginInteraction();
+    void restoreSmoothing();
     double zoomExtent(bool maximum) const;
 
     LevelLoader *loader_ = nullptr;

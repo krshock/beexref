@@ -15,6 +15,7 @@
 #include "settings.h"
 #include "ui/input_controller.h"
 #include "ui/main_window.h"
+#include "ui/rendering.h"
 #include "ui/scene.h"
 #include "ui/scene_item.h"
 #include "ui/view.h"
@@ -83,6 +84,7 @@ private slots:
     void wheelPanAxesMatchReference();
     void windowOpensBoardAndLoadsLevel();
     void newWindowHasUnsavedDocument();
+    void smoothingSuspendsDuringInteraction();
 };
 
 void TestUiScene::buildsItemsFromDocument()
@@ -366,6 +368,39 @@ void TestUiScene::newWindowHasUnsavedDocument()
 
     QCOMPARE(window.scene()->pixmapItemViews().size(), 1);
     QVERIFY(window.scene()->document()->isModified());
+}
+
+void TestUiScene::smoothingSuspendsDuringInteraction()
+{
+    // Repaints during drag/pan/zoom skip the bilinear filter and the
+    // filter returns when the input settles, as in the reference.
+    auto document = std::make_shared<doc::Document>(doc::Document::create());
+    document->addItem(pixmapItem(2000, 1000, Qt::gray));
+
+    ui::View view;
+    auto *scene = new ui::Scene(&view);
+    scene->setDocument(document);
+    view.setBoardScene(scene);
+    view.resize(400, 300);
+    view.fitScene();
+
+    // Test hygiene: a view destroyed right after a wheel event can
+    // leave the transient flag set, since its restore timer dies with
+    // it. The app's single view lives on, so this is test-only.
+    ui::rendering::setSmoothingSuspended(false);
+    QVERIFY(!ui::rendering::smoothingSuspended());
+
+    sendWheel(view.viewport(), view.viewport()->rect().center(), 120, Qt::NoModifier);
+    QVERIFY(ui::rendering::smoothingSuspended());
+    QTRY_VERIFY_WITH_TIMEOUT(!ui::rendering::smoothingSuspended(), 2000);
+
+    const QPoint center = view.viewport()->rect().center();
+    sendMouse(view.viewport(), QEvent::MouseButtonPress, center, Qt::MiddleButton,
+              Qt::MiddleButton);
+    QVERIFY(ui::rendering::smoothingSuspended());
+    sendMouse(view.viewport(), QEvent::MouseButtonRelease, center, Qt::MiddleButton,
+              Qt::NoButton);
+    QVERIFY(!ui::rendering::smoothingSuspended());
 }
 
 QTEST_MAIN(TestUiScene)

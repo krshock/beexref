@@ -2,7 +2,9 @@
 
 #include "doc/source.h"
 
+#include <QHash>
 #include <QImage>
+#include <QMutex>
 #include <QObject>
 #include <QSize>
 #include <QThread>
@@ -39,8 +41,12 @@ public:
     // result. targetSize is the wanted pixel size (aspect preserved);
     // quality is "fast" (single step) or "smooth" (progressive halving).
     // cacheKey names the level in the session cache; empty disables it.
+    // coalesceKey identifies the item: a newer request for the same key
+    // supersedes a queued one, so a zoom burst decodes only the latest
+    // fraction, as the reference worker does.
     void request(quint64 requestId, doc::SourcePtr source, const QSize &targetSize,
-                 const QString &quality, const QString &cacheKey = {});
+                 const QString &quality, const QString &cacheKey = {},
+                 const QString &coalesceKey = {});
 
     // Stops the worker thread and drops pending requests. Must be
     // called before the documents the sources read from are closed.
@@ -55,10 +61,19 @@ public:
 signals:
     void levelReady(quint64 requestId, const QImage &image);
     void levelFailed(quint64 requestId);
+    // The request was superseded by a newer one for the same item.
+    void levelCancelled(quint64 requestId);
 
 private:
+    struct Shared
+    {
+        QMutex mutex;
+        QHash<QString, quint64> latest;
+    };
+
     QThread thread_;
     QObject worker_;
+    std::shared_ptr<Shared> shared_ = std::make_shared<Shared>();
     std::shared_ptr<cache::SessionCache> cache_;
     bool shutdown_ = false;
 };

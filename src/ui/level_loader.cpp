@@ -6,8 +6,10 @@
 
 #include <QBuffer>
 #include <QCoreApplication>
+#include <QHash>
 #include <QImageReader>
 #include <QMetaObject>
+#include <QMutex>
 
 #include <utility>
 
@@ -81,14 +83,30 @@ void LevelLoader::setLevelCache(std::shared_ptr<cache::SessionCache> cache)
 }
 
 void LevelLoader::request(quint64 requestId, doc::SourcePtr source, const QSize &targetSize,
-                          const QString &quality, const QString &cacheKey)
+                          const QString &quality, const QString &cacheKey,
+                          const QString &coalesceKey)
 {
     if (shutdown_)
         return;
+    if (!coalesceKey.isEmpty()) {
+        QMutexLocker locker(&shared_->mutex);
+        shared_->latest.insert(coalesceKey, requestId);
+    }
     const auto cache = cache_;
+    const auto shared = shared_;
     QMetaObject::invokeMethod(
         &worker_,
-        [this, requestId, source = std::move(source), targetSize, quality, cacheKey, cache]() {
+        [this, requestId, source = std::move(source), targetSize, quality, cacheKey, coalesceKey,
+         cache, shared]() {
+            // A newer request for the same item supersedes this one; it
+            // is dropped before any decode work happens.
+            if (!coalesceKey.isEmpty()) {
+                QMutexLocker locker(&shared->mutex);
+                if (shared->latest.value(coalesceKey) != requestId) {
+                    emit levelCancelled(requestId);
+                    return;
+                }
+            }
             QImage image;
             const bool cacheable =
                 cache && cache->isAvailable() && !cacheKey.isEmpty() && targetSize.isValid()
@@ -135,6 +153,10 @@ void LevelLoader::shutdown()
     if (shutdown_)
         return;
     shutdown_ = true;
+    {
+        QMutexLocker locker(&shared_->mutex);
+        shared_->latest.clear();
+    }
     thread_.quit();
     thread_.wait();
     // Requests queued while the event loop was winding down are of no

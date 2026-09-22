@@ -74,6 +74,8 @@ qt_add_library(beexref_core STATIC
     src/ui/scene.h
     src/ui/scene_item.cpp
     src/ui/scene_item.h
+    src/ui/rendering.cpp
+    src/ui/rendering.h
     src/ui/theme.h
     src/ui/view.cpp
     src/ui/view.h

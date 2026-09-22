@@ -1,10 +1,12 @@
 #include "view.h"
 
 #include "lod_manager.h"
+#include "rendering.h"
 #include "theme.h"
 
 #include "doc/undo.h"
 
+#include <QApplication>
 #include <QDragEnterEvent>
 #include <QDragMoveEvent>
 #include <QDropEvent>
@@ -72,6 +74,22 @@ void View::updateViewState()
     if (!scene())
         return;
     lod_->setViewState(mapToScene(viewport()->rect()).boundingRect(), transform().m11());
+}
+
+void View::beginInteraction()
+{
+    rendering::setSmoothingSuspended(true);
+}
+
+void View::restoreSmoothing()
+{
+    if (QApplication::mouseButtons() != Qt::NoButton) {
+        // A drag is still in progress; the release event restores
+        // smoothing.
+        return;
+    }
+    rendering::setSmoothingSuspended(false);
+    viewport()->update();
 }
 
 void View::panBy(const QPoint &delta)
@@ -149,6 +167,8 @@ void View::wheelEvent(QWheelEvent *event)
         return;
     }
     const Qt::KeyboardModifiers modifiers = event->modifiers();
+    beginInteraction();
+    QTimer::singleShot(150, this, [this]() { restoreSmoothing(); });
     // The reference maps Shift (pan_horizontal) to the vertical
     // scrollbar and Shift+Ctrl (pan_vertical) to the horizontal one,
     // and pans by half the wheel delta. Kept for parity.
@@ -169,6 +189,7 @@ void View::wheelEvent(QWheelEvent *event)
 
 void View::mousePressEvent(QMouseEvent *event)
 {
+    beginInteraction();
     lod_->evaluateNow();
 
     if (event->button() == Qt::MiddleButton) {
@@ -250,6 +271,8 @@ void View::mouseMoveEvent(QMouseEvent *event)
 
 void View::mouseReleaseEvent(QMouseEvent *event)
 {
+    restoreSmoothing();
+
     if (panning_ && event->button() == Qt::MiddleButton) {
         panning_ = false;
         event->accept();
