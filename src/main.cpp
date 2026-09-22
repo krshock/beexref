@@ -1,11 +1,12 @@
 #include <QApplication>
 #include <QCommandLineOption>
 #include <QCommandLineParser>
-#include <QMainWindow>
 
+#include "board/board.h"
 #include "constants.h"
 #include "logging.h"
 #include "settings.h"
+#include "ui/main_window.h"
 
 namespace {
 
@@ -58,17 +59,14 @@ int main(int argc, char *argv[])
     logging::info(QStringLiteral("Starting"),
                   {{QStringLiteral("name"), QString::fromLatin1(constants::AppName)},
                    {QStringLiteral("version"), QString::fromLatin1(constants::Version)}});
+    board::sweepStaleTempFiles(settings::cacheDir());
 
-    QMainWindow window;
-    window.setWindowTitle(QString::fromLatin1(constants::AppName));
-    window.resize(500, 300);
+    ui::MainWindow window;
     window.show();
 
     const QStringList files = parser.positionalArguments();
-    if (!files.isEmpty()) {
-        logging::info(QStringLiteral("Board file requested"),
-                      {{QStringLiteral("file"), files.first()}});
-    }
+    if (!files.isEmpty())
+        window.openBoard(files.first());
 
     return app.exec();
 }

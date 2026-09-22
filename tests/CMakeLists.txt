@@ -49,3 +49,13 @@ qt_add_executable(test_doc_undo test_doc_undo.cpp)
 target_link_libraries(test_doc_undo PRIVATE beexref_core Qt6::Test)
 beexref_set_warnings(test_doc_undo)
 add_test(NAME doc_undo COMMAND test_doc_undo)
+
+qt_add_executable(test_ui_scene test_ui_scene.cpp)
+target_link_libraries(test_ui_scene PRIVATE beexref_core Qt6::Test)
+beexref_set_warnings(test_ui_scene)
+add_test(NAME ui_scene COMMAND test_ui_scene)
+
+qt_add_executable(test_util test_util.cpp)
+target_link_libraries(test_util PRIVATE beexref_core Qt6::Test)
+beexref_set_warnings(test_util)
+add_test(NAME util COMMAND test_util)

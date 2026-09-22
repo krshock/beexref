@@ -51,12 +51,30 @@ qt_add_library(beexref_core STATIC
     src/logging.cpp
     src/logging.h
     src/settings.cpp
-    src/settings.h)
+    src/settings.h
+    src/ui/level_loader.cpp
+    src/ui/level_loader.h
+    src/ui/main_window.cpp
+    src/ui/main_window.h
+    src/ui/scene.cpp
+    src/ui/scene.h
+    src/ui/scene_item.cpp
+    src/ui/scene_item.h
+    src/ui/theme.h
+    src/ui/view.cpp
+    src/ui/view.h
+    src/util/format.cpp
+    src/util/format.h
+    src/util/memory.cpp
+    src/util/memory.h)
 target_include_directories(beexref_core PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>)
 target_link_libraries(beexref_core
     PUBLIC Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Svg Qt6::Network Threads::Threads
     PRIVATE beexref_sqlite3)
+if(WIN32)
+    target_link_libraries(beexref_core PRIVATE psapi)
+endif()
 beexref_set_warnings(beexref_core)
 
 qt_add_executable(beexref src/main.cpp)
