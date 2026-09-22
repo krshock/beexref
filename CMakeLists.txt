@@ -40,6 +40,14 @@ qt_add_library(beexref_core STATIC
     src/board/write.cpp
     src/board/write.h
     src/constants.h
+    src/doc/document.cpp
+    src/doc/document.h
+    src/doc/item.cpp
+    src/doc/item.h
+    src/doc/source.cpp
+    src/doc/source.h
+    src/doc/undo.cpp
+    src/doc/undo.h
     src/logging.cpp
     src/logging.h
     src/settings.cpp

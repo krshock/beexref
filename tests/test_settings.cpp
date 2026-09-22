@@ -15,6 +15,8 @@ private slots:
     void recentFilesOrderAndLimit();
     void recentFilesExistingOnly();
     void portablePaths();
+    void fieldsDefaultsAndCasts();
+    void fieldsChangedAndRestore();
 };
 
 void TestSettings::missingFileUsesDefaults()
@@ -151,6 +153,71 @@ void TestSettings::portablePaths()
     QVERIFY(settings::configDir().endsWith(QStringLiteral("/BeeXRef")));
     QVERIFY(settings::iniPath().endsWith(QStringLiteral("/BeeXRef/BeeXRef.ini")));
     QVERIFY(settings::cacheDir().endsWith(QStringLiteral("/BeeXRef")));
+}
+
+void TestSettings::fieldsDefaultsAndCasts()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+
+    settings::File file(dir.filePath(QStringLiteral("fields.ini")));
+    file.load();
+
+    // Missing values yield the defaults from the FIELDS table.
+    QCOMPARE(settings::valueOrDefault(file, QStringLiteral("Items/lod_method")).toString(),
+             QStringLiteral("fixed"));
+    QCOMPARE(settings::valueOrDefault(file, QStringLiteral("Items/lod_ram_budget_mb")).toInt(),
+             1024);
+    QCOMPARE(settings::valueOrDefault(file, QStringLiteral("Items/lod_store_thumbnails")).toBool(),
+             true);
+    QCOMPARE(settings::valueOrDefault(file, QStringLiteral("Items/arrange_gap")).toInt(), 0);
+
+    file.setValue(QStringLiteral("Items"), QStringLiteral("lod_method"),
+                  QStringLiteral("ram_budget"));
+    QCOMPARE(settings::valueOrDefault(file, QStringLiteral("Items/lod_method")).toString(),
+             QStringLiteral("ram_budget"));
+
+    // Failed casts and validation fall back to the default.
+    file.setValue(QStringLiteral("Items"), QStringLiteral("lod_method"), QStringLiteral("bogus"));
+    QCOMPARE(settings::valueOrDefault(file, QStringLiteral("Items/lod_method")).toString(),
+             QStringLiteral("fixed"));
+    file.setValue(QStringLiteral("Items"), QStringLiteral("image_allocation_limit"),
+                  QStringLiteral("not-a-number"));
+    QCOMPARE(settings::valueOrDefault(file, QStringLiteral("Items/image_allocation_limit")).toInt(),
+             256);
+    file.setValue(QStringLiteral("Items"), QStringLiteral("arrange_gap"), QStringLiteral("500"));
+    QCOMPARE(settings::valueOrDefault(file, QStringLiteral("Items/arrange_gap")).toInt(), 0);
+    file.setValue(QStringLiteral("Items"), QStringLiteral("lod_ram_budget_mb"),
+                  QStringLiteral("0"));
+    QCOMPARE(settings::valueOrDefault(file, QStringLiteral("Items/lod_ram_budget_mb")).toInt(),
+             1024);
+
+    file.setValue(QStringLiteral("Items"), QStringLiteral("lod_store_thumbnails"),
+                  QStringLiteral("false"));
+    QCOMPARE(settings::valueOrDefault(file, QStringLiteral("Items/lod_store_thumbnails")).toBool(),
+             false);
+    file.setValue(QStringLiteral("Items"), QStringLiteral("lod_store_thumbnails"),
+                  QStringLiteral("yes"));
+    QCOMPARE(settings::valueOrDefault(file, QStringLiteral("Items/lod_store_thumbnails")).toBool(),
+             true);
+}
+
+void TestSettings::fieldsChangedAndRestore()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+
+    settings::File file(dir.filePath(QStringLiteral("changed.ini")));
+    file.load();
+    file.setValue(QStringLiteral("Items"), QStringLiteral("lod_quality"), QStringLiteral("fast"));
+    QVERIFY(settings::valueChanged(file, QStringLiteral("Items/lod_quality")));
+    QVERIFY(!settings::valueChanged(file, QStringLiteral("Items/lod_method")));
+
+    settings::restoreDefaults(file);
+    QVERIFY(!file.contains(QStringLiteral("Items"), QStringLiteral("lod_quality")));
+    QVERIFY(!settings::valueChanged(file, QStringLiteral("Items/lod_quality")));
+    QCOMPARE(settings::valueOrDefault(file, QStringLiteral("Items/lod_quality")).toString(),
+             QStringLiteral("smooth"));
 }
 
 QTEST_GUILESS_MAIN(TestSettings)

@@ -3,6 +3,10 @@
 #include <QMap>
 #include <QString>
 #include <QStringList>
+#include <QVariant>
+#include <QVector>
+
+#include <functional>
 
 namespace settings {
 
@@ -50,5 +54,26 @@ private:
     QString path_;
     QMap<QString, QMap<QString, QString>> sections_;
 };
+
+// One configurable setting, mirroring the reference's FIELDS table.
+struct FieldSpec
+{
+    QString key; // "Section/key"
+    QVariant defaultValue;
+    std::function<QVariant(const QVariant &)> cast;    // optional
+    std::function<bool(const QVariant &)> validate;    // optional
+};
+
+const QVector<FieldSpec> &fields();
+
+// Typed value with the reference's semantics: a missing value or a
+// failed cast/validation yields the default.
+QVariant valueOrDefault(const File &file, const QString &key);
+
+// Whether the value differs from its default.
+bool valueChanged(const File &file, const QString &key);
+
+// Removes every field, restoring defaults; the caller syncs the file.
+void restoreDefaults(File &file);
 
 } // namespace settings

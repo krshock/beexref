@@ -1,0 +1,240 @@
+#include "document.h"
+
+#include <QBuffer>
+#include <QImageReader>
+#include <QJsonDocument>
+
+#include <utility>
+
+namespace doc {
+namespace {
+
+QJsonObject parseJsonObject(const QString &text)
+{
+    if (text.isEmpty())
+        return {};
+    const QJsonDocument document = QJsonDocument::fromJson(text.toUtf8());
+    return document.isObject() ? document.object() : QJsonObject();
+}
+
+QString jsonString(const QJsonObject &object)
+{
+    return QString::fromUtf8(QJsonDocument(object).toJson(QJsonDocument::Compact));
+}
+
+QSize headerSize(const QByteArray &bytes)
+{
+    QBuffer buffer;
+    buffer.setData(bytes);
+    if (!buffer.open(QIODevice::ReadOnly))
+        return {};
+    QImageReader reader(&buffer);
+    return reader.size();
+}
+
+} // namespace
+
+Document::~Document()
+{
+    close();
+}
+
+Document::Document(Document &&other) noexcept
+    : path_(std::move(other.path_))
+    , items_(std::move(other.items_))
+    , modified_(other.modified_)
+    , board_(std::move(other.board_))
+{
+    other.modified_ = false;
+}
+
+Document &Document::operator=(Document &&other) noexcept
+{
+    if (this == &other)
+        return *this;
+    close();
+    path_ = std::move(other.path_);
+    items_ = std::move(other.items_);
+    modified_ = other.modified_;
+    board_ = std::move(other.board_);
+    other.modified_ = false;
+    return *this;
+}
+
+board::Result<Document> Document::open(const QString &path, const QString &tempDir,
+                                const board::Progress &progress)
+{
+    auto opened = board::Board::open(path, tempDir);
+    if (!opened)
+        return opened.error();
+    auto board = std::make_shared<board::Board>(opened.take());
+
+    auto rows = board->items();
+    if (!rows)
+        return rows.error();
+    const auto sizes = board->originalSizes(); // best-effort, like the Go port
+    const auto floors = board->floorLevels();
+
+    QVector<ItemPtr> items;
+    items.reserve(rows.value().size());
+    for (qsizetype i = 0; i < rows.value().size(); ++i) {
+        if (progress)
+            progress(static_cast<int>(i), static_cast<int>(rows.value().size()));
+        const board::ItemRow &row = rows.value().at(i);
+
+        auto item = std::make_shared<Item>(row.type);
+        item->id = row.id;
+        item->uuid = row.uuid;
+        item->x = row.x;
+        item->y = row.y;
+        item->z = row.z;
+        item->scale = row.scale;
+        item->rotation = row.rotation;
+        item->flip = static_cast<double>(row.flip);
+        item->data = parseJsonObject(row.data);
+        item->meta = parseJsonObject(row.meta);
+
+        if (item->isPixmap()) {
+            item->source = std::make_shared<BoardSource>(board, item->id);
+            if (sizes.isOk() && sizes.value().contains(item->id)) {
+                item->setOriginalSize(sizes.value().value(item->id));
+            } else if (auto blob = board->blob(item->id); blob.isOk()) {
+                item->setOriginalSize(headerSize(blob.value()));
+            }
+            if (floors.isOk() && floors.value().contains(item->id)) {
+                const board::FloorLevel &floor = floors.value().value(item->id);
+                item->floorData = floor.data;
+                item->floorFraction = floor.fraction;
+                item->floorFormat = floor.format;
+                if (item->format.isEmpty())
+                    item->format = floor.format;
+            }
+        }
+        items.append(std::move(item));
+    }
+    if (progress)
+        progress(static_cast<int>(rows.value().size()), static_cast<int>(rows.value().size()));
+
+    Document document;
+    document.path_ = path;
+    document.items_ = std::move(items);
+    document.board_ = std::move(board);
+    return document;
+}
+
+Document Document::create()
+{
+    return {};
+}
+
+void Document::addItem(const ItemPtr &item)
+{
+    items_.append(item);
+}
+
+void Document::insertItem(qsizetype index, const ItemPtr &item)
+{
+    items_.insert(qBound(qsizetype(0), index, items_.size()), item);
+}
+
+void Document::removeItem(const ItemPtr &item)
+{
+    const qsizetype index = indexOf(item);
+    if (index >= 0)
+        items_.remove(index);
+}
+
+qsizetype Document::indexOf(const Item &item) const
+{
+    for (qsizetype i = 0; i < items_.size(); ++i) {
+        if (items_.at(i).get() == &item)
+            return i;
+    }
+    return -1;
+}
+
+qsizetype Document::indexOf(const ItemPtr &item) const
+{
+    return indexOf(*item);
+}
+
+ItemPtr Document::itemById(qint64 id) const
+{
+    for (const ItemPtr &item : items_) {
+        if (item->id == id)
+            return item;
+    }
+    return {};
+}
+
+bool Document::hasBlob(const Item &item) const
+{
+    return item.hasSource();
+}
+
+board::Result<QByteArray> Document::blob(const Item &item) const
+{
+    if (!item.hasSource()) {
+        return board::Error{0,
+                     QStringLiteral("No readable encoded data for item %1").arg(item.id),
+                     path_};
+    }
+    QByteArray bytes = item.source->bytes();
+    if (bytes.isEmpty()) {
+        return board::Error{0,
+                     QStringLiteral("No readable encoded data for item %1").arg(item.id),
+                     path_};
+    }
+    return bytes;
+}
+
+board::Status Document::save(const QString &path, bool storeThumbnails,
+                      const board::Progress &progress) const
+{
+    QVector<board::Record> records;
+    records.reserve(items_.size());
+    for (const ItemPtr &item : items_) {
+        board::Record record;
+        record.saveId = item->id;
+        record.type = item->type;
+        record.x = item->x;
+        record.y = item->y;
+        record.z = item->z;
+        record.scale = item->scale;
+        record.rotation = item->rotation;
+        record.flip = item->flip;
+        record.dataJson = jsonString(item->data);
+        record.metaJson = jsonString(item->meta);
+        record.uuid = item->uuid;
+
+        if (item->isPixmap()) {
+            // Capture the immutable source, not the item: the writer may
+            // run on a worker while the document keeps changing.
+            const SourcePtr source = item->source;
+            if (source && source->isValid())
+                record.pixmapSource = [source]() { return source->bytes(); };
+            record.format = item->format;
+            record.filename = item->filename.isEmpty()
+                ? item->data.value(QStringLiteral("filename")).toString()
+                : item->filename;
+            record.floorData = item->floorData;
+            record.floorFraction = item->floorFraction;
+            record.floorFormat = item->floorFormat;
+            const QSize size = item->originalSize();
+            record.origW = size.width();
+            record.origH = size.height();
+        }
+        records.append(record);
+    }
+    return board::save(path, records, storeThumbnails, progress);
+}
+
+void Document::close()
+{
+    if (board_) {
+        board_->close();
+        board_.reset();
+    }
+}
+
+} // namespace doc

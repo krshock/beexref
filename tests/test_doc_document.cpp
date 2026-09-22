@@ -1,0 +1,271 @@
+#include <QBuffer>
+#include <QColor>
+#include <QImage>
+#include <QTemporaryDir>
+#include <QtTest>
+
+#include <atomic>
+#include <thread>
+
+#include "board/board.h"
+#include "doc/document.h"
+#include "doc/item.h"
+#include "doc/source.h"
+
+namespace {
+
+QByteArray makePng(int width, int height, const QColor &color)
+{
+    QImage image(width, height, QImage::Format_ARGB32);
+    image.fill(color);
+    QByteArray bytes;
+    QBuffer buffer(&bytes);
+    buffer.open(QIODevice::WriteOnly);
+    image.save(&buffer, "PNG");
+    return bytes;
+}
+
+doc::ItemPtr pixmapItem(const QByteArray &png)
+{
+    auto item = std::make_shared<doc::Item>(doc::kTypePixmap);
+    item->data.insert(QStringLiteral("filename"), QStringLiteral("x.png"));
+    item->meta.insert(QStringLiteral("author"), QStringLiteral("me"));
+    item->source = std::make_shared<doc::BytesSource>(png);
+    item->format = QStringLiteral("png");
+    item->filename = QStringLiteral("x.png");
+    item->setOriginalSize(QSize(300, 200));
+    return item;
+}
+
+} // namespace
+
+class TestDocument : public QObject
+{
+    Q_OBJECT
+
+private slots:
+    void savesAndReopensEveryField();
+    void reusesSavedFloors();
+    void reportsProgress();
+    void textItemRoundTrip();
+    void sourceStopsAfterClose();
+    void sourceIsReadableWhileItemsChange();
+    void openMissingFileFails();
+    void unsavedItemsGetIdsOnSave();
+};
+
+void TestDocument::savesAndReopensEveryField()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString path = dir.filePath(QStringLiteral("doc.beex"));
+
+    auto document = doc::Document::create();
+    const QByteArray png = makePng(300, 200, Qt::red);
+    doc::ItemPtr pixmap = pixmapItem(png);
+    pixmap->uuid = doc::newUuid();
+    pixmap->scale = 0.75;
+    pixmap->x = 12;
+    pixmap->y = 34;
+    pixmap->rotation = 90;
+    pixmap->flip = -1;
+    document.addItem(pixmap);
+
+    QVERIFY(document.save(path).isOk());
+
+    auto reopened = doc::Document::open(path, dir.filePath(QStringLiteral("cache")));
+    QVERIFY(reopened.isOk());
+    QCOMPARE(reopened.value().items().size(), 1);
+    const doc::ItemPtr item = reopened.value().items().first();
+    QCOMPARE(item->type, QString::fromLatin1(doc::kTypePixmap));
+    QCOMPARE(item->scale, 0.75);
+    QCOMPARE(item->x, 12.0);
+    QCOMPARE(item->y, 34.0);
+    QCOMPARE(item->rotation, 90.0);
+    QCOMPARE(item->flip, -1.0);
+    QCOMPARE(item->uuid, pixmap->uuid);
+    QCOMPARE(item->originalSize(), QSize(300, 200));
+    QCOMPARE(item->meta.value(QStringLiteral("author")).toString(), QStringLiteral("me"));
+    QCOMPARE(item->data.value(QStringLiteral("filename")).toString(), QStringLiteral("x.png"));
+    QVERIFY(item->floorFraction > 0);
+    QVERIFY(!item->floorData.isEmpty());
+    QVERIFY(item->hasSource());
+
+    auto blob = reopened.value().blob(*item);
+    QVERIFY(blob.isOk());
+    QCOMPARE(blob.value(), png);
+}
+
+void TestDocument::reusesSavedFloors()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString src = dir.filePath(QStringLiteral("src.beex"));
+    const QString out = dir.filePath(QStringLiteral("out.beex"));
+    const QString cacheDir = dir.filePath(QStringLiteral("cache"));
+
+    auto document = doc::Document::create();
+    document.addItem(pixmapItem(makePng(400, 300, Qt::blue)));
+    QVERIFY(document.save(src).isOk());
+    document.close();
+
+    auto reopened = doc::Document::open(src, cacheDir);
+    QVERIFY(reopened.isOk());
+    QVERIFY(!reopened.value().items().first()->floorData.isEmpty());
+    QVERIFY(reopened.value().save(out).isOk());
+
+    auto source = board::Board::open(src, cacheDir);
+    QVERIFY(source.isOk());
+    auto written = board::Board::open(out, cacheDir);
+    QVERIFY(written.isOk());
+    const auto expected = source.value().floorLevels();
+    const auto actual = written.value().floorLevels();
+    QCOMPARE(actual.value().size(), expected.value().size());
+    for (auto it = expected.value().cbegin(); it != expected.value().cend(); ++it) {
+        QVERIFY(actual.value().contains(it.key()));
+        const board::FloorLevel &want = it.value();
+        const board::FloorLevel &got = actual.value().value(it.key());
+        QCOMPARE(got.fraction, want.fraction);
+        QCOMPARE(got.format, want.format);
+        QCOMPARE(got.data, want.data);
+    }
+}
+
+void TestDocument::reportsProgress()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString path = dir.filePath(QStringLiteral("progress.beex"));
+
+    auto document = doc::Document::create();
+    for (int i = 0; i < 3; ++i)
+        document.addItem(pixmapItem(makePng(200, 150, Qt::green)));
+
+    QVector<QPair<int, int>> saveProgress;
+    QVERIFY(document
+                .save(path, true,
+                      [&saveProgress](int done, int total) { saveProgress.append({done, total}); })
+                .isOk());
+    QVERIFY(!saveProgress.isEmpty());
+    QCOMPARE(saveProgress.last(), qMakePair(3, 3));
+
+    QVector<QPair<int, int>> openProgress;
+    auto reopened = doc::Document::open(
+        path, dir.filePath(QStringLiteral("cache")),
+        [&openProgress](int done, int total) { openProgress.append({done, total}); });
+    QVERIFY(reopened.isOk());
+    QVERIFY(!openProgress.isEmpty());
+    QCOMPARE(openProgress.last(), qMakePair(3, 3));
+}
+
+void TestDocument::textItemRoundTrip()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString path = dir.filePath(QStringLiteral("text.beex"));
+
+    auto document = doc::Document::create();
+    auto text = std::make_shared<doc::Item>(doc::kTypeText);
+    text->x = 5;
+    text->y = 6;
+    text->setText(QStringLiteral("hello"));
+    document.addItem(text);
+    QVERIFY(document.save(path, false).isOk());
+
+    auto reopened = doc::Document::open(path, dir.filePath(QStringLiteral("cache")));
+    QVERIFY(reopened.isOk());
+    const doc::ItemPtr item = reopened.value().items().first();
+    QVERIFY(item->isText());
+    QCOMPARE(item->text(), QStringLiteral("hello"));
+    QCOMPARE(item->x, 5.0);
+    QVERIFY(!item->hasSource());
+}
+
+void TestDocument::sourceStopsAfterClose()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString path = dir.filePath(QStringLiteral("close.beex"));
+
+    auto document = doc::Document::create();
+    document.addItem(pixmapItem(makePng(200, 150, Qt::yellow)));
+    QVERIFY(document.save(path).isOk());
+    document.close();
+
+    auto reopened = doc::Document::open(path, dir.filePath(QStringLiteral("cache")));
+    QVERIFY(reopened.isOk());
+    const doc::ItemPtr item = reopened.value().items().first();
+    const doc::SourcePtr source = item->source;
+    QVERIFY(!source->bytes().isEmpty());
+
+    // The source keeps the board alive; closing it must not leave a
+    // dangling read behind.
+    reopened.value().close();
+    QVERIFY(source->bytes().isEmpty());
+}
+
+void TestDocument::sourceIsReadableWhileItemsChange()
+{
+    const QByteArray png = makePng(200, 150, Qt::magenta);
+    auto item = pixmapItem(png);
+    const doc::SourcePtr source = item->source;
+
+    std::atomic<int> mismatches{0};
+    const auto worker = [&source, &png, &mismatches]() {
+        for (int i = 0; i < 200; ++i) {
+            if (source->bytes() != png)
+                ++mismatches;
+        }
+    };
+
+    std::thread workerThread(worker);
+    for (int i = 0; i < 200; ++i) {
+        item->x = i;
+        item->scale = 1.0 + i;
+        item->setOpacity(0.5);
+        item->meta.insert(QStringLiteral("n"), i);
+    }
+    workerThread.join();
+    QCOMPARE(mismatches.load(), 0);
+}
+
+void TestDocument::openMissingFileFails()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    auto document = doc::Document::open(dir.filePath(QStringLiteral("missing.beex")),
+                                         dir.filePath(QStringLiteral("cache")));
+    QVERIFY(!document.isOk());
+    QVERIFY(!document.error().message.isEmpty());
+}
+
+void TestDocument::unsavedItemsGetIdsOnSave()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString path = dir.filePath(QStringLiteral("ids.beex"));
+
+    auto document = doc::Document::create();
+    const doc::ItemPtr first = pixmapItem(makePng(200, 150, Qt::red));
+    const doc::ItemPtr second = pixmapItem(makePng(200, 150, Qt::blue));
+    QCOMPARE(first->id, qint64(0));
+    document.addItem(first);
+    document.addItem(second);
+    QVERIFY(document.save(path).isOk());
+
+    auto reopened = doc::Document::open(path, dir.filePath(QStringLiteral("cache")));
+    QVERIFY(reopened.isOk());
+    QCOMPARE(reopened.value().items().at(0)->id, qint64(1));
+    QCOMPARE(reopened.value().items().at(1)->id, qint64(2));
+
+    // Saving again keeps the ids.
+    QVERIFY(reopened.value().save(path).isOk());
+    auto again = doc::Document::open(path, dir.filePath(QStringLiteral("cache")));
+    QVERIFY(again.isOk());
+    QCOMPARE(again.value().items().at(0)->id, qint64(1));
+    QCOMPARE(again.value().items().at(1)->id, qint64(2));
+}
+
+QTEST_GUILESS_MAIN(TestDocument)
+
+#include "test_doc_document.moc"

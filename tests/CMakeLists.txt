@@ -34,3 +34,18 @@ target_compile_definitions(test_boardcheck PRIVATE
     BOARDCHECK_PATH="$<TARGET_FILE:beexref-boardcheck>")
 beexref_set_warnings(test_boardcheck)
 add_test(NAME boardcheck COMMAND test_boardcheck)
+
+qt_add_executable(test_doc_item test_doc_item.cpp)
+target_link_libraries(test_doc_item PRIVATE beexref_core Qt6::Test)
+beexref_set_warnings(test_doc_item)
+add_test(NAME doc_item COMMAND test_doc_item)
+
+qt_add_executable(test_doc_document test_doc_document.cpp)
+target_link_libraries(test_doc_document PRIVATE beexref_core Qt6::Test)
+beexref_set_warnings(test_doc_document)
+add_test(NAME doc_document COMMAND test_doc_document)
+
+qt_add_executable(test_doc_undo test_doc_undo.cpp)
+target_link_libraries(test_doc_undo PRIVATE beexref_core Qt6::Test)
+beexref_set_warnings(test_doc_undo)
+add_test(NAME doc_undo COMMAND test_doc_undo)

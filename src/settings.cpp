@@ -226,4 +226,118 @@ void File::updateRecentFiles(const QString &filename)
     sync();
 }
 
+namespace {
+
+QString sectionOfKey(const QString &key)
+{
+    return key.left(key.indexOf(QLatin1Char('/')));
+}
+
+QString nameOfKey(const QString &key)
+{
+    return key.mid(key.indexOf(QLatin1Char('/')) + 1);
+}
+
+std::function<QVariant(const QVariant &)> boolCast()
+{
+    return [](const QVariant &value) -> QVariant {
+        bool parsed = false;
+        if (!parseBool(value.toString(), parsed))
+            return {};
+        return parsed;
+    };
+}
+
+std::function<QVariant(const QVariant &)> intCast()
+{
+    return [](const QVariant &value) -> QVariant {
+        bool ok = false;
+        const int number = value.toString().toInt(&ok);
+        return ok ? QVariant(number) : QVariant();
+    };
+}
+
+std::function<bool(const QVariant &)> oneOf(const QStringList &allowed)
+{
+    return [allowed](const QVariant &value) { return allowed.contains(value.toString()); };
+}
+
+std::function<bool(const QVariant &)> atLeast(int minimum)
+{
+    return [minimum](const QVariant &value) { return value.toInt() >= minimum; };
+}
+
+const FieldSpec *findField(const QString &key)
+{
+    for (const FieldSpec &field : fields()) {
+        if (field.key == key)
+            return &field;
+    }
+    return nullptr;
+}
+
+} // namespace
+
+const QVector<FieldSpec> &fields()
+{
+    static const QVector<FieldSpec> specs = {
+        {QStringLiteral("Save/confirm_close_unsaved"), true, boolCast(), nullptr},
+        {QStringLiteral("Items/image_storage_format"), QStringLiteral("best"), nullptr,
+         oneOf({QStringLiteral("png"), QStringLiteral("jpg"), QStringLiteral("best")})},
+        {QStringLiteral("Items/arrange_gap"), 0, intCast(),
+         [](const QVariant &value) { return value.toInt() >= 0 && value.toInt() <= 200; }},
+        {QStringLiteral("Items/arrange_default"), QStringLiteral("optimal"), nullptr,
+         oneOf({QStringLiteral("optimal"), QStringLiteral("horizontal"),
+                QStringLiteral("vertical"), QStringLiteral("square")})},
+        {QStringLiteral("Items/image_allocation_limit"), 256, intCast(), atLeast(0)},
+        {QStringLiteral("Items/lod_method"), QStringLiteral("fixed"), nullptr,
+         oneOf({QStringLiteral("single"), QStringLiteral("fixed"),
+                QStringLiteral("ram_budget")})},
+        {QStringLiteral("Items/lod_fractions"), QStringLiteral("1,0.5,0.25,0.125,0.0625"), nullptr,
+         [](const QVariant &value) { return !value.toString().isEmpty(); }},
+        {QStringLiteral("Items/lod_ram_budget_mb"), 1024, intCast(), atLeast(1)},
+        {QStringLiteral("Items/lod_quality"), QStringLiteral("smooth"), nullptr,
+         oneOf({QStringLiteral("fast"), QStringLiteral("smooth")})},
+        {QStringLiteral("Items/lod_store_thumbnails"), true, boolCast(), nullptr},
+        {QStringLiteral("Items/undo_cache"), true, boolCast(), nullptr},
+    };
+    return specs;
+}
+
+QVariant valueOrDefault(const File &file, const QString &key)
+{
+    const FieldSpec *field = findField(key);
+    if (!field)
+        return {};
+
+    const QString section = sectionOfKey(key);
+    const QString name = nameOfKey(key);
+    if (!file.contains(section, name))
+        return field->defaultValue;
+
+    QVariant value = file.value(section, name);
+    if (field->cast) {
+        value = field->cast(value);
+        if (!value.isValid())
+            return field->defaultValue;
+    }
+    if (field->validate && !field->validate(value))
+        return field->defaultValue;
+    return value;
+}
+
+bool valueChanged(const File &file, const QString &key)
+{
+    const FieldSpec *field = findField(key);
+    if (!field)
+        return false;
+    return valueOrDefault(file, key) != field->defaultValue;
+}
+
+void restoreDefaults(File &file)
+{
+    for (const FieldSpec &field : fields())
+        file.remove(sectionOfKey(field.key), nameOfKey(field.key));
+}
+
 } // namespace settings
