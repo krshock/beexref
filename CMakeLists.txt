@@ -30,11 +30,15 @@ target_compile_definitions(beexref_sqlite3 PRIVATE
 set_target_properties(beexref_sqlite3 PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 qt_add_library(beexref_core STATIC
+    src/board/board.cpp
+    src/board/board.h
     src/board/error.h
     src/board/schema.cpp
     src/board/schema.h
     src/board/sqlite.cpp
     src/board/sqlite.h
+    src/board/write.cpp
+    src/board/write.h
     src/constants.h
     src/logging.cpp
     src/logging.h
@@ -53,6 +57,10 @@ beexref_set_warnings(beexref)
 set_target_properties(beexref PROPERTIES
     WIN32_EXECUTABLE TRUE
     MACOSX_BUNDLE TRUE)
+
+qt_add_executable(beexref-boardcheck tools/boardcheck/main.cpp)
+target_link_libraries(beexref-boardcheck PRIVATE beexref_core)
+beexref_set_warnings(beexref-boardcheck)
 
 include(CheckIPOSupported)
 check_ipo_supported(RESULT beexref_ipo_supported OUTPUT beexref_ipo_error)

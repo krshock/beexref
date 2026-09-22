@@ -17,3 +17,20 @@ qt_add_executable(test_schema test_schema.cpp)
 target_link_libraries(test_schema PRIVATE beexref_core Qt6::Test)
 beexref_set_warnings(test_schema)
 add_test(NAME schema COMMAND test_schema)
+
+qt_add_executable(test_board test_board.cpp)
+target_link_libraries(test_board PRIVATE beexref_core Qt6::Test)
+beexref_set_warnings(test_board)
+add_test(NAME board COMMAND test_board)
+
+qt_add_executable(test_board_save test_board_save.cpp)
+target_link_libraries(test_board_save PRIVATE beexref_core Qt6::Test)
+beexref_set_warnings(test_board_save)
+add_test(NAME board_save COMMAND test_board_save)
+
+qt_add_executable(test_boardcheck test_boardcheck.cpp)
+target_link_libraries(test_boardcheck PRIVATE beexref_core Qt6::Test)
+target_compile_definitions(test_boardcheck PRIVATE
+    BOARDCHECK_PATH="$<TARGET_FILE:beexref-boardcheck>")
+beexref_set_warnings(test_boardcheck)
+add_test(NAME boardcheck COMMAND test_boardcheck)

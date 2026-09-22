@@ -55,12 +55,12 @@ constexpr const char *kLodTable = R"(
     )
 )";
 
-Status execScript(Database &db, const char *sql)
+Status execScript(Connection &db, const char *sql)
 {
     return db.execScript(QString::fromLatin1(sql));
 }
 
-Result<bool> hasColumn(Database &db, const QString &table, const QString &column)
+Result<bool> hasColumn(Connection &db, const QString &table, const QString &column)
 {
     auto statement = db.prepare(QStringLiteral("PRAGMA table_info(%1)").arg(table));
     if (!statement)
@@ -82,7 +82,7 @@ Result<bool> hasColumn(Database &db, const QString &table, const QString &column
 // Adds a column only when it is absent. Must be idempotent: a file
 // saved by an older app version may report a lower user_version while
 // already carrying the column.
-Status ensureColumn(Database &db, const QString &column, const QString &alter)
+Status ensureColumn(Connection &db, const QString &column, const QString &alter)
 {
     auto present = hasColumn(db, QStringLiteral("items"), column);
     if (!present)
@@ -92,7 +92,7 @@ Status ensureColumn(Database &db, const QString &column, const QString &alter)
     return db.exec(alter);
 }
 
-Status applyMigration(Database &db, int target)
+Status applyMigration(Connection &db, int target)
 {
     switch (target) {
     case 2:
@@ -117,7 +117,7 @@ Status applyMigration(Database &db, int target)
 
 } // namespace
 
-Status createTables(Database &db)
+Status createTables(Connection &db)
 {
     if (Status status = execScript(db, kItemsTable); !status)
         return status;
@@ -126,7 +126,7 @@ Status createTables(Database &db)
     return execScript(db, kLodTable);
 }
 
-Status writeHeader(Database &db, int userVersion, int applicationId)
+Status writeHeader(Connection &db, int userVersion, int applicationId)
 {
     if (Status status = db.exec(QStringLiteral("PRAGMA application_id=%1").arg(applicationId));
         !status)
@@ -134,7 +134,7 @@ Status writeHeader(Database &db, int userVersion, int applicationId)
     return db.exec(QStringLiteral("PRAGMA user_version=%1").arg(userVersion));
 }
 
-Result<int> readUserVersion(Database &db)
+Result<int> readUserVersion(Connection &db)
 {
     auto statement = db.prepare(QStringLiteral("PRAGMA user_version"));
     if (!statement)
@@ -148,7 +148,7 @@ Result<int> readUserVersion(Database &db)
     return static_cast<int>(statement.value().columnInt64(0));
 }
 
-Result<int> readApplicationId(Database &db)
+Result<int> readApplicationId(Connection &db)
 {
     auto statement = db.prepare(QStringLiteral("PRAGMA application_id"));
     if (!statement)
@@ -162,7 +162,7 @@ Result<int> readApplicationId(Database &db)
     return static_cast<int>(statement.value().columnInt64(0));
 }
 
-Result<bool> hasItemsTable(Database &db)
+Result<bool> hasItemsTable(Connection &db)
 {
     auto statement = db.prepare(QStringLiteral(
         "SELECT 1 FROM sqlite_master WHERE type='table' AND name='items'"));
@@ -174,7 +174,7 @@ Result<bool> hasItemsTable(Database &db)
     return row.value();
 }
 
-Status migrateToCurrent(Database &db)
+Status migrateToCurrent(Connection &db)
 {
     auto version = readUserVersion(db);
     if (!version)

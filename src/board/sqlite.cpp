@@ -15,49 +15,38 @@ QString Error::toString() const
 
 namespace {
 
-Error errorFrom(sqlite3 *db, const QString &path, int code)
+Error closedError(const QString &path = QString())
 {
-    Error error;
-    error.code = code != 0 ? code : (db ? sqlite3_extended_errcode(db) : 0);
-    error.message = db ? QString::fromUtf8(sqlite3_errmsg(db)) : QString();
-    error.path = path;
-    return error;
+    return Error{SQLITE_MISUSE, QStringLiteral("Connection is closed"), path};
 }
 
 } // namespace
 
-Database::Database(sqlite3 *db, QString path)
-    : db_(db)
-    , path_(std::move(path))
+Connection::Connection(std::shared_ptr<State> state)
+    : state_(std::move(state))
 {
 }
 
-Database::~Database()
+Connection::~Connection()
 {
-    if (db_)
-        sqlite3_close_v2(db_);
+    close();
 }
 
-Database::Database(Database &&other) noexcept
-    : db_(std::exchange(other.db_, nullptr))
-    , path_(std::move(other.path_))
-    , mutex_(std::move(other.mutex_))
+Connection::Connection(Connection &&other) noexcept
+    : state_(std::move(other.state_))
 {
 }
 
-Database &Database::operator=(Database &&other) noexcept
+Connection &Connection::operator=(Connection &&other) noexcept
 {
     if (this == &other)
         return *this;
-    if (db_)
-        sqlite3_close_v2(db_);
-    db_ = std::exchange(other.db_, nullptr);
-    path_ = std::move(other.path_);
-    mutex_ = std::move(other.mutex_);
+    close();
+    state_ = std::move(other.state_);
     return *this;
 }
 
-Result<Database> Database::open(const QString &path, OpenMode mode)
+Result<Connection> Connection::open(const QString &path, OpenMode mode)
 {
     int flags = SQLITE_OPEN_URI;
     switch (mode) {
@@ -76,93 +65,160 @@ Result<Database> Database::open(const QString &path, OpenMode mode)
     const QByteArray utf8 = path.toUtf8();
     const int rc = sqlite3_open_v2(utf8.constData(), &db, flags, nullptr);
     if (rc != SQLITE_OK) {
-        Error error = errorFrom(db, path, rc);
-        if (db)
+        Error error = closedError(path);
+        error.code = rc;
+        if (db) {
+            error.message = QString::fromUtf8(sqlite3_errmsg(db));
             sqlite3_close_v2(db);
+        }
         return error;
     }
     sqlite3_busy_timeout(db, 5000);
-    return Database(db, path);
+
+    auto state = std::make_shared<State>();
+    state->db = db;
+    state->path = path;
+    return Connection(std::move(state));
 }
 
-Error Database::errorFromDb(int code) const
+Error Connection::makeError(const State &state, int code)
 {
-    return errorFrom(db_, path_, code);
+    Error error;
+    error.code = code != 0 ? code : (state.db ? sqlite3_extended_errcode(state.db) : 0);
+    error.message = state.db ? QString::fromUtf8(sqlite3_errmsg(state.db))
+                             : QStringLiteral("Connection is closed");
+    error.path = state.path;
+    return error;
 }
 
-Status Database::exec(const QString &sql)
+Status Connection::execOnState(const std::shared_ptr<State> &state, const QString &sql)
 {
-    auto statement = prepare(sql);
-    if (!statement)
-        return statement.error();
-    return statement.value().exec();
-}
+    if (!state)
+        return Status::fail(closedError());
 
-Status Database::execScript(const QString &sql)
-{
-    std::lock_guard<std::mutex> lock(*mutex_);
+    std::lock_guard<std::mutex> lock(state->mutex);
+    if (state->closed || !state->db)
+        return Status::fail(closedError(state->path));
+
     char *rawError = nullptr;
     const QByteArray utf8 = sql.toUtf8();
-    const int rc = sqlite3_exec(db_, utf8.constData(), nullptr, nullptr, &rawError);
+    const int rc = sqlite3_exec(state->db, utf8.constData(), nullptr, nullptr, &rawError);
     if (rc == SQLITE_OK)
         return Status::ok();
-    Error error = errorFromDb(rc);
+
+    Error error = makeError(*state, rc);
     if (rawError)
         error.message = QString::fromUtf8(rawError);
     sqlite3_free(rawError);
     return Status::fail(std::move(error));
 }
 
-Result<Statement> Database::prepare(const QString &sql)
+bool Connection::isOpen() const
 {
-    std::lock_guard<std::mutex> lock(*mutex_);
+    if (!state_)
+        return false;
+    std::lock_guard<std::mutex> lock(state_->mutex);
+    return state_->db != nullptr && !state_->closed;
+}
+
+QString Connection::path() const
+{
+    return state_ ? state_->path : QString();
+}
+
+Status Connection::exec(const QString &sql)
+{
+    return execOnState(state_, sql);
+}
+
+Status Connection::execScript(const QString &sql)
+{
+    return execOnState(state_, sql);
+}
+
+Result<Statement> Connection::prepare(const QString &sql)
+{
+    if (!state_)
+        return closedError();
+
+    std::lock_guard<std::mutex> lock(state_->mutex);
+    if (state_->closed || !state_->db)
+        return closedError(state_->path);
+
     sqlite3_stmt *stmt = nullptr;
     const QByteArray utf8 = sql.toUtf8();
-    const int rc = sqlite3_prepare_v2(db_, utf8.constData(), utf8.size(), &stmt, nullptr);
+    const int rc = sqlite3_prepare_v2(state_->db, utf8.constData(), utf8.size(), &stmt, nullptr);
     if (rc != SQLITE_OK)
-        return errorFromDb(rc);
+        return makeError(*state_, rc);
     if (!stmt)
-        return errorFromDb(SQLITE_ERROR);
-    return Statement(db_, stmt, mutex_);
+        return makeError(*state_, SQLITE_ERROR);
+    return Statement(state_, stmt);
 }
 
-qint64 Database::lastInsertRowId() const
+qint64 Connection::lastInsertRowId() const
 {
-    std::lock_guard<std::mutex> lock(*mutex_);
-    return sqlite3_last_insert_rowid(db_);
+    if (!state_)
+        return 0;
+    std::lock_guard<std::mutex> lock(state_->mutex);
+    if (state_->closed || !state_->db)
+        return 0;
+    return sqlite3_last_insert_rowid(state_->db);
 }
 
-int Database::changes() const
+int Connection::changes() const
 {
-    std::lock_guard<std::mutex> lock(*mutex_);
-    return sqlite3_changes(db_);
+    if (!state_)
+        return 0;
+    std::lock_guard<std::mutex> lock(state_->mutex);
+    if (state_->closed || !state_->db)
+        return 0;
+    return sqlite3_changes(state_->db);
 }
 
-QString Database::quote(const QString &value)
+void Connection::close()
+{
+    if (!state_)
+        return;
+    std::lock_guard<std::mutex> lock(state_->mutex);
+    if (state_->closed)
+        return;
+    state_->closed = true;
+    if (state_->db) {
+        // close_v2 marks the handle as a zombie while statements are
+        // outstanding, so existing statements are finalized safely.
+        sqlite3_close_v2(state_->db);
+        state_->db = nullptr;
+    }
+}
+
+QString Connection::quote(const QString &value)
 {
     QString escaped = value;
     escaped.replace(QLatin1Char('\''), QLatin1String("''"));
     return QLatin1Char('\'') + escaped + QLatin1Char('\'');
 }
 
-Statement::Statement(sqlite3 *db, sqlite3_stmt *stmt, std::shared_ptr<std::mutex> mutex)
-    : db_(db)
+Statement::Statement(std::shared_ptr<Connection::State> state, sqlite3_stmt *stmt)
+    : state_(std::move(state))
     , stmt_(stmt)
-    , mutex_(std::move(mutex))
 {
 }
 
 Statement::~Statement()
 {
-    if (stmt_)
+    if (!stmt_)
+        return;
+    if (state_) {
+        std::lock_guard<std::mutex> lock(state_->mutex);
         sqlite3_finalize(stmt_);
+    } else {
+        sqlite3_finalize(stmt_);
+    }
 }
 
 Statement::Statement(Statement &&other) noexcept
-    : db_(std::exchange(other.db_, nullptr))
+    : state_(std::move(other.state_))
     , stmt_(std::exchange(other.stmt_, nullptr))
-    , mutex_(std::move(other.mutex_))
-    , hasRow_(std::exchange(other.hasRow_, false))
 {
 }
 
@@ -170,28 +226,33 @@ Statement &Statement::operator=(Statement &&other) noexcept
 {
     if (this == &other)
         return *this;
-    if (stmt_)
-        sqlite3_finalize(stmt_);
-    db_ = std::exchange(other.db_, nullptr);
+    if (stmt_) {
+        if (state_) {
+            std::lock_guard<std::mutex> lock(state_->mutex);
+            sqlite3_finalize(stmt_);
+        } else {
+            sqlite3_finalize(stmt_);
+        }
+    }
+    state_ = std::move(other.state_);
     stmt_ = std::exchange(other.stmt_, nullptr);
-    mutex_ = std::move(other.mutex_);
-    hasRow_ = std::exchange(other.hasRow_, false);
     return *this;
 }
 
 Error Statement::errorFromDb(int code) const
 {
-    QString path;
-    if (db_) {
-        if (const char *filename = sqlite3_db_filename(db_, "main"))
-            path = QString::fromUtf8(filename);
-    }
-    return errorFrom(db_, path, code);
+    if (!state_)
+        return closedError();
+    return Connection::makeError(*state_, code);
 }
 
 Status Statement::bind(int index, std::nullptr_t)
 {
-    std::lock_guard<std::mutex> lock(*mutex_);
+    if (!state_)
+        return Status::fail(closedError());
+    std::lock_guard<std::mutex> lock(state_->mutex);
+    if (state_->closed || !state_->db)
+        return Status::fail(closedError(state_->path));
     const int rc = sqlite3_bind_null(stmt_, index);
     if (rc != SQLITE_OK)
         return Status::fail(errorFromDb(rc));
@@ -205,7 +266,11 @@ Status Statement::bind(int index, int value)
 
 Status Statement::bind(int index, qint64 value)
 {
-    std::lock_guard<std::mutex> lock(*mutex_);
+    if (!state_)
+        return Status::fail(closedError());
+    std::lock_guard<std::mutex> lock(state_->mutex);
+    if (state_->closed || !state_->db)
+        return Status::fail(closedError(state_->path));
     const int rc = sqlite3_bind_int64(stmt_, index, value);
     if (rc != SQLITE_OK)
         return Status::fail(errorFromDb(rc));
@@ -214,7 +279,11 @@ Status Statement::bind(int index, qint64 value)
 
 Status Statement::bind(int index, double value)
 {
-    std::lock_guard<std::mutex> lock(*mutex_);
+    if (!state_)
+        return Status::fail(closedError());
+    std::lock_guard<std::mutex> lock(state_->mutex);
+    if (state_->closed || !state_->db)
+        return Status::fail(closedError(state_->path));
     const int rc = sqlite3_bind_double(stmt_, index, value);
     if (rc != SQLITE_OK)
         return Status::fail(errorFromDb(rc));
@@ -223,7 +292,11 @@ Status Statement::bind(int index, double value)
 
 Status Statement::bind(int index, const QString &value)
 {
-    std::lock_guard<std::mutex> lock(*mutex_);
+    if (!state_)
+        return Status::fail(closedError());
+    std::lock_guard<std::mutex> lock(state_->mutex);
+    if (state_->closed || !state_->db)
+        return Status::fail(closedError(state_->path));
     const QByteArray utf8 = value.toUtf8();
     const int rc = sqlite3_bind_text64(stmt_, index, utf8.constData(),
                                        static_cast<sqlite3_uint64>(utf8.size()),
@@ -235,7 +308,11 @@ Status Statement::bind(int index, const QString &value)
 
 Status Statement::bind(int index, const QByteArray &blob)
 {
-    std::lock_guard<std::mutex> lock(*mutex_);
+    if (!state_)
+        return Status::fail(closedError());
+    std::lock_guard<std::mutex> lock(state_->mutex);
+    if (state_->closed || !state_->db)
+        return Status::fail(closedError(state_->path));
     // SQLITE_STATIC: the caller keeps blob alive until step() returns.
     const int rc = sqlite3_bind_blob64(stmt_, index, blob.constData(),
                                        static_cast<sqlite3_uint64>(blob.size()),
@@ -247,17 +324,17 @@ Status Statement::bind(int index, const QByteArray &blob)
 
 Result<bool> Statement::step()
 {
-    std::lock_guard<std::mutex> lock(*mutex_);
+    if (!state_)
+        return closedError();
+    std::lock_guard<std::mutex> lock(state_->mutex);
+    if (state_->closed || !state_->db)
+        return closedError(state_->path);
+
     const int rc = sqlite3_step(stmt_);
-    if (rc == SQLITE_ROW) {
-        hasRow_ = true;
+    if (rc == SQLITE_ROW)
         return true;
-    }
-    if (rc == SQLITE_DONE) {
-        hasRow_ = false;
+    if (rc == SQLITE_DONE)
         return false;
-    }
-    hasRow_ = false;
     return errorFromDb(rc);
 }
 
@@ -274,8 +351,11 @@ Status Statement::exec()
 
 Status Statement::reset()
 {
-    std::lock_guard<std::mutex> lock(*mutex_);
-    hasRow_ = false;
+    if (!state_)
+        return Status::fail(closedError());
+    std::lock_guard<std::mutex> lock(state_->mutex);
+    if (state_->closed || !state_->db)
+        return Status::fail(closedError(state_->path));
     const int rc = sqlite3_reset(stmt_);
     if (rc != SQLITE_OK)
         return Status::fail(errorFromDb(rc));
@@ -284,31 +364,51 @@ Status Statement::reset()
 
 int Statement::columnCount() const
 {
-    std::lock_guard<std::mutex> lock(*mutex_);
+    if (!state_)
+        return 0;
+    std::lock_guard<std::mutex> lock(state_->mutex);
+    if (state_->closed)
+        return 0;
     return sqlite3_column_count(stmt_);
 }
 
 bool Statement::isNull(int column) const
 {
-    std::lock_guard<std::mutex> lock(*mutex_);
+    if (!state_)
+        return true;
+    std::lock_guard<std::mutex> lock(state_->mutex);
+    if (state_->closed)
+        return true;
     return sqlite3_column_type(stmt_, column) == SQLITE_NULL;
 }
 
 qint64 Statement::columnInt64(int column) const
 {
-    std::lock_guard<std::mutex> lock(*mutex_);
+    if (!state_)
+        return 0;
+    std::lock_guard<std::mutex> lock(state_->mutex);
+    if (state_->closed)
+        return 0;
     return sqlite3_column_int64(stmt_, column);
 }
 
 double Statement::columnDouble(int column) const
 {
-    std::lock_guard<std::mutex> lock(*mutex_);
+    if (!state_)
+        return 0;
+    std::lock_guard<std::mutex> lock(state_->mutex);
+    if (state_->closed)
+        return 0;
     return sqlite3_column_double(stmt_, column);
 }
 
 QString Statement::columnText(int column) const
 {
-    std::lock_guard<std::mutex> lock(*mutex_);
+    if (!state_)
+        return {};
+    std::lock_guard<std::mutex> lock(state_->mutex);
+    if (state_->closed)
+        return {};
     const auto *text = sqlite3_column_text(stmt_, column);
     if (!text)
         return {};
@@ -318,7 +418,11 @@ QString Statement::columnText(int column) const
 
 QByteArray Statement::columnBlob(int column) const
 {
-    std::lock_guard<std::mutex> lock(*mutex_);
+    if (!state_)
+        return {};
+    std::lock_guard<std::mutex> lock(state_->mutex);
+    if (state_->closed)
+        return {};
     const void *data = sqlite3_column_blob(stmt_, column);
     const int size = sqlite3_column_bytes(stmt_, column);
     if (!data || size <= 0)
@@ -326,22 +430,30 @@ QByteArray Statement::columnBlob(int column) const
     return QByteArray(static_cast<const char *>(data), size);
 }
 
-Result<Transaction> Transaction::begin(Database &db)
+Result<Transaction> Transaction::begin(Connection &connection)
 {
-    Status status = db.exec(QStringLiteral("BEGIN"));
+    Status status = connection.exec(QStringLiteral("BEGIN"));
     if (!status)
         return status.error();
-    return Transaction(&db);
+    return Transaction(connection.state_);
+}
+
+Transaction::Transaction(std::shared_ptr<Connection::State> state)
+    : state_(std::move(state))
+{
 }
 
 Transaction::~Transaction()
 {
-    if (db_)
-        db_->exec(QStringLiteral("ROLLBACK"));
+    if (!state_)
+        return;
+    std::lock_guard<std::mutex> lock(state_->mutex);
+    if (!state_->closed && state_->db)
+        sqlite3_exec(state_->db, "ROLLBACK", nullptr, nullptr, nullptr);
 }
 
 Transaction::Transaction(Transaction &&other) noexcept
-    : db_(std::exchange(other.db_, nullptr))
+    : state_(std::move(other.state_))
 {
 }
 
@@ -349,19 +461,21 @@ Transaction &Transaction::operator=(Transaction &&other) noexcept
 {
     if (this == &other)
         return *this;
-    if (db_)
-        db_->exec(QStringLiteral("ROLLBACK"));
-    db_ = std::exchange(other.db_, nullptr);
+    if (state_) {
+        std::lock_guard<std::mutex> lock(state_->mutex);
+        if (!state_->closed && state_->db)
+            sqlite3_exec(state_->db, "ROLLBACK", nullptr, nullptr, nullptr);
+    }
+    state_ = std::move(other.state_);
     return *this;
 }
 
 Status Transaction::commit()
 {
-    if (!db_)
+    if (!state_)
         return Status::ok();
-    Database *db = db_;
-    db_ = nullptr;
-    return db->exec(QStringLiteral("COMMIT"));
+    auto state = std::move(state_);
+    return Connection::execOnState(state, QStringLiteral("COMMIT"));
 }
 
 } // namespace board

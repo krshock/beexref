@@ -18,7 +18,7 @@ QByteArray fileHash(const QString &path)
     return hash.result();
 }
 
-bool tableHasColumn(board::Database &db, const QString &table, const QString &column)
+bool tableHasColumn(board::Connection &db, const QString &table, const QString &column)
 {
     auto statement = db.prepare(QStringLiteral("PRAGMA table_info(%1)").arg(table));
     if (!statement)
@@ -32,7 +32,7 @@ bool tableHasColumn(board::Database &db, const QString &table, const QString &co
     }
 }
 
-bool tableExists(board::Database &db, const QString &table)
+bool tableExists(board::Connection &db, const QString &table)
 {
     auto statement = db.prepare(QStringLiteral(
         "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?"));
@@ -44,7 +44,7 @@ bool tableExists(board::Database &db, const QString &table)
 
 // items/sqlar tables as they look in an older native file, optional
 // fork columns included.
-board::Status createOldSchema(board::Database &db, bool withData, bool withMeta, bool withUuid)
+board::Status createOldSchema(board::Connection &db, bool withData, bool withMeta, bool withUuid)
 {
     QStringList columns{QStringLiteral("id INTEGER PRIMARY KEY"),
                         QStringLiteral("type TEXT NOT NULL"),
@@ -96,8 +96,8 @@ void TestSchema::createsTablesAndHeader()
     QTemporaryDir dir;
     QVERIFY(dir.isValid());
 
-    auto db = board::Database::open(dir.filePath(QStringLiteral("new.beex")),
-                                    board::Database::OpenMode::Create);
+    auto db = board::Connection::open(dir.filePath(QStringLiteral("new.beex")),
+                                    board::Connection::OpenMode::Create);
     QVERIFY(db.isOk());
     QVERIFY(board::schema::createTables(db.value()).isOk());
     QVERIFY(board::schema::writeHeader(db.value()).isOk());
@@ -122,7 +122,7 @@ void TestSchema::migratesFromVersion3()
     const QString path = dir.filePath(QStringLiteral("v3.beex"));
 
     {
-        auto db = board::Database::open(path, board::Database::OpenMode::Create);
+        auto db = board::Connection::open(path, board::Connection::OpenMode::Create);
         QVERIFY(db.isOk());
         // v3 files already carry meta; migrations are keyed by target
         // version, so uuid (v4) and lod (v5) are the remaining steps.
@@ -134,7 +134,7 @@ void TestSchema::migratesFromVersion3()
                     .isOk());
     }
 
-    auto db = board::Database::open(path, board::Database::OpenMode::ReadWrite);
+    auto db = board::Connection::open(path, board::Connection::OpenMode::ReadWrite);
     QVERIFY(db.isOk());
     QVERIFY(board::schema::migrateToCurrent(db.value()).isOk());
 
@@ -158,7 +158,7 @@ void TestSchema::migratesFromVersion1()
     const QString path = dir.filePath(QStringLiteral("v1.bee"));
 
     {
-        auto db = board::Database::open(path, board::Database::OpenMode::Create);
+        auto db = board::Connection::open(path, board::Connection::OpenMode::Create);
         QVERIFY(db.isOk());
         QVERIFY(db.value()
                     .exec(QStringLiteral("CREATE TABLE items (id INTEGER PRIMARY KEY, "
@@ -173,7 +173,7 @@ void TestSchema::migratesFromVersion1()
         QVERIFY(db.value().exec(QStringLiteral("PRAGMA user_version=1")).isOk());
     }
 
-    auto db = board::Database::open(path, board::Database::OpenMode::ReadWrite);
+    auto db = board::Connection::open(path, board::Connection::OpenMode::ReadWrite);
     QVERIFY(db.isOk());
     QVERIFY(board::schema::migrateToCurrent(db.value()).isOk());
     QCOMPARE(board::schema::readUserVersion(db.value()).value(), board::schema::kUserVersion);
@@ -193,14 +193,14 @@ void TestSchema::migrationIsIdempotentWithExistingColumns()
     const QString path = dir.filePath(QStringLiteral("downgraded.beex"));
 
     {
-        auto db = board::Database::open(path, board::Database::OpenMode::Create);
+        auto db = board::Connection::open(path, board::Connection::OpenMode::Create);
         QVERIFY(db.isOk());
         // meta already exists while the version stamp says 3.
         QVERIFY(createOldSchema(db.value(), true, true, false).isOk());
         QVERIFY(db.value().exec(QStringLiteral("PRAGMA user_version=3")).isOk());
     }
 
-    auto db = board::Database::open(path, board::Database::OpenMode::ReadWrite);
+    auto db = board::Connection::open(path, board::Connection::OpenMode::ReadWrite);
     QVERIFY(db.isOk());
     QVERIFY(board::schema::migrateToCurrent(db.value()).isOk());
     QCOMPARE(board::schema::readUserVersion(db.value()).value(), board::schema::kUserVersion);
@@ -218,7 +218,7 @@ void TestSchema::rejectsNewerVersion()
     const QString path = dir.filePath(QStringLiteral("future.beex"));
 
     {
-        auto db = board::Database::open(path, board::Database::OpenMode::Create);
+        auto db = board::Connection::open(path, board::Connection::OpenMode::Create);
         QVERIFY(db.isOk());
         QVERIFY(createOldSchema(db.value(), true, true, true).isOk());
         QVERIFY(db.value().exec(QStringLiteral("PRAGMA user_version=6")).isOk());
@@ -227,7 +227,7 @@ void TestSchema::rejectsNewerVersion()
     const QByteArray before = fileHash(path);
     QVERIFY(!before.isEmpty());
 
-    auto db = board::Database::open(path, board::Database::OpenMode::ReadWrite);
+    auto db = board::Connection::open(path, board::Connection::OpenMode::ReadWrite);
     QVERIFY(db.isOk());
     auto status = board::schema::migrateToCurrent(db.value());
     QVERIFY(!status.isOk());
@@ -243,8 +243,8 @@ void TestSchema::migratesUninitializedDatabase()
     QTemporaryDir dir;
     QVERIFY(dir.isValid());
 
-    auto db = board::Database::open(dir.filePath(QStringLiteral("empty.beex")),
-                                    board::Database::OpenMode::Create);
+    auto db = board::Connection::open(dir.filePath(QStringLiteral("empty.beex")),
+                                    board::Connection::OpenMode::Create);
     QVERIFY(db.isOk());
     QVERIFY(!board::schema::hasItemsTable(db.value()).value());
     QCOMPARE(board::schema::readUserVersion(db.value()).value(), 0);

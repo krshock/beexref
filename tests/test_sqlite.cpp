@@ -8,7 +8,7 @@
 
 namespace {
 
-qint64 countRows(board::Database &db)
+qint64 countRows(board::Connection &db)
 {
     auto statement = db.prepare(QStringLiteral("SELECT count(*) FROM t"));
     if (!statement)
@@ -31,6 +31,7 @@ private slots:
     void readonlyRejectsWrites();
     void transactionRollback();
     void concurrentReads();
+    void useAfterCloseIsAnError();
 };
 
 void TestSqlite::createAndRoundTrip()
@@ -38,8 +39,8 @@ void TestSqlite::createAndRoundTrip()
     QTemporaryDir dir;
     QVERIFY(dir.isValid());
 
-    auto db = board::Database::open(dir.filePath(QStringLiteral("test.beex")),
-                                    board::Database::OpenMode::Create);
+    auto db = board::Connection::open(dir.filePath(QStringLiteral("test.beex")),
+                                    board::Connection::OpenMode::Create);
     QVERIFY(db.isOk());
     QVERIFY(db.value().isOpen());
     QCOMPARE(db.value().path(), dir.filePath(QStringLiteral("test.beex")));
@@ -82,8 +83,8 @@ void TestSqlite::bindTypes()
     QTemporaryDir dir;
     QVERIFY(dir.isValid());
 
-    auto db = board::Database::open(dir.filePath(QStringLiteral("types.beex")),
-                                    board::Database::OpenMode::Create);
+    auto db = board::Connection::open(dir.filePath(QStringLiteral("types.beex")),
+                                    board::Connection::OpenMode::Create);
     QVERIFY(db.isOk());
     QVERIFY(db.value()
                 .exec(QStringLiteral("CREATE TABLE t (i INTEGER, d REAL, s TEXT, b BLOB, n TEXT)"))
@@ -122,20 +123,20 @@ void TestSqlite::readonlyRejectsWrites()
 
     const QString path = dir.filePath(QStringLiteral("readonly.beex"));
     {
-        auto db = board::Database::open(path, board::Database::OpenMode::Create);
+        auto db = board::Connection::open(path, board::Connection::OpenMode::Create);
         QVERIFY(db.isOk());
         QVERIFY(db.value().exec(QStringLiteral("CREATE TABLE t (id INTEGER)")).isOk());
         QVERIFY(db.value().exec(QStringLiteral("INSERT INTO t VALUES (1)")).isOk());
     }
 
-    auto db = board::Database::open(path, board::Database::OpenMode::ReadOnly);
+    auto db = board::Connection::open(path, board::Connection::OpenMode::ReadOnly);
     QVERIFY(db.isOk());
     QCOMPARE(countRows(db.value()), qint64(1));
     QVERIFY(!db.value().exec(QStringLiteral("INSERT INTO t VALUES (2)")).isOk());
     QCOMPARE(countRows(db.value()), qint64(1));
 
-    auto missing = board::Database::open(dir.filePath(QStringLiteral("missing.beex")),
-                                         board::Database::OpenMode::ReadOnly);
+    auto missing = board::Connection::open(dir.filePath(QStringLiteral("missing.beex")),
+                                         board::Connection::OpenMode::ReadOnly);
     QVERIFY(!missing.isOk());
     QVERIFY(!missing.error().message.isEmpty());
 }
@@ -145,8 +146,8 @@ void TestSqlite::transactionRollback()
     QTemporaryDir dir;
     QVERIFY(dir.isValid());
 
-    auto db = board::Database::open(dir.filePath(QStringLiteral("tx.beex")),
-                                    board::Database::OpenMode::Create);
+    auto db = board::Connection::open(dir.filePath(QStringLiteral("tx.beex")),
+                                    board::Connection::OpenMode::Create);
     QVERIFY(db.isOk());
     QVERIFY(db.value().exec(QStringLiteral("CREATE TABLE t (id INTEGER)")).isOk());
 
@@ -172,8 +173,8 @@ void TestSqlite::concurrentReads()
     QTemporaryDir dir;
     QVERIFY(dir.isValid());
 
-    auto db = board::Database::open(dir.filePath(QStringLiteral("threads.beex")),
-                                    board::Database::OpenMode::Create);
+    auto db = board::Connection::open(dir.filePath(QStringLiteral("threads.beex")),
+                                    board::Connection::OpenMode::Create);
     QVERIFY(db.isOk());
     QVERIFY(db.value().exec(QStringLiteral("CREATE TABLE t (id INTEGER PRIMARY KEY, v INTEGER)"))
                 .isOk());
@@ -208,6 +209,42 @@ void TestSqlite::concurrentReads()
     first.join();
     second.join();
     QCOMPARE(mismatches.load(), 0);
+}
+
+void TestSqlite::useAfterCloseIsAnError()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+
+    auto db = board::Connection::open(dir.filePath(QStringLiteral("close.beex")),
+                                      board::Connection::OpenMode::Create);
+    QVERIFY(db.isOk());
+    QVERIFY(db.value().exec(QStringLiteral("CREATE TABLE t (id INTEGER PRIMARY KEY)")).isOk());
+    QVERIFY(db.value().exec(QStringLiteral("INSERT INTO t VALUES (1)")).isOk());
+
+    auto statement = db.value().prepare(QStringLiteral("SELECT id FROM t"));
+    QVERIFY(statement.isOk());
+    auto first = statement.value().step();
+    QVERIFY(first.isOk());
+    QVERIFY(first.value());
+    QCOMPARE(statement.value().columnInt64(0), qint64(1));
+
+    db.value().close();
+    QVERIFY(!db.value().isOpen());
+    QVERIFY(!db.value().exec(QStringLiteral("SELECT 1")).isOk());
+
+    auto afterClose = db.value().prepare(QStringLiteral("SELECT 1"));
+    QVERIFY(!afterClose.isOk());
+    QVERIFY(afterClose.error().message.contains(QStringLiteral("closed")));
+
+    // Statements keep the connection state alive and fail cleanly
+    // instead of touching a closed handle.
+    auto row = statement.value().step();
+    QVERIFY(!row.isOk());
+    QVERIFY(row.error().message.contains(QStringLiteral("closed")));
+    QVERIFY(!statement.value().reset().isOk());
+
+    statement.value() = {};
 }
 
 QTEST_GUILESS_MAIN(TestSqlite)

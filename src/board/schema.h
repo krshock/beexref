@@ -5,7 +5,7 @@
 #include <QString>
 
 namespace board {
-class Database;
+class Connection;
 }
 
 namespace board::schema {
@@ -19,23 +19,23 @@ inline constexpr int kBeeUserVersion = 2;
 inline constexpr int kBeeApplicationId = 2060242126;
 
 // Creates the format's tables when missing (idempotent).
-Status createTables(Database &db);
+Status createTables(Connection &db);
 
 // Writes application_id and user_version.
-Status writeHeader(Database &db, int userVersion = kUserVersion,
+Status writeHeader(Connection &db, int userVersion = kUserVersion,
                    int applicationId = kApplicationId);
 
-Result<int> readUserVersion(Database &db);
-Result<int> readApplicationId(Database &db);
+Result<int> readUserVersion(Connection &db);
+Result<int> readApplicationId(Connection &db);
 
 // True when the items table exists; used to reject non-board files.
-Result<bool> hasItemsTable(Database &db);
+Result<bool> hasItemsTable(Connection &db);
 
 // Migrates a read-write connection to the current version inside one
 // transaction. Idempotent: columns are only added when absent, so a
 // file stamped older that already carries later columns is fine.
 // Versions newer than supported yield an error and leave the file
 // untouched.
-Status migrateToCurrent(Database &db);
+Status migrateToCurrent(Connection &db);
 
 } // namespace board::schema

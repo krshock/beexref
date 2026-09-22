@@ -14,11 +14,32 @@ struct sqlite3_stmt;
 namespace board {
 
 class Statement;
+class Transaction;
 
-// Thin RAII wrapper around a SQLite connection. All operations are
-// serialized on an internal mutex so one connection can be shared
-// between threads (the app reads board blobs from the decode worker).
-class Database
+// SQLite connection wrapper.
+//
+// One Connection is exactly one sqlite3* handle. It is not a database
+// file and not a pool: a file is just the path passed to open(), and a
+// second file is either another Connection or ATTACHed to this one.
+//
+// Connection layout in the app — one connection per thread that needs
+// a file, never one connection shared across threads:
+//   * board file, UI reads      read-only Connection
+//   * board file, worker reads  a second read-only Connection
+//   * session cache file        its own Connection, worker-owned
+//   * save target file          its own Connection, save worker
+// Operations are serialized on the connection's mutex, so sharing is
+// safe, but per-thread connections are the intended pattern. Pragmas
+// with connection scope (busy_timeout, query_only, cache_size,
+// foreign_keys) are set on every connection at open; file-scoped ones
+// (application_id, user_version, journal_mode) are set once through
+// the schema layer.
+//
+// close() is serialized with in-flight operations and subsequent use
+// fails cleanly. Statements keep the connection state alive, so they
+// may outlive the Connection object, but one Statement must still be
+// used by one thread at a time.
+class Connection
 {
 public:
     enum class OpenMode {
@@ -27,21 +48,19 @@ public:
         Create,    // SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE
     };
 
-    Database() = default;
-    ~Database();
-    Database(const Database &) = delete;
-    Database &operator=(const Database &) = delete;
-    Database(Database &&other) noexcept;
-    Database &operator=(Database &&other) noexcept;
+    Connection() = default;
+    ~Connection();
+    Connection(const Connection &) = delete;
+    Connection &operator=(const Connection &) = delete;
+    Connection(Connection &&other) noexcept;
+    Connection &operator=(Connection &&other) noexcept;
 
-    // Opens path; URIs ("file:...?mode=ro") are honored. Uses
-    // busy_timeout=5000 like the Python reference.
-    static Result<Database> open(const QString &path, OpenMode mode);
+    // Opens path; URIs ("file:...?mode=ro") are honored. Sets
+    // busy_timeout=5000, as the Python reference does.
+    static Result<Connection> open(const QString &path, OpenMode mode);
 
-    bool isOpen() const { return db_ != nullptr; }
-    QString path() const { return path_; }
-
-    sqlite3 *handle() const { return db_; }
+    bool isOpen() const;
+    QString path() const;
 
     // Runs a statement without using result rows (DDL, PRAGMA writes).
     Status exec(const QString &sql);
@@ -54,6 +73,9 @@ public:
     qint64 lastInsertRowId() const;
     int changes() const;
 
+    // Serialized with in-flight operations. Called by the destructor.
+    void close();
+
     // Renders value as a SQL string literal, for statements that cannot
     // use bindings (VACUUM INTO).
     static QString quote(const QString &value);
@@ -62,17 +84,27 @@ private:
     friend class Statement;
     friend class Transaction;
 
-    Database(sqlite3 *db, QString path);
-    Error errorFromDb(int code = 0) const;
+    struct State
+    {
+        std::mutex mutex;
+        sqlite3 *db = nullptr;
+        QString path;
+        bool closed = false;
+    };
 
-    sqlite3 *db_ = nullptr;
-    QString path_;
-    // Shared so statements keep locking the same mutex when the
-    // Database is moved.
-    std::shared_ptr<std::mutex> mutex_ = std::make_shared<std::mutex>();
+    explicit Connection(std::shared_ptr<State> state);
+
+    static Error makeError(const State &state, int code);
+    static Status execOnState(const std::shared_ptr<State> &state, const QString &sql);
+
+    // Shared so statements stay valid (and see the closed flag) when the
+    // Connection is moved or destroyed.
+    std::shared_ptr<State> state_;
 };
 
-// Prepared statement. Move-only; must not outlive its Database.
+// Prepared statement, owned by one Connection; move-only. Blob bindings
+// use SQLITE_STATIC: the caller keeps the bytes alive until step()
+// returns, which is what keeps large payloads from being copied.
 class Statement
 {
 public:
@@ -90,9 +122,6 @@ public:
     Status bind(int index, qint64 value);
     Status bind(int index, double value);
     Status bind(int index, const QString &value);
-    // The blob is bound by reference (SQLITE_STATIC): it must stay
-    // alive and unchanged until step() returns. This keeps large image
-    // payloads from being copied.
     Status bind(int index, const QByteArray &blob);
 
     // Steps once: true when a row is available, false when done.
@@ -111,23 +140,23 @@ public:
     QByteArray columnBlob(int column) const;
 
 private:
-    friend class Database;
-    Statement(sqlite3 *db, sqlite3_stmt *stmt, std::shared_ptr<std::mutex> mutex);
+    friend class Connection;
+    Statement(std::shared_ptr<Connection::State> state, sqlite3_stmt *stmt);
 
-    Error errorFromDb(int code = 0) const;
-    bool hasRow() const { return hasRow_; }
+    Error errorFromDb(int code) const;
 
-    sqlite3 *db_ = nullptr;
+    std::shared_ptr<Connection::State> state_;
     sqlite3_stmt *stmt_ = nullptr;
-    std::shared_ptr<std::mutex> mutex_;
-    bool hasRow_ = false;
 };
 
-// BEGIN/COMMIT guard: rolls back on destruction unless committed.
+// BEGIN/COMMIT guard on one Connection: rolls back on destruction
+// unless committed. Keeps the connection state alive, so it is safe to
+// destroy after the Connection itself (the rollback is skipped when
+// the connection is already closed).
 class Transaction
 {
 public:
-    static Result<Transaction> begin(Database &db);
+    static Result<Transaction> begin(Connection &connection);
 
     Transaction() = default;
     ~Transaction();
@@ -139,12 +168,9 @@ public:
     Status commit();
 
 private:
-    explicit Transaction(Database *db)
-        : db_(db)
-    {
-    }
+    explicit Transaction(std::shared_ptr<Connection::State> state);
 
-    Database *db_ = nullptr;
+    std::shared_ptr<Connection::State> state_;
 };
 
 } // namespace board
