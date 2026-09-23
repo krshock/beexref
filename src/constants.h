@@ -15,6 +15,10 @@ inline constexpr char UserAgent[] =
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
 
+// Appended to a settings group's title while its value differs from the
+// default, as in the reference.
+inline constexpr char kChangedSymbol[] = "\u270E";
+
 // Z-order step: raising an item puts it above the current maximum by
 // this much, as in the reference ports.
 inline constexpr double kZStep = 0.001;

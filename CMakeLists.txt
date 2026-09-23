@@ -79,6 +79,8 @@ qt_add_library(beexref_core STATIC
     src/ui/cursors.cpp
     src/ui/cursors.h
     src/ui/selection_ops.cpp
+    src/ui/settings_dialog.cpp
+    src/ui/settings_dialog.h
     src/ui/selection_ops.h
     src/ui/selection_tools.cpp
     src/ui/selection_tools.h

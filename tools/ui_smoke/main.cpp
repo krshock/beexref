@@ -17,6 +17,7 @@
 #include <QImage>
 #include <QMimeData>
 #include <QAction>
+#include <QDialog>
 #include <QSlider>
 #include <QMouseEvent>
 #include <QScrollBar>
@@ -459,6 +460,20 @@ public:
             out() << "delete undone: " << window_.scene()->document()->items().size()
                   << " items, " << window_.scene()->selectedItemViews().size() << " selected\n";
             snapshot(QStringLiteral("24-delete-undone"));
+
+            // The settings dialog (read-only: the harness never writes
+            // the user's settings file).
+            actionByText(QStringLiteral("&Settings"))->trigger();
+            QTest::qWait(800);
+            for (QDialog *candidate : window_.findChildren<QDialog *>()) {
+                if (!candidate->windowTitle().endsWith(QStringLiteral("Settings")))
+                    continue;
+                const QString path = outputDir_ + QStringLiteral("/28-settings.png");
+                candidate->grab().save(path);
+                out() << "settings dialog " << candidate->width() << "x" << candidate->height()
+                      << " -> " << path << "\n";
+                candidate->close();
+            }
         }
 
         const ui::LodManager::Stats stats = view->lodManager()->stats();

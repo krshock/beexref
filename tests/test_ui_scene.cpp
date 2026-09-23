@@ -4,9 +4,14 @@
 #include <QColor>
 #include <QImage>
 #include <QMimeData>
+#include <QDialog>
 #include <QMouseEvent>
 #include <QScrollBar>
+#include <QCheckBox>
+#include <QLineEdit>
+#include <QRadioButton>
 #include <QSlider>
+#include <QSpinBox>
 #include <QTemporaryDir>
 #include <QtTest>
 #include <QWheelEvent>
@@ -17,11 +22,13 @@
 #include "doc/item.h"
 #include "doc/source.h"
 #include "doc/undo.h"
+#include "constants.h"
 #include "settings.h"
 #include "ui/input_controller.h"
 #include "ui/main_window.h"
 #include "ui/color_gamut.h"
 #include "ui/hud.h"
+#include "ui/settings_dialog.h"
 #include "ui/grayscale.h"
 #include "ui/opacity_dialog.h"
 #include "ui/rendering.h"
@@ -168,6 +175,8 @@ private slots:
     void raiseAndLowerChangeZOrder();
     void newSceneClearsTheBoard();
     void hudToastsAppearAndExpire();
+    void settingsDialogWritesAndRestores();
+    void settingsActionOpensTheDialog();
 };
 
 void TestUiScene::buildsItemsFromDocument()
@@ -1639,6 +1648,84 @@ void TestUiScene::hudToastsAppearAndExpire()
     QTest::qWait(250);
     QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
     QVERIFY(view.findChildren<QWidget *>(QStringLiteral("HUDToast")).isEmpty());
+}
+
+void TestUiScene::settingsDialogWritesAndRestores()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    settings::setSettingsDir(dir.path());
+
+    ui::SettingsDialog dialog;
+    QSignalSpy spy(&dialog, &ui::SettingsDialog::settingChanged);
+
+    // An integer field writes through immediately.
+    auto *gap = dialog.findChild<QSpinBox *>(QStringLiteral("Items/arrange_gap"));
+    QVERIFY(gap);
+    gap->setValue(25);
+    QCOMPARE(spy.count(), 1);
+    QCOMPARE(spy.first().first().toString(), QStringLiteral("Items/arrange_gap"));
+    {
+        settings::File file(settings::iniPath());
+        file.load();
+        QCOMPARE(file.value(QStringLiteral("Items"), QStringLiteral("arrange_gap")),
+                 QStringLiteral("25"));
+    }
+
+    // So does a checkbox, a radio option and a line edit.
+    auto *confirm = dialog.findChild<QCheckBox *>(QStringLiteral("Save/confirm_close_unsaved"));
+    QVERIFY(confirm);
+    confirm->setChecked(false);
+    auto *budgetMethod = dialog.findChild<QRadioButton *>(QStringLiteral("ram_budget"));
+    QVERIFY(budgetMethod);
+    budgetMethod->setChecked(true);
+    auto *fractions = dialog.findChild<QLineEdit *>(QStringLiteral("Items/lod_fractions"));
+    QVERIFY(fractions);
+    fractions->setText(QStringLiteral("1,0.5"));
+    {
+        settings::File file(settings::iniPath());
+        file.load();
+        QCOMPARE(file.value(QStringLiteral("Save"), QStringLiteral("confirm_close_unsaved")),
+                 QStringLiteral("false"));
+        QCOMPARE(file.value(QStringLiteral("Items"), QStringLiteral("lod_method")),
+                 QStringLiteral("ram_budget"));
+        QCOMPARE(file.value(QStringLiteral("Items"), QStringLiteral("lod_fractions")),
+                 QStringLiteral("1,0.5"));
+    }
+
+    // A changed group shows the marker in its title.
+    auto *gapGroup = dialog.findChild<QGroupBox *>(QStringLiteral("Items/arrange_gap"));
+    QVERIFY(gapGroup);
+    QVERIFY(gapGroup->title().contains(QString::fromUtf8(constants::kChangedSymbol)));
+
+    // Restoring defaults clears the entries and the widgets.
+    QSignalSpy restoredSpy(&dialog, &ui::SettingsDialog::settingsRestored);
+    dialog.restoreDefaults();
+    QCOMPARE(restoredSpy.count(), 1);
+    {
+        settings::File file(settings::iniPath());
+        file.load();
+        QVERIFY(!file.contains(QStringLiteral("Items"), QStringLiteral("arrange_gap")));
+        QVERIFY(!file.contains(QStringLiteral("Items"), QStringLiteral("lod_method")));
+    }
+    QCOMPARE(gap->value(), 0);
+    QVERIFY(!gapGroup->title().contains(QString::fromUtf8(constants::kChangedSymbol)));
+
+    settings::setSettingsDir(QString());
+}
+
+void TestUiScene::settingsActionOpensTheDialog()
+{
+    ui::MainWindow window;
+    actionByText(window, QStringLiteral("&Settings"))->trigger();
+
+    QDialog *settings = nullptr;
+    for (QDialog *candidate : window.findChildren<QDialog *>()) {
+        if (candidate->windowTitle().endsWith(QStringLiteral("Settings")))
+            settings = candidate;
+    }
+    QVERIFY(settings);
+    QVERIFY(settings->isVisible() || !settings->isHidden());
 }
 
 QTEST_MAIN(TestUiScene)

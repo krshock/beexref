@@ -63,6 +63,12 @@ private:
     void copySampledColor(const QColor &color);
     // Opens the gamut wheel for the single selected image.
     void showColorGamut();
+    // Settings menu: the settings dialog and the settings folder.
+    void openSettingsDialog();
+    void openSettingsDir();
+    void applySettingChanged(const QString &key);
+    // Applies Items/image_allocation_limit to QImageReader.
+    void applyAllocationLimit();
     // File menu: new, open, recent, insert.
     void newScene();
     void insertImages();

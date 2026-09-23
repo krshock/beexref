@@ -13,6 +13,7 @@
 #include "logging.h"
 #include "opacity_dialog.h"
 #include "selection_ops.h"
+#include "settings_dialog.h"
 #include "settings.h"
 #include "util/format.h"
 #include "util/memory.h"
@@ -20,8 +21,10 @@
 #include <QAction>
 #include <QApplication>
 #include <QImageReader>
+#include <QUrl>
 #include <QMenu>
 #include <QClipboard>
+#include <QDesktopServices>
 #include <QCursor>
 #include <QFileDialog>
 #include <QFileInfo>
@@ -132,21 +135,9 @@ MainWindow::MainWindow(bool cacheDisabled, QWidget *parent)
     connect(titleTimer, &QTimer::timeout, this, &MainWindow::updateTitle);
     titleTimer->start(2000);
 
-    // Decode allocation limit, as the reference applies on startup; the
-    // environment variable wins, matching the Python app.
-    {
-        settings::File file(settings::iniPath());
-        file.load();
-        int limit =
-            settings::valueOrDefault(file, QStringLiteral("Items/image_allocation_limit")).toInt();
-        if (qEnvironmentVariableIsSet("QT_IMAGEIO_MAXALLOC")) {
-            bool ok = false;
-            const int fromEnv = qEnvironmentVariableIntValue("QT_IMAGEIO_MAXALLOC", &ok);
-            if (ok)
-                limit = fromEnv;
-        }
-        QImageReader::setAllocationLimit(limit);
-    }
+    // Decode allocation limit, as the reference applies on startup (the
+    // environment variable wins, matching the Python app).
+    applyAllocationLimit();
 }
 
 MainWindow::~MainWindow()
@@ -246,6 +237,57 @@ void MainWindow::afterSelectionAction()
     view_->lodManager()->evaluateNow();
     updateActions();
     updateTitle();
+}
+
+void MainWindow::openSettingsDialog()
+{
+    auto *dialog = new SettingsDialog(this);
+    dialog->setAttribute(Qt::WA_DeleteOnClose);
+    connect(dialog, &SettingsDialog::settingChanged, this, &MainWindow::applySettingChanged);
+    connect(dialog, &SettingsDialog::settingsRestored, this, [this]() {
+        applyAllocationLimit();
+        view_->setLodSettings(loadLodSettings());
+        view_->lodManager()->evaluateNow();
+    });
+    dialog->show();
+}
+
+void MainWindow::openSettingsDir()
+{
+    const QString dir = QFileInfo(settings::iniPath()).absolutePath();
+    QDesktopServices::openUrl(QUrl::fromLocalFile(dir));
+}
+
+void MainWindow::applySettingChanged(const QString &key)
+{
+    if (key == QLatin1String("Items/image_allocation_limit")) {
+        applyAllocationLimit();
+        return;
+    }
+    if (key.startsWith(QLatin1String("Items/lod_"))) {
+        // LOD settings take effect at once, like the reference's
+        // lod_changed event.
+        view_->setLodSettings(loadLodSettings());
+        view_->lodManager()->evaluateNow();
+        return;
+    }
+    // arrange_gap and arrange_default are read when used; the storage
+    // format and cache settings apply on the next save or run.
+}
+
+void MainWindow::applyAllocationLimit()
+{
+    settings::File file(settings::iniPath());
+    file.load();
+    int limit =
+        settings::valueOrDefault(file, QStringLiteral("Items/image_allocation_limit")).toInt();
+    if (qEnvironmentVariableIsSet("QT_IMAGEIO_MAXALLOC")) {
+        bool ok = false;
+        const int fromEnv = qEnvironmentVariableIntValue("QT_IMAGEIO_MAXALLOC", &ok);
+        if (ok)
+            limit = fromEnv;
+    }
+    QImageReader::setAllocationLimit(limit);
 }
 
 bool MainWindow::confirmDiscardChanges(const QString &message)
@@ -614,6 +656,12 @@ void MainWindow::buildActions()
     actions_->add(QStringLiteral("sample_color"), QStringLiteral("Sample Color"),
                   QKeySequence(QStringLiteral("S")), G::ItemsInScene,
                   [this](bool) { view_->startSampleColor(); });
+
+    // Settings.
+    actions_->add(QStringLiteral("settings"), QStringLiteral("&Settings"), {}, G::Always,
+                  [this](bool) { openSettingsDialog(); });
+    actions_->add(QStringLiteral("open_settings_dir"), QStringLiteral("&Open Settings Folder"),
+                  {}, G::Always, [this](bool) { openSettingsDir(); });
 }
 
 void MainWindow::buildMenus()
@@ -684,6 +732,11 @@ void MainWindow::buildMenus()
     actions_->appendSeparator(imagesMenu);
     actions_->append(imagesMenu, QStringLiteral("show_color_gamut"));
     actions_->append(imagesMenu, QStringLiteral("sample_color"));
+
+    // Settings: the Keyboard & Mouse editor arrives with the bindings.
+    auto *settingsMenu = menuBar()->addMenu(QStringLiteral("&Settings"));
+    actions_->append(settingsMenu, QStringLiteral("settings"));
+    actions_->append(settingsMenu, QStringLiteral("open_settings_dir"));
 }
 
 void MainWindow::updateActions()
