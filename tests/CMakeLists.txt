@@ -99,6 +99,11 @@ target_link_libraries(test_session_cache PRIVATE beexref_core Qt6::Test)
 beexref_set_warnings(test_session_cache)
 add_test(NAME session_cache COMMAND test_session_cache)
 
+qt_add_executable(test_color_tools test_color_tools.cpp)
+target_link_libraries(test_color_tools PRIVATE beexref_core Qt6::Test)
+beexref_set_warnings(test_color_tools)
+add_test(NAME color_tools COMMAND test_color_tools)
+
 qt_add_executable(test_layout_ops test_layout_ops.cpp)
 target_link_libraries(test_layout_ops PRIVATE beexref_core Qt6::Test)
 beexref_set_warnings(test_layout_ops)

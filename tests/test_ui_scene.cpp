@@ -5,6 +5,7 @@
 #include <QMimeData>
 #include <QMouseEvent>
 #include <QScrollBar>
+#include <QSlider>
 #include <QTemporaryDir>
 #include <QtTest>
 #include <QWheelEvent>
@@ -18,6 +19,7 @@
 #include "settings.h"
 #include "ui/input_controller.h"
 #include "ui/main_window.h"
+#include "ui/color_gamut.h"
 #include "ui/grayscale.h"
 #include "ui/opacity_dialog.h"
 #include "ui/rendering.h"
@@ -142,6 +144,11 @@ private slots:
     void cropActionStartsAndUndoCancels();
     void resetActionsAreSingleUndoSteps();
     void doubleClickFitsTheItem();
+    void sampleColorReadsTheDisplayedPixel();
+    void sampleModeCopiesTheColorUnderThePointer();
+    void gamutDialogCanCloseWhileCounting();
+    void gamutPlotFiltersDotsByThreshold();
+    void gamutDialogSliderUpdatesContinuously();
 };
 
 void TestUiScene::buildsItemsFromDocument()
@@ -1259,6 +1266,157 @@ void TestUiScene::doubleClickFitsTheItem()
     sendMouse(view.viewport(), QEvent::MouseButtonDblClick, QPoint(0, 0), Qt::LeftButton,
               Qt::LeftButton);
     QCOMPARE(view.transform().m11(), afterFit);
+}
+
+void TestUiScene::sampleColorReadsTheDisplayedPixel()
+{
+    auto document = std::make_shared<doc::Document>(doc::Document::create());
+    const doc::ItemPtr item = pixmapItem(4, 2, Qt::red);
+    document->addItem(item);
+
+    ui::Scene scene;
+    scene.setDocument(document);
+    SceneItem *view = scene.pixmapItemViews().first();
+
+    QImage level(4, 2, QImage::Format_ARGB32);
+    level.setPixelColor(0, 0, QColor(255, 0, 0));
+    level.setPixelColor(1, 0, QColor(0, 255, 0));
+    level.setPixelColor(2, 0, QColor(0, 0, 255));
+    level.setPixelColor(3, 0, QColor(255, 255, 0));
+    level.setPixelColor(0, 1, QColor(0, 255, 255));
+    level.setPixelColor(1, 1, QColor(255, 0, 255));
+    level.setPixelColor(2, 1, QColor(255, 255, 255));
+    level.setPixelColor(3, 1, QColor(0, 0, 0, 0)); // fully transparent
+    view->setLevel(level, 1.0);
+
+    QCOMPARE(view->sampleColorAt(view->mapToScene(QPointF(0.5, 0.5))), QColor(255, 0, 0));
+    QCOMPARE(view->sampleColorAt(view->mapToScene(QPointF(1.5, 0.5))), QColor(0, 255, 0));
+    QCOMPARE(view->sampleColorAt(view->mapToScene(QPointF(2.5, 1.5))), QColor(255, 255, 255));
+    // A fully transparent pixel has no colour, and neither has a point
+    // outside the item.
+    QVERIFY(!view->sampleColorAt(view->mapToScene(QPointF(3.5, 1.5))).isValid());
+    QVERIFY(!view->sampleColorAt(view->mapToScene(QPointF(4.5, 0.5))).isValid());
+
+    // A coarser level is addressed through the fraction: local pixels
+    // 0..3 map onto level pixels 0..1.
+    QImage coarse(2, 1, QImage::Format_ARGB32);
+    coarse.setPixelColor(0, 0, QColor(10, 20, 30));
+    coarse.setPixelColor(1, 0, QColor(40, 50, 60));
+    view->setLevel(coarse, 0.5);
+    QCOMPARE(view->sampleColorAt(view->mapToScene(QPointF(0.5, 0.5))), QColor(10, 20, 30));
+    QCOMPARE(view->sampleColorAt(view->mapToScene(QPointF(3.5, 0.5))), QColor(40, 50, 60));
+
+    // Grayscale items sample their grey copy.
+    item->setGrayscale(true);
+    scene.syncDocument();
+    const QColor grey = view->sampleColorAt(view->mapToScene(QPointF(0.5, 0.5)));
+    QVERIFY(grey.isValid());
+    QCOMPARE(grey.red(), grey.green());
+    QCOMPARE(grey.green(), grey.blue());
+    QCOMPARE(grey.alpha(), 255);
+}
+
+void TestUiScene::sampleModeCopiesTheColorUnderThePointer()
+{
+    auto document = std::make_shared<doc::Document>(doc::Document::create());
+    const doc::ItemPtr item = pixmapItem(4, 2, Qt::red);
+    document->addItem(item);
+
+    ui::View view;
+    auto *scene = new ui::Scene(&view);
+    scene->setDocument(document);
+    view.setBoardScene(scene);
+    view.resize(600, 400);
+    view.setTransform(QTransform::fromScale(2.0, 2.0));
+    view.centerOn(QPointF(2, 1));
+
+    SceneItem *viewItem = scene->pixmapItemViews().first();
+    QImage level(4, 2, QImage::Format_ARGB32);
+    level.fill(QColor(255, 0, 255));
+    viewItem->setLevel(level, 1.0);
+
+    QSignalSpy spy(&view, &ui::View::colorSampled);
+    view.startSampleColor();
+    QVERIFY(view.samplingColor());
+    QCOMPARE(view.viewport()->cursor().shape(), Qt::CrossCursor);
+
+    // The swatch follows the pointer with the colour under it.
+    const QPoint centre = view.mapFromScene(viewItem->mapToScene(QPointF(2, 1)));
+    sendMouse(view.viewport(), QEvent::MouseMove, centre, Qt::NoButton, Qt::NoButton);
+    QCOMPARE(view.sampledColor(), QColor(255, 0, 255));
+
+    // A left click reports it and leaves the mode.
+    sendMouse(view.viewport(), QEvent::MouseButtonPress, centre, Qt::LeftButton, Qt::LeftButton);
+    QCOMPARE(spy.count(), 1);
+    QCOMPARE(spy.first().first().value<QColor>(), QColor(255, 0, 255));
+    QVERIFY(!view.samplingColor());
+
+    // Off the image there is no colour; clicking still leaves the mode
+    // and reports nothing.
+    view.startSampleColor();
+    const QPoint empty(4, 4);
+    sendMouse(view.viewport(), QEvent::MouseMove, empty, Qt::NoButton, Qt::NoButton);
+    QVERIFY(!view.sampledColor().isValid());
+    sendMouse(view.viewport(), QEvent::MouseButtonPress, empty, Qt::LeftButton, Qt::LeftButton);
+    QCOMPARE(spy.count(), 1);
+    QVERIFY(!view.samplingColor());
+
+    // Any key cancels the mode, like the reference.
+    view.startSampleColor();
+    QTest::keyClick(&view, Qt::Key_Escape);
+    QVERIFY(!view.samplingColor());
+}
+
+void TestUiScene::gamutDialogCanCloseWhileCounting()
+{
+    // Destroying the dialog while the worker still counts must not
+    // destroy a running thread.
+    auto document = std::make_shared<doc::Document>(doc::Document::create());
+    const doc::ItemPtr item = pixmapItem(64, 64, Qt::red);
+    document->addItem(item);
+
+    ui::Scene scene;
+    scene.setDocument(document);
+    SceneItem *view = scene.pixmapItemViews().first();
+    QImage level(64, 64, QImage::Format_ARGB32);
+    level.fill(Qt::red);
+    view->setLevel(level, 1.0);
+
+    {
+        ui::GamutDialog dialog(nullptr, item, level);
+        dialog.show();
+    }
+    QVERIFY(true);
+}
+
+void TestUiScene::gamutPlotFiltersDotsByThreshold()
+{
+    ui::GamutPlot plot;
+    QHash<ui::colors::GamutKey, int> gamut;
+    gamut.insert(ui::colors::GamutKey{0, 255}, 2);
+    gamut.insert(ui::colors::GamutKey{120, 255}, 50);
+    plot.setGamut(gamut);
+
+    plot.setThreshold(20);
+    QCOMPARE(plot.visibleDots(), 1);
+    plot.setThreshold(1);
+    QCOMPARE(plot.visibleDots(), 2);
+    plot.setThreshold(100);
+    QCOMPARE(plot.visibleDots(), 0);
+    plot.setThreshold(50);
+    QCOMPARE(plot.visibleDots(), 1);
+}
+
+void TestUiScene::gamutDialogSliderUpdatesContinuously()
+{
+    // The wheel follows the slider while it is dragged (the Go port's
+    // behaviour), not only when the handle is released.
+    ui::GamutDialog dialog(nullptr, doc::ItemPtr(), QImage(2, 1, QImage::Format_ARGB32));
+    auto *slider = dialog.findChild<QSlider *>();
+    QVERIFY(slider);
+    QVERIFY(slider->hasTracking());
+    QCOMPARE(slider->minimum(), 0);
+    QCOMPARE(slider->maximum(), 500);
 }
 
 QTEST_MAIN(TestUiScene)

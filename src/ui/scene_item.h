@@ -49,6 +49,12 @@ public:
     void setModelCrop(const QRectF &rect);
     void commitCrop(const QRectF &rect);
 
+    // The colour of the displayed pixel under a scene position, or an
+    // invalid colour when there is none (outside the item, no level
+    // loaded, or a fully transparent pixel), like the reference's
+    // sample_color_at.
+    QColor sampleColorAt(const QPointF &scenePos) const;
+
     const QImage &level() const { return level_; }
     // The image actually painted: the grayscale copy when the document
     // item asks for grayscale, the colour level otherwise.

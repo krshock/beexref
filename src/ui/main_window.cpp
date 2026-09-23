@@ -1,6 +1,8 @@
 #include "main_window.h"
 
 #include "cache/session_cache.h"
+#include "color_gamut.h"
+#include "color_tools.h"
 #include "constants.h"
 #include "input_controller.h"
 #include "layout_ops.h"
@@ -14,6 +16,8 @@
 #include "util/memory.h"
 
 #include <QAction>
+#include <QApplication>
+#include <QClipboard>
 #include <QCursor>
 #include <QFileDialog>
 #include <QFileInfo>
@@ -22,6 +26,7 @@
 #include <QMessageBox>
 #include <QMimeData>
 #include <QTimer>
+#include <QToolTip>
 
 namespace ui {
 namespace {
@@ -228,6 +233,14 @@ MainWindow::MainWindow(bool cacheDisabled, QWidget *parent)
         selection::setGrayscale(*scene_, undoStack_, checked);
         afterSelectionAction();
     });
+    imagesMenu->addSeparator();
+    gamutAction_ = imagesMenu->addAction(QStringLiteral("Show &Color Gamut"));
+    connect(gamutAction_, &QAction::triggered, this, &MainWindow::showColorGamut);
+    auto *sampleColorAction = imagesMenu->addAction(QStringLiteral("Sample &Color"));
+    sampleColorAction->setShortcut(QKeySequence(Qt::Key_S));
+    connect(sampleColorAction, &QAction::triggered, view_, &View::startSampleColor);
+    connect(view_, &View::colorSampled, this, &MainWindow::copySampledColor);
+
     connect(scene_, &QGraphicsScene::selectionChanged, this,
             &MainWindow::updateSelectionActions);
     updateSelectionActions();
@@ -323,6 +336,7 @@ void MainWindow::applyHistoryStep(bool undo)
     // The reference cancels active modes (crop, sampling) before an
     // undo or redo touches the items they edit.
     view_->cancelCrop();
+    view_->cancelSampleColor();
     const bool changed = undo ? undoStack_.undo() : undoStack_.redo();
     if (!changed)
         return;
@@ -339,12 +353,36 @@ void MainWindow::afterSelectionAction()
     // Scene-wide edits cancel an active crop, like the reference's
     // cancel_active_modes().
     view_->cancelCrop();
+    view_->cancelSampleColor();
     if (document_)
         document_->setModified(true);
     view_->refreshSceneRect();
     view_->lodManager()->evaluateNow();
     updateSelectionActions();
     updateTitle();
+}
+
+void MainWindow::copySampledColor(const QColor &color)
+{
+    const QString hex = colors::hex(color);
+    QApplication::clipboard()->setText(hex);
+    // A later paste should not restore the items copied before.
+    input_->clearInternalClipboard();
+    QToolTip::showText(QCursor::pos(), QStringLiteral("Copied color to clipboard: %1").arg(hex));
+    logging::info(QStringLiteral("Sampled color"), {{QStringLiteral("color"), hex}});
+}
+
+void MainWindow::showColorGamut()
+{
+    if (!scene_)
+        return;
+    const QVector<SceneItem *> images = selection::imageSelection(*scene_);
+    if (images.size() != 1)
+        return;
+    SceneItem *view = images.first();
+    auto *dialog = new GamutDialog(this, view->item(), view->level());
+    dialog->setAttribute(Qt::WA_DeleteOnClose);
+    dialog->show();
 }
 
 void MainWindow::normalizeSelection(int mode)
@@ -430,6 +468,8 @@ void MainWindow::updateSelectionActions()
     const QVector<SceneItem *> images = selection::imageSelection(*scene_);
     grayscaleAction_->setEnabled(!images.isEmpty());
     grayscaleAction_->setChecked(!images.isEmpty() && images.first()->item()->grayscale());
+    if (gamutAction_)
+        gamutAction_->setEnabled(images.size() == 1);
 }
 
 void MainWindow::updateTitle()

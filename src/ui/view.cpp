@@ -1,5 +1,6 @@
 #include "view.h"
 
+#include "color_swatch.h"
 #include "cursors.h"
 #include "lod_manager.h"
 #include "rendering.h"
@@ -17,6 +18,7 @@
 #include <QPainter>
 #include <QScrollBar>
 #include <QTimer>
+#include <QCursor>
 #include <QKeyEvent>
 #include <QWheelEvent>
 
@@ -327,6 +329,21 @@ void View::mousePressEvent(QMouseEvent *event)
         return;
     }
 
+    if (sampling_) {
+        if (event->button() == Qt::LeftButton) {
+            const QPoint viewportPos = event->position().toPoint();
+            if (auto *item = dynamic_cast<SceneItem *>(itemAt(viewportPos))) {
+                const QColor color = item->sampleColorAt(mapToScene(viewportPos));
+                if (color.isValid())
+                    emit colorSampled(color);
+            }
+        }
+        // Any button leaves the mode, like the reference.
+        cancelSampleColor();
+        event->accept();
+        return;
+    }
+
     if (cropItem_ && event->button() == Qt::LeftButton) {
         const QPoint viewportPos = event->position().toPoint();
         const QPointF itemPos = cropItem_->mapFromScene(mapToScene(viewportPos));
@@ -433,6 +450,12 @@ void View::mouseMoveEvent(QMouseEvent *event)
         panStart_ = position;
         updateViewState();
         lod_->schedule();
+        event->accept();
+        return;
+    }
+
+    if (sampling_) {
+        updateSampleSwatch(position);
         event->accept();
         return;
     }
@@ -741,6 +764,7 @@ void View::cropSelection()
 {
     if (cropItem_)
         return;
+    cancelSampleColor();
     SceneItem *target = nullptr;
     if (boardScene_) {
         const QVector<SceneItem *> selected = boardScene_->selectedItemViews();
@@ -812,6 +836,53 @@ void View::finishCropSession(bool changed)
     emit documentModified();
 }
 
+void View::startSampleColor()
+{
+    // Only one tool runs at a time, like the reference's
+    // cancel_active_modes().
+    cancelCrop();
+    sampling_ = true;
+    viewport()->setCursor(Qt::CrossCursor);
+    if (!swatch_)
+        swatch_ = new ColorSwatch(viewport());
+
+    // Show the colour under the pointer right away.
+    const QPoint pos = viewport()->mapFromGlobal(QCursor::pos());
+    if (viewport()->rect().contains(pos))
+        updateSampleSwatch(pos);
+    setFocus();
+}
+
+void View::cancelSampleColor()
+{
+    if (!sampling_)
+        return;
+    sampling_ = false;
+    if (viewport())
+        viewport()->unsetCursor();
+    if (swatch_)
+        swatch_->hide();
+}
+
+QColor View::sampledColor() const
+{
+    return swatch_ ? swatch_->color() : QColor();
+}
+
+void View::updateSampleSwatch(const QPoint &viewportPos)
+{
+    if (!swatch_)
+        return;
+    QColor color;
+    if (auto *item = dynamic_cast<SceneItem *>(itemAt(viewportPos)))
+        color = item->sampleColorAt(mapToScene(viewportPos));
+    // Without a colour the swatch stays visible but transparent, like
+    // the reference's NONE_COLOR.
+    swatch_->setColor(color);
+    swatch_->moveNear(viewportPos);
+    swatch_->show();
+}
+
 void View::updateCropHoverCursor(const QPoint &viewportPos)
 {
     if (!cropItem_) {
@@ -839,6 +910,11 @@ void View::updateCropHoverCursor(const QPoint &viewportPos)
 
 void View::keyPressEvent(QKeyEvent *event)
 {
+    if (sampling_) {
+        cancelSampleColor();
+        event->accept();
+        return;
+    }
     if (cropItem_) {
         if (event->key() == Qt::Key_Return || event->key() == Qt::Key_Enter) {
             confirmCrop();
@@ -856,7 +932,7 @@ void View::keyPressEvent(QKeyEvent *event)
 
 void View::leaveEvent(QEvent *event)
 {
-    if (drag_ == Drag::None && !panning_)
+    if (drag_ == Drag::None && !panning_ && !sampling_)
         viewport()->unsetCursor();
     QGraphicsView::leaveEvent(event);
 }

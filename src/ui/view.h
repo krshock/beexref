@@ -7,6 +7,7 @@
 
 #include "doc/undo.h"
 
+#include <QColor>
 #include <QGraphicsView>
 #include <QPoint>
 #include <QPointF>
@@ -20,6 +21,7 @@ class QMimeData;
 
 namespace ui {
 
+class ColorSwatch;
 class LevelLoader;
 class LodManager;
 
@@ -53,6 +55,15 @@ public:
     // active modes before undo/redo and before a scene is replaced.
     void cancelCrop();
     bool cropActive() const { return cropItem_ != nullptr; }
+
+    // Sample colour mode: a crosshair and a swatch follow the pointer;
+    // the next click reports the colour under it and leaves the mode
+    // (the reference's Sample Color action).
+    void startSampleColor();
+    void cancelSampleColor();
+    bool samplingColor() const { return sampling_; }
+    // The colour currently shown in the swatch; invalid when none.
+    QColor sampledColor() const;
     // Commands for completed gestures (moves) are pushed here.
     void setUndoStack(doc::UndoStack *stack) { undoStack_ = stack; }
 
@@ -63,6 +74,8 @@ public:
     void zoomAt(int delta, const QPoint &anchor);
 
 signals:
+    // A colour was sampled and the mode ended; the window copies it.
+    void colorSampled(const QColor &color);
     // A drop the filter accepted, with its position in scene
     // coordinates. The mime data stays owned by the event.
     void mimeDropped(const QMimeData *data, const QPointF &scenePos);
@@ -129,6 +142,7 @@ private:
     void confirmCrop();
     void finishCropSession(bool changed);
     void updateCropHoverCursor(const QPoint &viewportPos);
+    void updateSampleSwatch(const QPoint &viewportPos);
     // View scale times the item's scale: the reference's
     // fixed_length_for_viewport denominator.
     double cropScale() const;
@@ -153,6 +167,10 @@ private:
 
     // Last region the selection overlay was known to occupy.
     QRectF overlayRegion_;
+
+    // Sample colour mode.
+    bool sampling_ = false;
+    ColorSwatch *swatch_ = nullptr;
 
     // Crop session state.
     SceneItem *cropItem_ = nullptr;

@@ -44,6 +44,9 @@ public:
     void paste(const QPointF &scenePos, double viewScale = 1.0);
 
     bool hasInternalClipboard() const { return !internalClipboard_.isEmpty(); }
+    // Forget the copied items, so a paste does not restore them; the
+    // reference clears its internal clipboard when a colour is copied.
+    void clearInternalClipboard() { internalClipboard_.clear(); }
 
     // Payloads of items that leave the board are moved here, so a
     // deleted image's bytes do not stay in RAM for undo.

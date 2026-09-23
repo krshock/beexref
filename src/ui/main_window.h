@@ -5,6 +5,7 @@
 #include "scene.h"
 #include "view.h"
 
+#include <QColor>
 #include <QMainWindow>
 
 #include <memory>
@@ -51,9 +52,13 @@ private:
     // The reference's Change Opacity...: live preview in the dialog,
     // one undo step on OK, nothing on Cancel.
     void changeOpacity();
-    // Keeps the Grayscale action's enabled and checked state in step
-    // with the selection.
+    // Keeps the Grayscale and Color Gamut actions in step with the
+    // selection.
     void updateSelectionActions();
+    // Copies a sampled colour and says so (the reference's notification).
+    void copySampledColor(const QColor &color);
+    // Opens the gamut wheel for the single selected image.
+    void showColorGamut();
     // Items and Arrange menu handlers (Items/* settings are read at use
     // time, like the reference's valueOrDefault calls).
     void normalizeSelection(int mode); // 0 height, 1 width, 2 size
@@ -67,6 +72,7 @@ private:
     LevelLoader *loader_ = nullptr;
     InputController *input_ = nullptr;
     QAction *grayscaleAction_ = nullptr;
+    QAction *gamutAction_ = nullptr;
     doc::UndoStack undoStack_;
     std::shared_ptr<cache::SessionCache> sessionCache_;
     std::shared_ptr<doc::Document> document_;

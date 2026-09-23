@@ -53,6 +53,31 @@ QRectF SceneItem::imageBounds() const
     return QRectF(QPointF(0, 0), QSizeF(imageSize()));
 }
 
+QColor SceneItem::sampleColorAt(const QPointF &scenePos) const
+{
+    if (!isPixmap() || level_.isNull())
+        return {};
+    const QPointF local = mapFromScene(scenePos);
+    if (!displayBounds().contains(local))
+        return {};
+
+    const QImage &image = displayLevel();
+    if (image.isNull())
+        return {};
+
+    // Local coordinates are original image pixels; the level is the
+    // same image at the current fraction. Clamp rather than reporting
+    // no colour when a truncated downscale falls just short of the far
+    // edge.
+    const double fraction = levelFraction_ > 0 ? levelFraction_ : 1.0;
+    const int x = qBound(0, int(local.x() * fraction), image.width() - 1);
+    const int y = qBound(0, int(local.y() * fraction), image.height() - 1);
+    const QColor color = image.pixelColor(x, y);
+    if (color.alpha() == 0)
+        return {};
+    return color;
+}
+
 QString SceneItem::errorText() const
 {
     return item_->text().isEmpty() ? QStringLiteral("Cannot load image") : item_->text();

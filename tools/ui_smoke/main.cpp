@@ -17,6 +17,7 @@
 #include <QImage>
 #include <QMimeData>
 #include <QAction>
+#include <QSlider>
 #include <QMouseEvent>
 #include <QScrollBar>
 #include <QTextStream>
@@ -27,6 +28,7 @@
 
 #include "doc/document.h"
 #include "settings.h"
+#include "ui/color_gamut.h"
 #include "ui/input_controller.h"
 #include "ui/lod_manager.h"
 #include "ui/main_window.h"
@@ -361,6 +363,67 @@ public:
                   << fitted.width() << "x" << fitted.height() << " in viewport "
                   << viewport->width() << "x" << viewport->height() << "\n";
             snapshot(QStringLiteral("21-double-click-fit"));
+
+            // E5: sample the colour under the pointer and copy it.
+            QAction *sampleColor = nullptr;
+            QAction *showGamut = nullptr;
+            for (QAction *action : actions) {
+                if (action->text() == QStringLiteral("Sample &Color"))
+                    sampleColor = action;
+                else if (action->text() == QStringLiteral("Show &Color Gamut"))
+                    showGamut = action;
+            }
+            QApplication::clipboard()->clear();
+            const QPoint samplePoint = view->mapFromScene(target->sceneBoundingRect().center());
+            sampleColor->trigger();
+            sendMouse(viewport, QEvent::MouseMove, samplePoint, Qt::NoButton, Qt::NoButton);
+            QTest::qWait(300);
+            out() << "sampling active: " << window_.view()->samplingColor()
+                  << ", swatch " << window_.view()->sampledColor().name() << "\n";
+            snapshot(QStringLiteral("22-sample-swatch"));
+
+            sendMouse(viewport, QEvent::MouseButtonPress, samplePoint, Qt::LeftButton,
+                      Qt::LeftButton);
+            QTest::qWait(300);
+            out() << "sampled clipboard: " << QApplication::clipboard()->text()
+                  << ", mode ended: " << !window_.view()->samplingColor() << "\n";
+            snapshot(QStringLiteral("23-sampled"));
+
+            // E5: the colour gamut wheel for a real photo item (the
+            // pasted one is a flat colour); the histogram is counted off
+            // the GUI thread and the action needs a single image
+            // selection.
+            window_.scene()->clearSelection();
+            ui::SceneItem *photo = all.at(1);
+            photo->setSelected(true);
+            QTest::qWait(200);
+            out() << "gamut action enabled: " << showGamut->isEnabled() << "\n";
+            showGamut->trigger();
+            QTest::qWait(1500);
+            for (QWidget *widget : QApplication::topLevelWidgets()) {
+                if (widget->windowTitle() != QStringLiteral("Color Gamut"))
+                    continue;
+                const QString path = outputDir_ + QStringLiteral("/24-color-gamut.png");
+                widget->grab().save(path);
+                out() << "gamut dialog " << widget->width() << "x" << widget->height() << " -> "
+                      << path << "\n";
+
+                // The wheel must follow the slider continuously: each
+                // step changes how many buckets pass the threshold.
+                QSlider *slider = widget->findChild<QSlider *>();
+                ui::GamutPlot *plot = widget->findChild<ui::GamutPlot *>();
+                QStringList steps;
+                if (slider && plot) {
+                    for (int value : {20, 100, 300, 500}) {
+                        slider->setValue(value);
+                        QTest::qWait(150);
+                        steps << QStringLiteral("%1:%2").arg(value).arg(plot->visibleDots());
+                    }
+                }
+                out() << "gamut dots per threshold (value:dots): " << steps.join(QStringLiteral(" "))
+                      << "\n";
+                widget->close();
+            }
         }
 
         const ui::LodManager::Stats stats = view->lodManager()->stats();
