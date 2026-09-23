@@ -2350,6 +2350,31 @@ void TestUiScene::welcomeOverlayListsRecentFiles()
     QCOMPARE(files->item(0)->text(), QStringLiteral("recent.beex"));
     QCOMPARE(files->item(0)->data(Qt::UserRole).toString(), recent);
 
+    // Tall window: the files card sits below the welcome card.
+    QWidget *mainCard =
+        overlay->findChild<QLabel *>(QStringLiteral("HUDDisplay"))->parentWidget()->parentWidget();
+    QWidget *filesCard = files->parentWidget()->parentWidget();
+    QVERIFY(!overlay->sideBySide());
+    QVERIFY(!filesCard->isHidden());
+    QVERIFY(filesCard->geometry().top() >= mainCard->geometry().bottom());
+
+    // Too short to stack: it moves to the right of the welcome card.
+    window.resize(900, 340);
+    QTest::qWait(50);
+    QVERIFY(overlay->sideBySide());
+    QVERIFY(!filesCard->isHidden());
+    QVERIFY(filesCard->geometry().left() >= mainCard->geometry().right());
+
+    // Too short and too narrow: it makes way entirely.
+    window.resize(380, 340);
+    QTest::qWait(50);
+    QVERIFY(!overlay->sideBySide());
+    QVERIFY(filesCard->isHidden());
+
+    window.resize(900, 700);
+    QTest::qWait(50);
+    QVERIFY(!filesCard->isHidden());
+
     QSignalSpy spy(overlay, &ui::WelcomeOverlay::recentFileActivated);
     QTest::mouseClick(files->viewport(), Qt::LeftButton, Qt::NoModifier,
                       files->visualItemRect(files->item(0)).center());

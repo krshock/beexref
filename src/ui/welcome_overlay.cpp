@@ -5,6 +5,7 @@
 #include "theme.h"
 
 #include <QApplication>
+#include <QBoxLayout>
 #include <QDragEnterEvent>
 #include <QDragMoveEvent>
 #include <QDropEvent>
@@ -27,7 +28,6 @@ constexpr int kCardWidth = 460;
 constexpr int kLogoSizeStart = 64;
 constexpr int kLogoSizeEmpty = 40;
 constexpr int kIconSize = 18;
-constexpr int kFilesMinHeight = 430;
 constexpr int kSmallHeight = 360;
 constexpr int kLogoMinHeight = 280;
 constexpr int kSubtitleMinHeight = 260;
@@ -58,9 +58,11 @@ WelcomeOverlay::WelcomeOverlay(QWidget *canvas)
         canvas_->installEventFilter(this);
 
     content_ = new QWidget(this);
-    auto *contentLayout = new QVBoxLayout(content_);
-    contentLayout->setContentsMargins(0, 0, 0, 0);
-    contentLayout->setSpacing(14);
+    // A box layout, so the recent-files card can move from below the
+    // welcome card to beside it when the window is too short.
+    contentLayout_ = new QBoxLayout(QBoxLayout::TopToBottom, content_);
+    contentLayout_->setContentsMargins(0, 0, 0, 0);
+    contentLayout_->setSpacing(14);
 
     card_ = makeCard();
     auto *cardLayout = qobject_cast<hud::HudPanel *>(card_)->bodyLayout();
@@ -105,8 +107,8 @@ WelcomeOverlay::WelcomeOverlay(QWidget *canvas)
             emit recentFileActivated(item->data(Qt::UserRole).toString());
     });
 
-    contentLayout->addWidget(card_, 0, Qt::AlignHCenter);
-    contentLayout->addWidget(filesCard_, 0, Qt::AlignHCenter);
+    contentLayout_->addWidget(card_, 0, Qt::AlignCenter);
+    contentLayout_->addWidget(filesCard_, 0, Qt::AlignCenter);
 
     auto *layout = new QVBoxLayout(this);
     layout->setContentsMargins(0, 0, 0, 0);
@@ -241,8 +243,29 @@ void WelcomeOverlay::updateVisibility()
     // Hide or shrink optional content when the window is small, like
     // the reference.
     const int height = this->height();
+    const int width = this->width();
     const bool small = height < kSmallHeight;
-    filesCard_->setVisible(hasRecentFiles_ && height >= kFilesMinHeight);
+
+    // The recent-files card goes below the welcome card when that fits,
+    // beside it when stacking would not, and away when neither does.
+    sideBySide_ = false;
+    bool filesVisible = hasRecentFiles_;
+    if (filesVisible) {
+        const int spacing = contentLayout_->spacing();
+        const int stacked = card_->sizeHint().height() + spacing
+            + filesCard_->sizeHint().height();
+        const int beside =
+            card_->sizeHint().width() + spacing + filesCard_->sizeHint().width();
+        if (height >= stacked) {
+            contentLayout_->setDirection(QBoxLayout::TopToBottom);
+        } else if (width >= beside) {
+            contentLayout_->setDirection(QBoxLayout::LeftToRight);
+            sideBySide_ = true;
+        } else {
+            filesVisible = false;
+        }
+    }
+    filesCard_->setVisible(filesVisible);
     logoLabel_->setVisible(!logo_.isNull() && height >= kLogoMinHeight);
     subtitleLabel_->setVisible(height >= kSubtitleMinHeight);
     hintLabel_->setVisible(height >= kHintMinHeight);

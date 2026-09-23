@@ -7,6 +7,7 @@
 
 #include <functional>
 
+class QBoxLayout;
 class QLabel;
 class QListWidget;
 class QPushButton;
@@ -43,6 +44,9 @@ public:
     void setCanvas(QWidget *canvas);
     void setMode(Mode mode);
     Mode mode() const { return mode_; }
+    // Whether the recent-files card sits beside the welcome card (when
+    // stacking it would not fit vertically) rather than below it.
+    bool sideBySide() const { return sideBySide_; }
     void setRecentFiles(const QStringList &files);
     // The board name shown in empty-board mode (elided in the middle).
     void setBoardName(const QString &name);
@@ -86,6 +90,8 @@ private:
     QPixmap logo_;
 
     QWidget *content_ = nullptr;
+    QBoxLayout *contentLayout_ = nullptr;
+    bool sideBySide_ = false;
     QWidget *card_ = nullptr;
     QLabel *logoLabel_ = nullptr;
     QLabel *titleLabel_ = nullptr;
