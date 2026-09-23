@@ -5,6 +5,7 @@
 #include "color_gamut.h"
 #include "color_tools.h"
 #include "hud.h"
+#include "info_dialogs.h"
 #include "constants.h"
 #include "input_controller.h"
 #include "layout_ops.h"
@@ -12,6 +13,7 @@
 #include "lod_manager.h"
 #include "logging.h"
 #include "opacity_dialog.h"
+#include "rendering.h"
 #include "selection_ops.h"
 #include "controls.h"
 #include "controls_dialog.h"
@@ -23,6 +25,7 @@
 #include <QAction>
 #include <QApplication>
 #include <QImageReader>
+#include <QPlainTextEdit>
 #include <QUrl>
 #include <QMenu>
 #include <QClipboard>
@@ -252,6 +255,43 @@ void MainWindow::openSettingsDialog()
         view_->setLodSettings(loadLodSettings());
         view_->lodManager()->evaluateNow();
     });
+    dialog->show();
+}
+
+void MainWindow::openImageInfo()
+{
+    if (!scene_)
+        return;
+    const QVector<SceneItem *> images = selection::imageSelection(*scene_);
+    if (images.size() != 1)
+        return;
+    auto *dialog = new ImageInfoDialog(this, images.first());
+    dialog->setAttribute(Qt::WA_DeleteOnClose);
+    dialog->show();
+}
+
+void MainWindow::openHelp()
+{
+    auto *dialog = new HelpDialog(this);
+    dialog->setAttribute(Qt::WA_DeleteOnClose);
+    dialog->show();
+}
+
+void MainWindow::showAbout()
+{
+    QMessageBox::about(
+        this, QStringLiteral("About %1").arg(QString::fromLatin1(constants::AppName)),
+        QStringLiteral("<h2>%1 %2</h2><p>%3</p><p>%4</p>")
+            .arg(QString::fromLatin1(constants::AppName),
+                 QString::fromLatin1(constants::Version),
+                 QString::fromLatin1(constants::AppNameFull),
+                 QString::fromUtf8(constants::Copyright)));
+}
+
+void MainWindow::openDebugLog()
+{
+    auto *dialog = new DebugLogDialog(this);
+    dialog->setAttribute(Qt::WA_DeleteOnClose);
     dialog->show();
 }
 
@@ -715,6 +755,69 @@ void MainWindow::buildActions()
                   QKeySequence(QStringLiteral("S")), G::ItemsInScene,
                   [this](bool) { view_->startSampleColor(); });
 
+    // View: window and rendering toggles. The reference's defaults are
+    // session-only; Show Menu Bar starts checked here because the
+    // reference's unchecked default would leave the menu unreachable
+    // once hidden.
+    actions_->add(QStringLiteral("fullscreen"), QStringLiteral("&Fullscreen"),
+                  QKeySequence(Qt::Key_F11), G::Always,
+                  [this](bool checked) {
+                      checked ? showFullScreen() : showNormal();
+                  },
+                  true);
+    actions_->add(QStringLiteral("always_on_top"), QStringLiteral("&Always On Top"), {},
+                  G::Always,
+                  [this](bool checked) {
+                      const bool visible = isVisible();
+                      setWindowFlag(Qt::WindowStaysOnTopHint, checked);
+                      if (visible)
+                          show();
+                  },
+                  true);
+    actions_->add(QStringLiteral("show_scrollbars"), QStringLiteral("Show &Scrollbars"), {},
+                  G::Always,
+                  [this](bool checked) {
+                      const Qt::ScrollBarPolicy policy =
+                          checked ? Qt::ScrollBarAsNeeded : Qt::ScrollBarAlwaysOff;
+                      view_->setHorizontalScrollBarPolicy(policy);
+                      view_->setVerticalScrollBarPolicy(policy);
+                  },
+                  true);
+    QAction *menubarAction = actions_->add(
+        QStringLiteral("show_menubar"), QStringLiteral("Show &Menu Bar"), {}, G::Always,
+        [this](bool checked) { menuBar()->setVisible(checked); }, true);
+    // Deliberate deviation: the reference defaults this off, which would
+    // leave its own toggle unreachable once hidden.
+    menubarAction->setChecked(true);
+    QAction *titlebarAction = actions_->add(
+        QStringLiteral("show_titlebar"), QStringLiteral("Show &Title Bar"), {}, G::Always,
+        [this](bool checked) {
+            const bool visible = isVisible();
+            setWindowFlag(Qt::FramelessWindowHint, !checked);
+            if (visible)
+                show();
+        },
+        true);
+    // The window starts with its title bar, like the reference's default.
+    titlebarAction->setChecked(true);
+    QAction *smoothAction = actions_->add(
+        QStringLiteral("smooth_images"), QStringLiteral("&Smooth Images"), {}, G::Always,
+        [this](bool checked) {
+            rendering::setSmoothPixmaps(checked);
+            view_->viewport()->update();
+        },
+        true);
+    // Smooth drawing is on by default, matching rendering's own default.
+    smoothAction->setChecked(true);
+    actions_->add(QStringLiteral("move_window"), QStringLiteral("Move &Window"),
+                  QKeySequence(QStringLiteral("Ctrl+M")), G::Always,
+                  [this](bool) { view_->toggleMoveWindow(); });
+
+    // Images: the metadata window.
+    actions_->add(QStringLiteral("show_image_info"), QStringLiteral("Show Image &Info"),
+                  QKeySequence(QStringLiteral("I")), G::SingleImage,
+                  [this](bool) { openImageInfo(); });
+
     // Settings.
     actions_->add(QStringLiteral("settings"), QStringLiteral("&Settings"), {}, G::Always,
                   [this](bool) { openSettingsDialog(); });
@@ -722,6 +825,17 @@ void MainWindow::buildActions()
                   G::Always, [this](bool) { openControlsDialog(); });
     actions_->add(QStringLiteral("open_settings_dir"), QStringLiteral("&Open Settings Folder"),
                   {}, G::Always, [this](bool) { openSettingsDir(); });
+
+    // Help.
+    actions_->add(QStringLiteral("help"), QStringLiteral("&Help"), QKeySequence(Qt::Key_F1),
+                  G::Always, [this](bool) { openHelp(); });
+    // The reference binds Help twice.
+    actions_->setDefaultShortcuts(QStringLiteral("help"),
+                                  {QStringLiteral("F1"), QStringLiteral("Ctrl+H")});
+    actions_->add(QStringLiteral("about"), QStringLiteral("&About"), {}, G::Always,
+                  [this](bool) { showAbout(); });
+    actions_->add(QStringLiteral("debuglog"), QStringLiteral("Show &Debug Log"), {}, G::Always,
+                  [this](bool) { openDebugLog(); });
 }
 
 void MainWindow::buildMenus()
@@ -757,6 +871,15 @@ void MainWindow::buildMenus()
     auto *viewMenu = menuBar()->addMenu(QStringLiteral("&View"));
     actions_->append(viewMenu, QStringLiteral("fit_scene"));
     actions_->append(viewMenu, QStringLiteral("fit_selection"));
+    actions_->appendSeparator(viewMenu);
+    actions_->append(viewMenu, QStringLiteral("fullscreen"));
+    actions_->append(viewMenu, QStringLiteral("always_on_top"));
+    actions_->append(viewMenu, QStringLiteral("show_scrollbars"));
+    actions_->append(viewMenu, QStringLiteral("show_menubar"));
+    actions_->append(viewMenu, QStringLiteral("show_titlebar"));
+    actions_->append(viewMenu, QStringLiteral("smooth_images"));
+    actions_->appendSeparator(viewMenu);
+    actions_->append(viewMenu, QStringLiteral("move_window"));
 
     // Insert: text arrives with text editing.
     auto *insertMenu = menuBar()->addMenu(QStringLiteral("&Insert"));
@@ -791,6 +914,7 @@ void MainWindow::buildMenus()
     actions_->append(imagesMenu, QStringLiteral("grayscale"));
     actions_->appendSeparator(imagesMenu);
     actions_->append(imagesMenu, QStringLiteral("show_color_gamut"));
+    actions_->append(imagesMenu, QStringLiteral("show_image_info"));
     actions_->append(imagesMenu, QStringLiteral("sample_color"));
 
     // Settings: the Keyboard & Mouse editor arrives with the bindings.
@@ -798,6 +922,11 @@ void MainWindow::buildMenus()
     actions_->append(settingsMenu, QStringLiteral("settings"));
     actions_->append(settingsMenu, QStringLiteral("keyboard_settings"));
     actions_->append(settingsMenu, QStringLiteral("open_settings_dir"));
+
+    auto *helpMenu = menuBar()->addMenu(QStringLiteral("&Help"));
+    actions_->append(helpMenu, QStringLiteral("help"));
+    actions_->append(helpMenu, QStringLiteral("about"));
+    actions_->append(helpMenu, QStringLiteral("debuglog"));
 }
 
 void MainWindow::updateActions()

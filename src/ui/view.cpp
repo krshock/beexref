@@ -330,11 +330,23 @@ void View::mousePressEvent(QMouseEvent *event)
     beginInteraction();
     lod_->evaluateNow();
 
+    // While the window is following the pointer, any press ends the
+    // mode, like the reference's movewin handling.
+    if (movingWindow_) {
+        exitMoveWindow();
+        event->accept();
+        return;
+    }
+
     // The reference checks the configured mouse bindings before the
-    // item interactions: pan, drag-zoom and (not ported yet)
-    // move-window.
+    // item interactions: pan, drag-zoom and move-window.
     const controls::Bindings::Match binding =
         bindings_.mouseAction(event->button(), event->modifiers());
+    if (binding.valid && binding.group == QLatin1String("movewindow")) {
+        enterMoveWindow();
+        event->accept();
+        return;
+    }
     if (binding.valid && binding.group == QLatin1String("pan")) {
         panning_ = true;
         panStart_ = event->position().toPoint();
@@ -465,6 +477,17 @@ void View::mouseMoveEvent(QMouseEvent *event)
 {
     const QPoint position = event->position().toPoint();
 
+    if (movingWindow_) {
+        // The window follows the pointer by the global cursor delta.
+        const QPointF global = event->globalPosition();
+        const QPointF delta = global - moveWindowGlobal_;
+        moveWindowGlobal_ = global;
+        if (QWidget *top = window())
+            top->move(top->pos() + delta.toPoint());
+        event->accept();
+        return;
+    }
+
     if (panning_) {
         // Content follows the cursor: the reference pans by
         // (start - current), which is the negated scrollbar delta.
@@ -552,6 +575,12 @@ void View::mouseMoveEvent(QMouseEvent *event)
 void View::mouseReleaseEvent(QMouseEvent *event)
 {
     restoreSmoothing();
+
+    if (movingWindow_) {
+        exitMoveWindow();
+        event->accept();
+        return;
+    }
 
     // A release ends pan and drag-zoom, whatever button it is, like the
     // reference's PAN_MODE/ZOOM_MODE handling.
@@ -879,6 +908,31 @@ void View::finishCropSession(bool changed)
     emit documentModified();
 }
 
+void View::toggleMoveWindow()
+{
+    if (movingWindow_)
+        exitMoveWindow();
+    else
+        enterMoveWindow();
+}
+
+void View::enterMoveWindow()
+{
+    if (movingWindow_)
+        return;
+    movingWindow_ = true;
+    viewport()->setCursor(Qt::SizeAllCursor);
+    moveWindowGlobal_ = QCursor::pos();
+}
+
+void View::exitMoveWindow()
+{
+    if (!movingWindow_)
+        return;
+    movingWindow_ = false;
+    viewport()->unsetCursor();
+}
+
 void View::startSampleColor()
 {
     // Only one tool runs at a time, like the reference's
@@ -953,6 +1007,11 @@ void View::updateCropHoverCursor(const QPoint &viewportPos)
 
 void View::keyPressEvent(QKeyEvent *event)
 {
+    if (movingWindow_) {
+        exitMoveWindow();
+        event->accept();
+        return;
+    }
     if (sampling_) {
         cancelSampleColor();
         event->accept();
@@ -975,7 +1034,7 @@ void View::keyPressEvent(QKeyEvent *event)
 
 void View::leaveEvent(QEvent *event)
 {
-    if (drag_ == Drag::None && !panning_ && !sampling_)
+    if (drag_ == Drag::None && !panning_ && !sampling_ && !movingWindow_)
         viewport()->unsetCursor();
     QGraphicsView::leaveEvent(event);
 }

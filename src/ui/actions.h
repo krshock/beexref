@@ -56,6 +56,9 @@ public:
     QStringList defaultShortcuts(const QString &id) const;
     QStringList shortcuts(const QString &id) const;
     void setShortcuts(const QString &id, const QStringList &shortcuts);
+    // Sets the action's shortcuts and records them as the defaults
+    // (the reference has actions with two, e.g. Help = F1, Ctrl+H).
+    void setDefaultShortcuts(const QString &id, const QStringList &shortcuts);
 
     // Appends one registered action to a menu, in the reference's order.
     void append(QMenu *menu, const QString &id);

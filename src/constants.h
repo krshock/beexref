@@ -5,6 +5,8 @@ namespace constants {
 inline constexpr char AppName[] = "BeeXRef";
 inline constexpr char AppNameFull[] = "BeeXRef Reference Image Viewer";
 inline constexpr char Version[] = "0.1.0";
+// The reference's about box text.
+inline constexpr char Copyright[] = "Copyright \u00A9 2021-2024 Rebecca Breu";
 
 inline constexpr char BeeFileExtension[] = ".bee";
 inline constexpr char BeexFileExtension[] = ".beex";

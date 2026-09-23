@@ -35,6 +35,7 @@
 #include "ui/lod_manager.h"
 #include "ui/main_window.h"
 #include "ui/scene.h"
+#include "ui/rendering.h"
 #include "ui/selection_ops.h"
 #include "ui/scene_item.h"
 #include "ui/view.h"
@@ -498,6 +499,63 @@ public:
                                            + QStringLiteral("/31-controls-wheel.png"));
                 }
                 candidate->close();
+            }
+
+            // Part 3: window toggles and the info dialogs.
+            actionByText(QStringLiteral("Show &Scrollbars"))->trigger();
+            QTest::qWait(300);
+            out() << "scrollbars on: "
+                  << (view->horizontalScrollBarPolicy() == Qt::ScrollBarAsNeeded) << "\n";
+            snapshot(QStringLiteral("32-scrollbars"));
+
+            actionByText(QStringLiteral("&Smooth Images"))->trigger();
+            QTest::qWait(200);
+            out() << "smooth off: " << !ui::rendering::smoothPixmaps() << "\n";
+            actionByText(QStringLiteral("&Smooth Images"))->trigger();
+            actionByText(QStringLiteral("Show &Scrollbars"))->trigger();
+            QTest::qWait(200);
+
+            actionByText(QStringLiteral("&Help"))->trigger();
+            QTest::qWait(600);
+            for (QDialog *candidate : window_.findChildren<QDialog *>()) {
+                if (!candidate->windowTitle().endsWith(QStringLiteral("Help")))
+                    continue;
+                const QString path = outputDir_ + QStringLiteral("/33-help.png");
+                candidate->grab().save(path);
+                out() << "help dialog " << candidate->width() << "x" << candidate->height()
+                      << " -> " << path << "\n";
+                candidate->close();
+            }
+
+            actionByText(QStringLiteral("Show &Debug Log"))->trigger();
+            QTest::qWait(600);
+            for (QDialog *candidate : window_.findChildren<QDialog *>()) {
+                if (!candidate->windowTitle().endsWith(QStringLiteral("Debug Log")))
+                    continue;
+                const QString path = outputDir_ + QStringLiteral("/34-debug-log.png");
+                candidate->grab().save(path);
+                out() << "debug log dialog " << candidate->width() << "x" << candidate->height()
+                      << " -> " << path << "\n";
+                candidate->close();
+            }
+
+            // Image Info needs one selected image.
+            window_.scene()->clearSelection();
+            ui::SceneItem *infoItem = window_.scene()->pixmapItemViews().value(0);
+            if (infoItem) {
+                infoItem->setSelected(true);
+                QTest::qWait(200);
+                actionByText(QStringLiteral("Show Image &Info"))->trigger();
+                QTest::qWait(600);
+                for (QDialog *candidate : window_.findChildren<QDialog *>()) {
+                    if (!candidate->windowTitle().endsWith(QStringLiteral("Image Info")))
+                        continue;
+                    const QString path = outputDir_ + QStringLiteral("/35-image-info.png");
+                    candidate->grab().save(path);
+                    out() << "image info dialog " << candidate->width() << "x"
+                          << candidate->height() << " -> " << path << "\n";
+                    candidate->close();
+                }
             }
         }
 

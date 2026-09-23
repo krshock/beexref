@@ -5,6 +5,10 @@
 #include <QImage>
 #include <QMimeData>
 #include <QDialog>
+#include <QDialogButtonBox>
+#include <QLabel>
+#include <QMenuBar>
+#include <QPlainTextEdit>
 #include <QMouseEvent>
 #include <QScrollBar>
 #include <QCheckBox>
@@ -34,6 +38,7 @@
 #include "ui/controls.h"
 #include "ui/controls_dialog.h"
 #include "ui/hud.h"
+#include "ui/info_dialogs.h"
 #include "ui/settings_dialog.h"
 #include "ui/grayscale.h"
 #include "ui/opacity_dialog.h"
@@ -185,6 +190,9 @@ private slots:
     void settingsActionOpensTheDialog();
     void controlsDialogEditsShortcutsAndBindings();
     void viewAppliesBindingOverrides();
+    void windowTogglesFollowTheActions();
+    void moveWindowModeFollowsThePointer();
+    void infoDialogsShowTheExpectedContent();
 };
 
 void TestUiScene::buildsItemsFromDocument()
@@ -1886,6 +1894,201 @@ void TestUiScene::viewAppliesBindingOverrides()
                  view.transform().m11())));
 
     settings::setSettingsDir(QString());
+}
+
+void TestUiScene::windowTogglesFollowTheActions()
+{
+    ui::MainWindow window;
+
+    // Scrollbars start off, like the reference's default.
+    QAction *scrollbars = actionByText(window, QStringLiteral("Show &Scrollbars"));
+    QVERIFY(scrollbars);
+    QVERIFY(!scrollbars->isChecked());
+    QCOMPARE(window.view()->horizontalScrollBarPolicy(), Qt::ScrollBarAlwaysOff);
+    scrollbars->trigger();
+    QCOMPARE(window.view()->horizontalScrollBarPolicy(), Qt::ScrollBarAsNeeded);
+    QCOMPARE(window.view()->verticalScrollBarPolicy(), Qt::ScrollBarAsNeeded);
+    scrollbars->trigger();
+    QCOMPARE(window.view()->horizontalScrollBarPolicy(), Qt::ScrollBarAlwaysOff);
+
+    // Smooth images start on.
+    QAction *smooth = actionByText(window, QStringLiteral("&Smooth Images"));
+    QVERIFY(smooth);
+    QVERIFY(smooth->isChecked());
+    QVERIFY(ui::rendering::smoothPixmaps());
+    smooth->trigger();
+    QVERIFY(!ui::rendering::smoothPixmaps());
+    smooth->trigger();
+    QVERIFY(ui::rendering::smoothPixmaps());
+
+    // The menu bar starts visible here (the reference's unchecked
+    // default would leave it unreachable once hidden).
+    QAction *menubar = actionByText(window, QStringLiteral("Show &Menu Bar"));
+    QVERIFY(menubar);
+    QVERIFY(menubar->isChecked());
+    QVERIFY(!window.menuBar()->isHidden());
+    menubar->trigger();
+    QVERIFY(window.menuBar()->isHidden());
+    menubar->trigger();
+    QVERIFY(!window.menuBar()->isHidden());
+
+    // Window flags follow their actions.
+    QAction *onTop = actionByText(window, QStringLiteral("&Always On Top"));
+    QVERIFY(onTop);
+    onTop->trigger();
+    QVERIFY(window.windowFlags().testFlag(Qt::WindowStaysOnTopHint));
+    onTop->trigger();
+    QVERIFY(!window.windowFlags().testFlag(Qt::WindowStaysOnTopHint));
+
+    QAction *titlebar = actionByText(window, QStringLiteral("Show &Title Bar"));
+    QVERIFY(titlebar);
+    QVERIFY(titlebar->isChecked());
+    titlebar->trigger();
+    QVERIFY(window.windowFlags().testFlag(Qt::FramelessWindowHint));
+    titlebar->trigger();
+    QVERIFY(!window.windowFlags().testFlag(Qt::FramelessWindowHint));
+
+    QAction *fullscreen = actionByText(window, QStringLiteral("&Fullscreen"));
+    QVERIFY(fullscreen);
+    fullscreen->trigger();
+    QVERIFY(window.isFullScreen());
+    fullscreen->trigger();
+    QVERIFY(!window.isFullScreen());
+}
+
+void TestUiScene::moveWindowModeFollowsThePointer()
+{
+    ui::MainWindow window;
+    window.show();
+    QTest::qWait(50);
+    ui::View *view = window.view();
+    QVERIFY(!view->movingWindow());
+
+    // Ctrl+M enters the mode.
+    actionByText(window, QStringLiteral("Move &Window"))->trigger();
+    QVERIFY(view->movingWindow());
+    QCOMPARE(view->viewport()->cursor().shape(), Qt::SizeAllCursor);
+
+    // Moving the pointer moves the window (the platform may clamp the
+    // requested position, so only the change is asserted).
+    const QPoint centre = view->viewport()->rect().center();
+    const QPoint beforeMove = window.pos();
+    sendMouse(view->viewport(), QEvent::MouseMove, centre, Qt::NoButton, Qt::NoButton);
+    const QPoint afterFirstMove = window.pos();
+    QVERIFY(afterFirstMove != beforeMove);
+    sendMouse(view->viewport(), QEvent::MouseMove, centre + QPoint(25, 15), Qt::NoButton,
+              Qt::NoButton);
+    QVERIFY(window.pos() != afterFirstMove);
+
+    // A press ends the mode.
+    sendMouse(view->viewport(), QEvent::MouseButtonPress, centre, Qt::LeftButton, Qt::LeftButton);
+    QVERIFY(!view->movingWindow());
+
+    // The bound combination enters it too (Left + Ctrl + Alt).
+    ui::View plain;
+    ui::Scene scene;
+    plain.setBoardScene(&scene);
+    plain.resize(200, 150);
+    sendMouse(plain.viewport(), QEvent::MouseButtonPress, QPoint(40, 40), Qt::LeftButton,
+              Qt::LeftButton, Qt::ControlModifier | Qt::AltModifier);
+    QVERIFY(plain.movingWindow());
+
+    // A key exits.
+    QTest::keyClick(&plain, Qt::Key_Escape);
+    QVERIFY(!plain.movingWindow());
+}
+
+void TestUiScene::infoDialogsShowTheExpectedContent()
+{
+    ui::MainWindow window;
+
+    // Metadata rows of a plain image.
+    QImage image(6, 4, QImage::Format_ARGB32);
+    image.fill(Qt::red);
+    QMimeData mime;
+    mime.setImageData(image);
+    window.input()->insertMimeData(mime, QPointF(10, 10));
+    SceneItem *view = window.scene()->pixmapItemViews().first();
+    QVERIFY(view);
+    view->setSelected(true);
+
+    const QVector<QPair<QString, QString>> rows = ui::itemMetadata(view);
+    const auto valueOf = [&rows](const QString &label) {
+        for (const auto &row : rows) {
+            if (row.first == label)
+                return row.second;
+        }
+        return QString();
+    };
+    QCOMPARE(valueOf(QStringLiteral("Size")), QStringLiteral("6 x 4"));
+    QCOMPARE(valueOf(QStringLiteral("Grayscale")), QStringLiteral("No"));
+    QCOMPARE(valueOf(QStringLiteral("Flipped")), QStringLiteral("No"));
+    QCOMPARE(valueOf(QStringLiteral("Opacity")), QStringLiteral("100%"));
+    QCOMPARE(valueOf(QStringLiteral("Scale")), QStringLiteral("1.00"));
+    QCOMPARE(valueOf(QStringLiteral("Rotation")), QStringLiteral("0.0°"));
+    QCOMPARE(valueOf(QStringLiteral("Save ID")), QStringLiteral("Not saved"));
+
+    // The metadata panel's fields show up when set.
+    view->item()->meta.insert(QStringLiteral("origin_url"), QStringLiteral("https://example.org"));
+    view->item()->meta.insert(QStringLiteral("notes"), QStringLiteral("a note"));
+    const QVector<QPair<QString, QString>> withMeta = ui::itemMetadata(view);
+    bool sawUrl = false;
+    bool sawNotes = false;
+    for (const auto &row : withMeta) {
+        if (row.first == QLatin1String("Origin URL") && row.second == QLatin1String("https://example.org"))
+            sawUrl = true;
+        if (row.first == QLatin1String("Notes") && row.second == QLatin1String("a note"))
+            sawNotes = true;
+    }
+    QVERIFY(sawUrl);
+    QVERIFY(sawNotes);
+
+    // The Image Info dialog lists them.
+    QAction *infoAction = actionByText(window, QStringLiteral("Show Image &Info"));
+    QVERIFY(infoAction);
+    QVERIFY(infoAction->isEnabled());
+    infoAction->trigger();
+    QDialog *info = nullptr;
+    for (QDialog *candidate : window.findChildren<QDialog *>()) {
+        if (candidate->windowTitle().endsWith(QStringLiteral("Image Info")))
+            info = candidate;
+    }
+    QVERIFY(info);
+    bool sawSizeLabel = false;
+    for (QLabel *label : info->findChildren<QLabel *>()) {
+        if (label->text() == QLatin1String("Size:"))
+            sawSizeLabel = true;
+    }
+    QVERIFY(sawSizeLabel);
+    QVERIFY(!info->findChildren<QPlainTextEdit *>().isEmpty()); // the Source row
+    info->close();
+
+    // Help and Debug Log open with their expected content.
+    actionByText(window, QStringLiteral("&Help"))->trigger();
+    QDialog *help = nullptr;
+    for (QDialog *candidate : window.findChildren<QDialog *>()) {
+        if (candidate->windowTitle().endsWith(QStringLiteral("Help")))
+            help = candidate;
+    }
+    QVERIFY(help);
+    QVERIFY(help->findChild<QTabWidget *>());
+    bool sawControls = false;
+    for (QLabel *label : help->findChildren<QLabel *>()) {
+        if (label->text().contains(QStringLiteral("Pan Canvas")))
+            sawControls = true;
+    }
+    QVERIFY(sawControls);
+    help->close();
+
+    actionByText(window, QStringLiteral("Show &Debug Log"))->trigger();
+    QDialog *debug = nullptr;
+    for (QDialog *candidate : window.findChildren<QDialog *>()) {
+        if (candidate->windowTitle().endsWith(QStringLiteral("Debug Log")))
+            debug = candidate;
+    }
+    QVERIFY(debug);
+    QVERIFY(debug->findChild<QPlainTextEdit *>());
+    debug->close();
 }
 
 QTEST_MAIN(TestUiScene)

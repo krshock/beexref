@@ -64,6 +64,10 @@ private:
     // Opens the gamut wheel for the single selected image.
     void showColorGamut();
     // Settings menu: the settings dialog and the settings folder.
+    void openImageInfo();
+    void openHelp();
+    void showAbout();
+    void openDebugLog();
     void openSettingsDialog();
     void openControlsDialog();
     void openSettingsDir();

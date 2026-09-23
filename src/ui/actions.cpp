@@ -94,6 +94,15 @@ void ActionRegistry::setShortcuts(const QString &id, const QStringList &shortcut
     target->setShortcuts(sequences);
 }
 
+void ActionRegistry::setDefaultShortcuts(const QString &id, const QStringList &shortcuts)
+{
+    const auto it = entries_.find(id);
+    if (it == entries_.end())
+        return;
+    it.value().defaults = shortcuts;
+    setShortcuts(id, shortcuts);
+}
+
 void ActionRegistry::append(QMenu *menu, const QString &id)
 {
     QAction *action = this->action(id);
@@ -112,8 +121,10 @@ void ActionRegistry::setState(const ActionState &state)
     state_ = state;
     for (const Entry &entry : std::as_const(entries_)) {
         entry.action->setEnabled(groupEnabled(entry.group, state_));
-        if (entry.action->isCheckable())
-            entry.action->setChecked(entry.isChecked ? entry.isChecked() : false);
+        // Only actions with a state predicate (grayscale) follow the
+        // scene; session toggles like smooth images keep their state.
+        if (entry.isChecked)
+            entry.action->setChecked(entry.isChecked());
     }
 }
 

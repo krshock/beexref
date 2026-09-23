@@ -48,6 +48,14 @@ public:
     // The keyboard/mouse bindings, reloaded after the controls editor
     // changes them.
     void setBindings(const controls::Bindings &bindings) { bindings_ = bindings; }
+
+    // Move-window mode (the reference's movewin): while active the
+    // window follows the pointer; any press, release or key ends it.
+    // Entered with Ctrl+M or the bound mouse combination.
+    void toggleMoveWindow();
+    void enterMoveWindow();
+    void exitMoveWindow();
+    bool movingWindow() const { return movingWindow_; }
     // Refreshes the scrollable area after the items changed shape, as
     // the reference does on every scene change.
     void refreshSceneRect() { recalculateSceneRect(); }
@@ -165,6 +173,8 @@ private:
     bool moveStarted_ = false;
     // Drag-zoom (the reference's ZOOM_MODE): a bound button drag zooms.
     bool dragZoom_ = false;
+    bool movingWindow_ = false;
+    QPointF moveWindowGlobal_;
     bool dragZoomInverted_ = false;
     QPoint dragZoomStart_;
     QPoint dragZoomAnchor_;
