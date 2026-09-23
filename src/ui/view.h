@@ -218,6 +218,9 @@ private:
     QVector<MoveEntry> moveStarts_;
 
     static constexpr double kMoveThreshold = 3.0; // viewport pixels
+    // Zoom bursts hold LOD work for this long after the last zoom event,
+    // so level decodes happen once the view has settled.
+    static constexpr int kZoomInhibitMs = 300;
     static constexpr double kMaxZoomExtent = 10000000.0;
     static constexpr double kMinZoomExtent = 50.0;
 };

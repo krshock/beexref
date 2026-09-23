@@ -25,6 +25,12 @@ LodManager::LodManager(QObject *parent)
     releaseTimer_.setSingleShot(true);
     releaseTimer_.setInterval(kReleaseDelayMs);
     connect(&releaseTimer_, &QTimer::timeout, this, &LodManager::releaseMemory);
+
+    holdTimer_.setSingleShot(true);
+    connect(&holdTimer_, &QTimer::timeout, this, [this]() {
+        // The burst is over: evaluate once with the final view state.
+        evaluateNow();
+    });
 }
 
 void LodManager::setScene(Scene *scene)
@@ -88,6 +94,24 @@ QString LodManager::cacheKey(const SceneItem *item, double fraction) const
                                           QString::number(fraction, 'g', 17));
 }
 
+void LodManager::setOrderOrigin(const QPointF &scenePoint)
+{
+    orderOrigin_ = scenePoint;
+}
+
+QPointF LodManager::orderOrigin() const
+{
+    return orderOrigin_;
+}
+
+QPointF LodManager::effectiveOrderOrigin() const
+{
+    // An explicit point wins; otherwise the visible rect's centre.
+    if (!orderOrigin_.isNull())
+        return orderOrigin_;
+    return visibleRect_.center();
+}
+
 void LodManager::setViewState(const QRectF &visibleSceneRect, double viewScale)
 {
     visibleRect_ = visibleSceneRect;
@@ -119,6 +143,8 @@ void LodManager::reset()
 
 void LodManager::schedule()
 {
+    if (holdTimer_.isActive())
+        return;
     if (evalScheduled_)
         return;
     evalScheduled_ = true;
@@ -130,8 +156,19 @@ void LodManager::schedule()
 
 void LodManager::evaluateNow()
 {
+    if (holdTimer_.isActive())
+        return;
     deferUpgrades_ = false;
     evaluate();
+}
+
+void LodManager::hold(int milliseconds)
+{
+    if (milliseconds <= 0) {
+        holdTimer_.stop();
+        return;
+    }
+    holdTimer_.start(milliseconds);
 }
 
 void LodManager::setGestureItems(const QSet<const doc::Item *> &items)
@@ -209,13 +246,39 @@ void LodManager::applyRAMBudget(QHash<SceneItem *, double> &desired, qint64 budg
     }
 }
 
+QVector<SceneItem *> LodManager::hintOrder(
+    const QVector<SceneItem *> &items, const QHash<SceneItem *, RequestHint> &hints) const
+{
+    QVector<SceneItem *> order = items;
+    // One comparator per hint method, most significant first. They are
+    // applied as stable passes from the least to the most significant,
+    // so earlier methods dominate and new ones are a list entry.
+    using HintFn = std::function<bool(SceneItem *, SceneItem *)>;
+    const QVector<HintFn> methods = {
+        [&hints](SceneItem *a, SceneItem *b) {
+            return static_cast<int>(hints.value(a).band) < static_cast<int>(hints.value(b).band);
+        },
+        [&hints](SceneItem *a, SceneItem *b) {
+            return hints.value(a).distance < hints.value(b).distance;
+        },
+    };
+    for (auto method = methods.crbegin(); method != methods.crend(); ++method)
+        std::stable_sort(order.begin(), order.end(), *method);
+    return order;
+}
+
 void LodManager::evaluate()
 {
-    if (!scene_)
+    if (!scene_ || holdTimer_.isActive())
         return;
     ++evals_;
 
     QHash<SceneItem *, double> desired;
+    QHash<SceneItem *, RequestHint> hints;
+    QSet<SceneItem *> selectedItems;
+    for (SceneItem *view : scene_->selectedItemViews())
+        selectedItems.insert(view);
+    const QPointF origin = effectiveOrderOrigin();
     const QVector<SceneItem *> items = scene_->pixmapItemViews();
     for (SceneItem *item : items) {
         const doc::ItemPtr &model = item->item();
@@ -227,6 +290,12 @@ void LodManager::evaluate()
             // level for the budget but queue nothing.
             cancelLevel(item);
             desired.insert(item, item->levelFraction());
+            RequestHint hint;
+            hint.visible = true;
+            hint.selected = selectedItems.contains(item);
+            hint.band = hint.selected ? RequestBand::Selected : RequestBand::Visible;
+            hint.distance = QLineF(item->sceneBoundingRect().center(), origin).length();
+            hints.insert(item, hint);
             continue;
         }
 
@@ -242,15 +311,23 @@ void LodManager::evaluate()
         }
         item->setWasVisible(visibleNow);
         desired.insert(item, fraction);
+
+        RequestHint hint;
+        hint.visible = visibleNow;
+        hint.selected = selectedItems.contains(item);
+        hint.band = hint.selected ? RequestBand::Selected
+            : visibleNow           ? RequestBand::Visible
+                                   : RequestBand::Deferred;
+        hint.distance = QLineF(item->sceneBoundingRect().center(), origin).length();
+        hints.insert(item, hint);
     }
 
     const qint64 budget = levelBudgetBytes(settings_);
     if (budget > 0)
         applyRAMBudget(desired, budget);
 
-    for (auto it = desired.cbegin(); it != desired.cend(); ++it) {
-        SceneItem *item = it.key();
-        const double fraction = it.value();
+    for (SceneItem *item : hintOrder(desired.keys().toVector(), hints)) {
+        const double fraction = desired.value(item);
         if (item->retryBlocked())
             continue;
         if (deferUpgrades_ && fraction > item->coarsestFraction())
@@ -283,11 +360,11 @@ void LodManager::evaluate()
             continue;
 
         item->setRequeue(false);
-        requestLevel(item, fraction);
+        requestLevel(item, fraction, hints.value(item).band);
     }
 }
 
-void LodManager::requestLevel(SceneItem *item, double fraction)
+void LodManager::requestLevel(SceneItem *item, double fraction, RequestBand band)
 {
     if (!loader_)
         return;
@@ -305,7 +382,7 @@ void LodManager::requestLevel(SceneItem *item, double fraction)
 
     loader_->request(requestId, item->item()->source, item->levelSizeFor(fraction),
                      settings_.quality, cacheKey(item, fraction),
-                     item->item()->ensureUuid());
+                     item->item()->ensureUuid(), band);
 }
 
 void LodManager::cancelLevel(SceneItem *item)

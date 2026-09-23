@@ -16,6 +16,20 @@
 namespace ui {
 namespace {
 
+// The worker executes these events in its own thread's event loop; the
+// queue is that event queue, so the band maps onto the event priority.
+class QueueEvent : public QEvent
+{
+public:
+    static constexpr QEvent::Type kType = QEvent::Type(QEvent::User + 1);
+    explicit QueueEvent(std::function<void()> run)
+        : QEvent(kType)
+        , run(std::move(run))
+    {
+    }
+    std::function<void()> run;
+};
+
 QImage decodeLevel(const doc::SourcePtr &source, const QSize &targetSize, const QString &quality)
 {
     if (!source || !source->isValid())
@@ -64,10 +78,28 @@ QImage decodeLevel(const doc::SourcePtr &source, const QSize &targetSize, const 
 
 } // namespace
 
+// The worker object: it only exists to have its event() run request
+// events in the loader thread.
+class LevelLoader::Worker : public QObject
+{
+public:
+    bool event(QEvent *event) override
+    {
+        if (event->type() == QueueEvent::kType) {
+            auto *request = static_cast<QueueEvent *>(event);
+            if (request->run)
+                request->run();
+            return true;
+        }
+        return QObject::event(event);
+    }
+};
+
 LevelLoader::LevelLoader(QObject *parent)
     : QObject(parent)
 {
-    worker_.moveToThread(&thread_);
+    worker_ = new Worker;
+    worker_->moveToThread(&thread_);
     thread_.setObjectName(QStringLiteral("level-loader"));
     thread_.start();
 }
@@ -84,7 +116,7 @@ void LevelLoader::setLevelCache(std::shared_ptr<cache::SessionCache> cache)
 
 void LevelLoader::request(quint64 requestId, doc::SourcePtr source, const QSize &targetSize,
                           const QString &quality, const QString &cacheKey,
-                          const QString &coalesceKey)
+                          const QString &coalesceKey, RequestBand band)
 {
     if (shutdown_)
         return;
@@ -94,8 +126,7 @@ void LevelLoader::request(quint64 requestId, doc::SourcePtr source, const QSize 
     }
     const auto cache = cache_;
     const auto shared = shared_;
-    QMetaObject::invokeMethod(
-        &worker_,
+    enqueue(
         [this, requestId, source = std::move(source), targetSize, quality, cacheKey, coalesceKey,
          cache, shared]() {
             // A newer request for the same item supersedes this one; it
@@ -137,15 +168,24 @@ void LevelLoader::request(quint64 requestId, doc::SourcePtr source, const QSize 
             // thread's arena and are the largest churn the app creates.
             util::releaseFreeMemory();
         },
-        Qt::QueuedConnection);
+        band);
+}
+
+void LevelLoader::enqueue(std::function<void()> run, RequestBand band)
+{
+    if (shutdown_ || !worker_)
+        return;
+    const Qt::EventPriority priority = band == RequestBand::Selected ? Qt::HighEventPriority
+        : band == RequestBand::Visible                                 ? Qt::NormalEventPriority
+                                                                      : Qt::LowEventPriority;
+    QCoreApplication::postEvent(worker_, new QueueEvent(std::move(run)), priority);
 }
 
 void LevelLoader::releaseMemory()
 {
     if (shutdown_)
         return;
-    QMetaObject::invokeMethod(&worker_, []() { util::releaseFreeMemory(); },
-                              Qt::QueuedConnection);
+    enqueue([]() { util::releaseFreeMemory(); }, RequestBand::Deferred);
 }
 
 void LevelLoader::shutdown()
@@ -161,7 +201,9 @@ void LevelLoader::shutdown()
     thread_.wait();
     // Requests queued while the event loop was winding down are of no
     // interest anymore; drop them so the worker is not restarted.
-    QCoreApplication::removePostedEvents(&worker_);
+    QCoreApplication::removePostedEvents(worker_);
+    delete worker_;
+    worker_ = nullptr;
 }
 
 } // namespace ui

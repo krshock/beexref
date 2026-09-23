@@ -37,6 +37,37 @@ doc::ItemPtr bigItem(int width, int height, const QColor &color)
     return item;
 }
 
+// Three big images spread across a wide viewport: red at x=0, green at
+// x=2000, blue at x=4000, all visible from a viewport of 6000 width.
+std::shared_ptr<doc::Document> threeVisibleItems()
+{
+    auto document = std::make_shared<doc::Document>(doc::Document::create());
+    const QVector<QPair<double, QColor>> spec = {
+        {0, Qt::darkRed}, {2000, Qt::darkGreen}, {4000, Qt::darkBlue}};
+    for (const auto &entry : spec) {
+        const doc::ItemPtr item = bigItem(1200, 900, entry.second);
+        item->x = entry.first;
+        document->addItem(item);
+    }
+    return document;
+}
+
+// The dominant channel of a decoded level, to identify an image.
+QChar dominantChannel(const QImage &image)
+{
+    const QColor colour = image.pixelColor(image.width() / 2, image.height() / 2);
+    if (colour.red() >= colour.green() && colour.red() >= colour.blue())
+        return QLatin1Char('r');
+    if (colour.green() >= colour.blue())
+        return QLatin1Char('g');
+    return QLatin1Char('b');
+}
+
+QChar decodedChannel(const QSignalSpy &ready, int index)
+{
+    return dominantChannel(ready.at(index).at(1).value<QImage>());
+}
+
 SceneItem *firstPixmap(ui::Scene &scene)
 {
     const QVector<SceneItem *> items = scene.pixmapItemViews();
@@ -58,6 +89,13 @@ private slots:
     void undoWhileLevelDecodes();
     void cacheServesLevelsWithoutDecoding();
     void coalescesBurstsPerItem();
+    void holdDelaysEvaluationsUntilItExpires();
+    void selectedRequestsRunFirst();
+    void nearestVisibleItemsDecodeFirst();
+    void selectedItemDecodesFirst();
+    void priorityPointOrdersByDistance();
+    void deprioritizedRequestsQueueBehindVisibleOnes();
+    void offScreenDecodesWaitBehindVisibleOnes();
 };
 
 void TestLodManager::defersUpgradesUntilInteraction()
@@ -281,6 +319,185 @@ void TestLodManager::coalescesBurstsPerItem()
     QVERIFY(ready.count() >= 1);
     QCOMPARE(ready.last().at(0).toULongLong(), quint64(6));
     QVERIFY(cancelled.count() >= 4);
+}
+
+void TestLodManager::holdDelaysEvaluationsUntilItExpires()
+{
+    auto document = std::make_shared<doc::Document>(doc::Document::create());
+    document->addItem(bigItem(2000, 1000, Qt::red));
+
+    ui::Scene scene;
+    ui::LevelLoader loader;
+    QSignalSpy ready(&loader, &ui::LevelLoader::levelReady);
+    ui::LodManager manager;
+    manager.setScene(&scene);
+    manager.setLoader(&loader);
+    scene.setDocument(document);
+    manager.setViewState(QRectF(0, 0, 2000, 1000), 0.1);
+    manager.evaluateNow();
+    manager.reset();
+
+    SceneItem *item = firstPixmap(scene);
+    QVERIFY(item);
+
+    // While the zoom burst is held, neither schedule() nor evaluateNow()
+    // does anything (the setup's own evaluation is the baseline).
+    const int baseline = manager.stats().requests;
+    manager.hold(60);
+    QVERIFY(manager.holding());
+    manager.schedule();
+    manager.evaluateNow();
+    QTest::qWait(20);
+    QCOMPARE(manager.stats().requests, baseline);
+    // No level was swapped in, even if the setup's own decode finished.
+    QCOMPARE(item->levelFraction(), 0.0);
+
+    // Restarting the window keeps the hold.
+    manager.hold(60);
+    QTest::qWait(40);
+    QCOMPARE(manager.stats().requests, baseline);
+    QVERIFY(manager.holding());
+
+    // After it expires one evaluation runs and the visible item is
+    // upgraded to the wanted level.
+    QTRY_COMPARE_WITH_TIMEOUT(item->levelFraction(), 0.125, 5000);
+    QVERIFY(!manager.holding());
+    QVERIFY(manager.stats().requests > baseline);
+}
+
+void TestLodManager::deprioritizedRequestsQueueBehindVisibleOnes()
+{
+    ui::LevelLoader loader;
+    QSignalSpy ready(&loader, &ui::LevelLoader::levelReady);
+
+    auto offScreen = std::make_shared<doc::BytesSource>(makePng(1200, 900, Qt::darkBlue));
+    auto visible = std::make_shared<doc::BytesSource>(makePng(1200, 900, Qt::darkRed));
+    // The deprioritized request is queued first; the visible one second.
+    loader.request(1, offScreen, QSize(300, 225), QStringLiteral("fast"), QString(),
+                   QStringLiteral("off-screen"), ui::RequestBand::Deferred);
+    loader.request(2, visible, QSize(300, 225), QStringLiteral("fast"), QString(),
+                   QStringLiteral("visible"), ui::RequestBand::Visible);
+
+    QTRY_COMPARE_WITH_TIMEOUT(ready.count(), 2, 15000);
+    // The normal-priority decode runs first, the deprioritized one after.
+    QCOMPARE(ready.at(0).at(0).toULongLong(), quint64(2));
+    QCOMPARE(ready.at(1).at(0).toULongLong(), quint64(1));
+}
+
+void TestLodManager::offScreenDecodesWaitBehindVisibleOnes()
+{
+    auto document = std::make_shared<doc::Document>(doc::Document::create());
+    // The visible item first, so the off-screen (topmost) one is
+    // evaluated first; the off-screen one sits far to the right.
+    document->addItem(bigItem(1200, 900, Qt::darkRed));
+    const doc::ItemPtr offScreen = bigItem(1200, 900, Qt::darkBlue);
+    offScreen->x = 5000;
+    document->addItem(offScreen);
+
+    ui::Scene scene;
+    ui::LevelLoader loader;
+    QSignalSpy ready(&loader, &ui::LevelLoader::levelReady);
+    ui::LodManager manager;
+    manager.setScene(&scene);
+    manager.setLoader(&loader);
+    scene.setDocument(document);
+    // Only the first item's area is on screen.
+    manager.setViewState(QRectF(0, 0, 1200, 900), 0.1);
+    manager.evaluateNow();
+
+    QTRY_COMPARE_WITH_TIMEOUT(ready.count(), 2, 15000);
+    // The visible item (red) decodes first, the off-screen one (blue)
+    // after it, whatever order they were queued in.
+    const QImage first = ready.at(0).at(1).value<QImage>();
+    const QColor firstColour = first.pixelColor(first.width() / 2, first.height() / 2);
+    QVERIFY2(firstColour.red() > firstColour.blue(),
+             qPrintable(QStringLiteral("first decode was %1").arg(firstColour.name())));
+    const QImage second = ready.at(1).at(1).value<QImage>();
+    const QColor secondColour = second.pixelColor(second.width() / 2, second.height() / 2);
+    QVERIFY(secondColour.blue() > secondColour.red());
+}
+
+void TestLodManager::nearestVisibleItemsDecodeFirst()
+{
+    auto document = threeVisibleItems();
+    ui::Scene scene;
+    ui::LevelLoader loader;
+    QSignalSpy ready(&loader, &ui::LevelLoader::levelReady);
+    ui::LodManager manager;
+    manager.setScene(&scene);
+    manager.setLoader(&loader);
+    scene.setDocument(document);
+    manager.setViewState(QRectF(0, 0, 6000, 1200), 0.1);
+    manager.evaluateNow();
+
+    QTRY_COMPARE_WITH_TIMEOUT(ready.count(), 3, 20000);
+    // The viewport centre is at (3000, 600): green (x=2000) is nearest,
+    // then blue (x=4000), then red (x=0).
+    QCOMPARE(decodedChannel(ready, 0), QLatin1Char('g'));
+    QCOMPARE(decodedChannel(ready, 1), QLatin1Char('b'));
+    QCOMPARE(decodedChannel(ready, 2), QLatin1Char('r'));
+}
+
+void TestLodManager::selectedItemDecodesFirst()
+{
+    auto document = threeVisibleItems();
+    ui::Scene scene;
+    ui::LevelLoader loader;
+    QSignalSpy ready(&loader, &ui::LevelLoader::levelReady);
+    ui::LodManager manager;
+    manager.setScene(&scene);
+    manager.setLoader(&loader);
+    scene.setDocument(document);
+    manager.setViewState(QRectF(0, 0, 6000, 1200), 0.1);
+
+    // The farthest image (red) is selected: it decodes first even
+    // though it is the worst by distance.
+    SceneItem *red = scene.itemViewFor(document->items().value(0));
+    QVERIFY(red);
+    red->setSelected(true);
+    manager.evaluateNow();
+
+    QTRY_COMPARE_WITH_TIMEOUT(ready.count(), 3, 20000);
+    QCOMPARE(decodedChannel(ready, 0), QLatin1Char('r'));
+}
+
+void TestLodManager::priorityPointOrdersByDistance()
+{
+    auto document = threeVisibleItems();
+    ui::Scene scene;
+    ui::LevelLoader loader;
+    QSignalSpy ready(&loader, &ui::LevelLoader::levelReady);
+    ui::LodManager manager;
+    manager.setScene(&scene);
+    manager.setLoader(&loader);
+    scene.setDocument(document);
+    manager.setViewState(QRectF(0, 0, 6000, 1200), 0.1);
+    // An explicit point near the right-hand image.
+    manager.setOrderOrigin(QPointF(5000, 450));
+    manager.evaluateNow();
+
+    QTRY_COMPARE_WITH_TIMEOUT(ready.count(), 3, 20000);
+    QCOMPARE(decodedChannel(ready, 0), QLatin1Char('b'));
+    QCOMPARE(decodedChannel(ready, 1), QLatin1Char('g'));
+    QCOMPARE(decodedChannel(ready, 2), QLatin1Char('r'));
+}
+
+void TestLodManager::selectedRequestsRunFirst()
+{
+    ui::LevelLoader loader;
+    QSignalSpy ready(&loader, &ui::LevelLoader::levelReady);
+
+    auto visible = std::make_shared<doc::BytesSource>(makePng(1200, 900, Qt::darkRed));
+    auto selected = std::make_shared<doc::BytesSource>(makePng(1200, 900, Qt::darkBlue));
+    // The selected request is queued last but runs first.
+    loader.request(1, visible, QSize(300, 225), QStringLiteral("fast"), QString(),
+                   QStringLiteral("visible"), ui::RequestBand::Visible);
+    loader.request(2, selected, QSize(300, 225), QStringLiteral("fast"), QString(),
+                   QStringLiteral("selected"), ui::RequestBand::Selected);
+
+    QTRY_COMPARE_WITH_TIMEOUT(ready.count(), 2, 15000);
+    QCOMPARE(ready.at(0).at(0).toULongLong(), quint64(2));
+    QCOMPARE(ready.at(1).at(0).toULongLong(), quint64(1));
 }
 
 QTEST_MAIN(TestLodManager)

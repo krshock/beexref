@@ -54,6 +54,22 @@ public:
     // coordinates and the view's transform scale.
     void setViewState(const QRectF &visibleSceneRect, double viewScale);
 
+    // The consumption hints: how the manager orders its requests before
+    // the loader consumes them.
+    //
+    //   * every request gets a RequestHint (selected, visible, distance,
+    //     band);
+    //   * hintOrder() applies one comparator per hint method, stable and
+    //     least significant first, so earlier methods dominate;
+    //   * the band is the coarse half the loader consumes (selected,
+    //     visible, deferred), the rest orders within the batch.
+    //
+    // Decodes are ordered by distance from a scene point: selected
+    // images first, then visible ones nearest first, then off-screen.
+    // Unset (the default) means the visible rect's centre.
+    void setOrderOrigin(const QPointF &scenePoint);
+    QPointF orderOrigin() const;
+
     // Rebuilds every item's ladder (document replaced or settings
     // changed) and evaluates. Upgrades stay deferred to the floor until
     // the next user interaction, as after a file load.
@@ -63,6 +79,13 @@ public:
     void schedule();
     // Immediate evaluation; also ends the deferred-upgrade phase.
     void evaluateNow();
+
+    // Holds every LOD action (evaluations, level swaps, decodes) for the
+    // given window; each call restarts the window, so a zoom burst is
+    // held until the given milliseconds after the last event, when one
+    // evaluation runs.
+    void hold(int milliseconds);
+    bool holding() const { return holdTimer_.isActive(); }
 
     // Items in an active gesture keep their displayed level.
     void setGestureItems(const QSet<const doc::Item *> &items);
@@ -94,6 +117,19 @@ signals:
     void levelsChanged();
 
 private:
+    // The hint inputs of one image, and the ordered plan built from
+    // them.
+    struct RequestHint
+    {
+        bool selected = false;
+        bool visible = false;
+        double distance = 0;
+        RequestBand band = RequestBand::Deferred;
+    };
+    QPointF effectiveOrderOrigin() const;
+    QVector<SceneItem *> hintOrder(const QVector<SceneItem *> &items,
+                                   const QHash<SceneItem *, RequestHint> &hints) const;
+
     struct Pending
     {
         SceneItem *item = nullptr;
@@ -102,7 +138,9 @@ private:
     };
 
     void evaluate();
-    void requestLevel(SceneItem *item, double fraction);
+    // The band decides the loader's queue order (see RequestBand).
+    void requestLevel(SceneItem *item, double fraction,
+                      RequestBand band = RequestBand::Visible);
     void cancelLevel(SceneItem *item);
     void applyRAMBudget(QHash<SceneItem *, double> &desired, qint64 budget);
     double desiredFraction(const SceneItem *item) const;
@@ -121,6 +159,8 @@ private:
     LodSettings settings_ = normalized(LodSettings());
 
     QRectF visibleRect_;
+    // Invalid means "use the visible rect's centre".
+    QPointF orderOrigin_;
     double viewScale_ = 1.0;
 
     bool evalScheduled_ = false;
@@ -131,6 +171,7 @@ private:
     QSet<const doc::Item *> gestureItems_;
 
     QTimer releaseTimer_;
+    QTimer holdTimer_;
     quint64 nextRequestId_ = 1;
     int decodes_ = 0;
     int requests_ = 0;

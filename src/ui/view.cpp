@@ -241,7 +241,9 @@ void View::zoomAt(int delta, const QPoint &anchor)
     panBy(mapFromScene(sceneAnchor) - anchor);
     updateViewState();
     recalculateSceneRect();
-    lod_->evaluateNow();
+    // Keep the levels as they are while zooming; the evaluation runs
+    // kZoomInhibitMs after the last zoom event.
+    lod_->hold(kZoomInhibitMs);
 }
 
 void View::fitRect(const QRectF &rect)

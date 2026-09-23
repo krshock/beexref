@@ -1,6 +1,7 @@
 #pragma once
 
 #include "doc/source.h"
+#include "levels.h"
 
 #include <QHash>
 #include <QImage>
@@ -44,9 +45,14 @@ public:
     // coalesceKey identifies the item: a newer request for the same key
     // supersedes a queued one, so a zoom burst decodes only the latest
     // fraction, as the reference worker does.
+    //
+    // The band decides the queue order: a request in a higher band runs
+    // before lower-band work, FIFO within a band. A superseded request
+    // is still dropped for free when it reaches the front, and a decode
+    // already running is never interrupted.
     void request(quint64 requestId, doc::SourcePtr source, const QSize &targetSize,
                  const QString &quality, const QString &cacheKey = {},
-                 const QString &coalesceKey = {});
+                 const QString &coalesceKey = {}, RequestBand band = RequestBand::Visible);
 
     // Stops the worker thread and drops pending requests. Must be
     // called before the documents the sources read from are closed.
@@ -65,6 +71,10 @@ signals:
     void levelCancelled(quint64 requestId);
 
 private:
+    // Posts one request to the worker's event loop with the band's
+    // priority.
+    void enqueue(std::function<void()> run, RequestBand band);
+
     struct Shared
     {
         QMutex mutex;
@@ -72,7 +82,8 @@ private:
     };
 
     QThread thread_;
-    QObject worker_;
+    class Worker;
+    Worker *worker_ = nullptr;
     std::shared_ptr<Shared> shared_ = std::make_shared<Shared>();
     std::shared_ptr<cache::SessionCache> cache_;
     bool shutdown_ = false;

@@ -34,6 +34,16 @@ struct Level
 // The wanted level covers the item's on-screen size with a little
 // headroom, and the visibility test extends the viewport on each side,
 // as the reference manager does.
+// The consumption band of a request: the level loader services bands in
+// this order (highest first) and FIFO inside a band. Bands are the
+// loader's contract; which hint put a request there is the manager's
+// business.
+enum class RequestBand {
+    Selected, // an explicitly selected image
+    Visible,  // on screen (or in a gesture)
+    Deferred, // off screen: runs when nothing above it waits
+};
+
 inline constexpr double kLevelOverdraw = 1.2;
 inline constexpr double kLevelVisibilityMargin = 0.1;
 
