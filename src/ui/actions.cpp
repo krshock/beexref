@@ -47,7 +47,11 @@ QAction *ActionRegistry::add(const QString &id, const QString &text, const QKeyS
     entry.action = action;
     entry.group = group;
     entry.isChecked = std::move(isChecked);
+    if (!shortcut.isEmpty())
+        entry.defaults.append(shortcut.toString(QKeySequence::PortableText));
     entries_.insert(id, entry);
+    if (!order_.contains(id))
+        order_.append(id);
     return action;
 }
 
@@ -55,6 +59,39 @@ QAction *ActionRegistry::action(const QString &id) const
 {
     const auto it = entries_.constFind(id);
     return it == entries_.cend() ? nullptr : it.value().action;
+}
+
+QStringList ActionRegistry::ids() const
+{
+    return order_;
+}
+
+QStringList ActionRegistry::defaultShortcuts(const QString &id) const
+{
+    const auto it = entries_.constFind(id);
+    return it == entries_.cend() ? QStringList() : it.value().defaults;
+}
+
+QStringList ActionRegistry::shortcuts(const QString &id) const
+{
+    QAction *action = this->action(id);
+    if (!action)
+        return {};
+    QStringList values;
+    for (const QKeySequence &sequence : action->shortcuts())
+        values.append(sequence.toString(QKeySequence::PortableText));
+    return values;
+}
+
+void ActionRegistry::setShortcuts(const QString &id, const QStringList &shortcuts)
+{
+    QAction *target = action(id);
+    if (!target)
+        return;
+    QList<QKeySequence> sequences;
+    for (const QString &value : shortcuts)
+        sequences.append(QKeySequence(value, QKeySequence::PortableText));
+    target->setShortcuts(sequences);
 }
 
 void ActionRegistry::append(QMenu *menu, const QString &id)

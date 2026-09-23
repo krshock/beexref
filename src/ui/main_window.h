@@ -65,7 +65,12 @@ private:
     void showColorGamut();
     // Settings menu: the settings dialog and the settings folder.
     void openSettingsDialog();
+    void openControlsDialog();
     void openSettingsDir();
+    // Re-applies the stored shortcut overrides to every action.
+    void applyShortcuts();
+    // The "Menu: Action" label of an action, for the controls editor.
+    QString actionLabel(const QString &id) const;
     void applySettingChanged(const QString &key);
     // Applies Items/image_allocation_limit to QImageReader.
     void applyAllocationLimit();

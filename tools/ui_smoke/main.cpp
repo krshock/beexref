@@ -19,6 +19,7 @@
 #include <QAction>
 #include <QDialog>
 #include <QSlider>
+#include <QTabWidget>
 #include <QMouseEvent>
 #include <QScrollBar>
 #include <QTextStream>
@@ -472,6 +473,30 @@ public:
                 candidate->grab().save(path);
                 out() << "settings dialog " << candidate->width() << "x" << candidate->height()
                       << " -> " << path << "\n";
+                candidate->close();
+            }
+
+            // The Keyboard & Mouse editor (read-only: the harness never
+            // writes the user's bindings).
+            actionByText(QStringLiteral("&Keyboard && Mouse"))->trigger();
+            QTest::qWait(800);
+            for (QDialog *candidate : window_.findChildren<QDialog *>()) {
+                if (candidate->windowTitle() != QStringLiteral("Keyboard & Mouse Controls"))
+                    continue;
+                const QString path = outputDir_ + QStringLiteral("/29-controls.png");
+                candidate->grab().save(path);
+                out() << "controls dialog " << candidate->width() << "x" << candidate->height()
+                      << " -> " << path << "\n";
+                if (auto *tabs = candidate->findChild<QTabWidget *>()) {
+                    tabs->setCurrentIndex(1);
+                    QTest::qWait(200);
+                    candidate->grab().save(outputDir_
+                                           + QStringLiteral("/30-controls-mouse.png"));
+                    tabs->setCurrentIndex(2);
+                    QTest::qWait(200);
+                    candidate->grab().save(outputDir_
+                                           + QStringLiteral("/31-controls-wheel.png"));
+                }
                 candidate->close();
             }
         }

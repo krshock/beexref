@@ -50,6 +50,13 @@ public:
                  ActionGroup group, Run run, bool checkable = false, Checked isChecked = {});
     QAction *action(const QString &id) const;
 
+    // For the Keyboard & Mouse editor: every action id in registration
+    // order, its default shortcut list, and the live override.
+    QStringList ids() const;
+    QStringList defaultShortcuts(const QString &id) const;
+    QStringList shortcuts(const QString &id) const;
+    void setShortcuts(const QString &id, const QStringList &shortcuts);
+
     // Appends one registered action to a menu, in the reference's order.
     void append(QMenu *menu, const QString &id);
     void appendSeparator(QMenu *menu);
@@ -63,9 +70,11 @@ private:
         QAction *action = nullptr;
         ActionGroup group = ActionGroup::Always;
         Checked isChecked;
+        QStringList defaults;
     };
 
     QHash<QString, Entry> entries_;
+    QStringList order_;
     ActionState state_;
 };
 

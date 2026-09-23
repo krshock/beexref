@@ -1,5 +1,6 @@
 #pragma once
 
+#include "controls.h"
 #include "crop_tools.h"
 #include "levels.h"
 #include "scene.h"
@@ -44,6 +45,9 @@ public:
 
     void setLodSettings(const LodSettings &settings);
     LodManager *lodManager() const { return lod_; }
+    // The keyboard/mouse bindings, reloaded after the controls editor
+    // changes them.
+    void setBindings(const controls::Bindings &bindings) { bindings_ = bindings; }
     // Refreshes the scrollable area after the items changed shape, as
     // the reference does on every scene change.
     void refreshSceneRect() { recalculateSceneRect(); }
@@ -159,6 +163,12 @@ private:
     QPoint panStart_;
     bool moving_ = false;
     bool moveStarted_ = false;
+    // Drag-zoom (the reference's ZOOM_MODE): a bound button drag zooms.
+    bool dragZoom_ = false;
+    bool dragZoomInverted_ = false;
+    QPoint dragZoomStart_;
+    QPoint dragZoomAnchor_;
+    controls::Bindings bindings_;
     Drag drag_ = Drag::None;
     // The view transform at press: gesture coordinates are mapped
     // through this, so a view shift mid-gesture (the scene rect grows

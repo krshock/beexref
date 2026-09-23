@@ -8,10 +8,14 @@
 #include <QMouseEvent>
 #include <QScrollBar>
 #include <QCheckBox>
+#include <QComboBox>
 #include <QLineEdit>
 #include <QRadioButton>
+#include <QKeySequenceEdit>
 #include <QSlider>
 #include <QSpinBox>
+#include <QTabWidget>
+#include <QTableWidget>
 #include <QTemporaryDir>
 #include <QtTest>
 #include <QWheelEvent>
@@ -27,6 +31,8 @@
 #include "ui/input_controller.h"
 #include "ui/main_window.h"
 #include "ui/color_gamut.h"
+#include "ui/controls.h"
+#include "ui/controls_dialog.h"
 #include "ui/hud.h"
 #include "ui/settings_dialog.h"
 #include "ui/grayscale.h"
@@ -111,10 +117,10 @@ doc::ItemPtr textItem(const QString &text)
 }
 
 void sendMouse(QWidget *widget, QEvent::Type type, const QPoint &position, Qt::MouseButton button,
-               Qt::MouseButtons buttons)
+               Qt::MouseButtons buttons, Qt::KeyboardModifiers modifiers = Qt::NoModifier)
 {
     QMouseEvent event(type, QPointF(position), QPointF(widget->mapToGlobal(position)), button,
-                      buttons, Qt::NoModifier);
+                      buttons, modifiers);
     QApplication::sendEvent(widget, &event);
 }
 
@@ -177,6 +183,8 @@ private slots:
     void hudToastsAppearAndExpire();
     void settingsDialogWritesAndRestores();
     void settingsActionOpensTheDialog();
+    void controlsDialogEditsShortcutsAndBindings();
+    void viewAppliesBindingOverrides();
 };
 
 void TestUiScene::buildsItemsFromDocument()
@@ -1726,6 +1734,158 @@ void TestUiScene::settingsActionOpensTheDialog()
     }
     QVERIFY(settings);
     QVERIFY(settings->isVisible() || !settings->isHidden());
+}
+
+void TestUiScene::controlsDialogEditsShortcutsAndBindings()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    settings::setSettingsDir(dir.path());
+
+    ui::MainWindow window;
+    actionByText(window, QStringLiteral("&Keyboard && Mouse"))->trigger();
+
+    ui::ControlsDialog *dialog = nullptr;
+    for (ui::ControlsDialog *candidate : window.findChildren<ui::ControlsDialog *>())
+        dialog = candidate;
+    QVERIFY(dialog);
+
+    // Editing a shortcut writes the override and applies it.
+    auto *undoEditor = dialog->findChild<QKeySequenceEdit *>(QStringLiteral("undo_0"));
+    QVERIFY(undoEditor);
+    undoEditor->setKeySequence(QKeySequence(QStringLiteral("Ctrl+U")));
+    QMetaObject::invokeMethod(undoEditor, "editingFinished");
+    {
+        const ui::controls::Store store;
+        QCOMPARE(store.actionShortcuts(QStringLiteral("undo"), {QStringLiteral("Ctrl+Z")}),
+                 QStringList({QStringLiteral("Ctrl+U")}));
+    }
+    QCOMPARE(actionByText(window, QStringLiteral("&Undo"))->shortcut(),
+             QKeySequence(QStringLiteral("Ctrl+U")));
+
+    // A conflicting shortcut is taken from the other action.
+    undoEditor->setKeySequence(QKeySequence(QStringLiteral("Ctrl+C")));
+    QMetaObject::invokeMethod(undoEditor, "editingFinished");
+    QVERIFY(actionByText(window, QStringLiteral("&Copy"))->shortcuts().isEmpty());
+    {
+        const ui::controls::Store store;
+        QVERIFY(store.actionShortcuts(QStringLiteral("copy"), {QStringLiteral("Ctrl+C")})
+                    .isEmpty());
+    }
+
+    // Mouse bindings: move pan to the left button.
+    auto *mouseTable = dialog->findChild<QTableWidget *>(QStringLiteral("mouseTable"));
+    QVERIFY(mouseTable);
+    // The modifiers column is wide enough for its checkbox labels.
+    QVERIFY(mouseTable->cellWidget(0, 3));
+    QVERIFY2(mouseTable->columnWidth(3) >= mouseTable->cellWidget(0, 3)->sizeHint().width(),
+             qPrintable(QStringLiteral("modifiers column %1, needs %2")
+                            .arg(mouseTable->columnWidth(3))
+                            .arg(mouseTable->cellWidget(0, 3)->sizeHint().width())));
+    auto *wheelTable = dialog->findChild<QTableWidget *>(QStringLiteral("wheelTable"));
+    QVERIFY(wheelTable);
+    QVERIFY(wheelTable->cellWidget(0, 2));
+    QVERIFY(wheelTable->columnWidth(2) >= wheelTable->cellWidget(0, 2)->sizeHint().width());
+
+    // Row 2 is pan1 in the reference's table order.
+    auto *button = qobject_cast<QComboBox *>(mouseTable->cellWidget(2, 2));
+    QVERIFY(button);
+    button->setCurrentText(QStringLiteral("Left"));
+    {
+        const ui::controls::Store store;
+        QCOMPARE(store.mouse(QStringLiteral("pan1")).button, QStringLiteral("Left"));
+    }
+
+    // Giving the second pan binding the same combination clears the
+    // first one, like the reference's conflict handling. Row 3 is pan2.
+    auto *pan2Modifiers = mouseTable->cellWidget(3, 3);
+    QVERIFY(pan2Modifiers);
+    auto *noModifier = pan2Modifiers->findChild<QCheckBox *>(QStringLiteral("No Modifier"));
+    QVERIFY(noModifier);
+    noModifier->setChecked(true);
+    {
+        const ui::controls::Store store;
+        QCOMPARE(store.mouse(QStringLiteral("pan1")).button, QStringLiteral("Not Configured"));
+        QCOMPARE(store.mouse(QStringLiteral("pan2")).modifiers,
+                 QStringList({QStringLiteral("No Modifier")}));
+    }
+
+    // Restore defaults clears everything again.
+    dialog->restoreDefaults();
+    QCOMPARE(actionByText(window, QStringLiteral("&Undo"))->shortcut(),
+             QKeySequence(QStringLiteral("Ctrl+Z")));
+    {
+        const ui::controls::Store store;
+        QVERIFY(!QFile::exists(store.path())
+                || !settings::File(store.path()).contains(QStringLiteral("Mouse"),
+                                                          QStringLiteral("pan1_button")));
+    }
+
+    settings::setSettingsDir(QString());
+}
+
+void TestUiScene::viewAppliesBindingOverrides()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    settings::setSettingsDir(dir.path());
+
+    // Pan needs Shift now: the middle button alone does nothing.
+    {
+        ui::controls::Store store;
+        ui::controls::MouseBinding pan = store.mouse(QStringLiteral("pan1"));
+        pan.modifiers = {QStringLiteral("Shift")};
+        store.setMouse(pan);
+    }
+
+    auto document = std::make_shared<doc::Document>(doc::Document::create());
+    document->addItem(pixmapItem(200, 200, Qt::red));
+
+    ui::View view;
+    auto *scene = new ui::Scene(&view);
+    scene->setDocument(document);
+    view.setBoardScene(scene);
+    view.resize(400, 300);
+    view.fitScene();
+
+    const int hBefore = view.horizontalScrollBar()->value();
+    const QPoint empty(5, 5);
+    sendMouse(view.viewport(), QEvent::MouseButtonPress, empty, Qt::MiddleButton,
+              Qt::MiddleButton);
+    sendMouse(view.viewport(), QEvent::MouseMove, empty + QPoint(40, 0), Qt::NoButton,
+              Qt::MiddleButton);
+    sendMouse(view.viewport(), QEvent::MouseButtonRelease, empty + QPoint(40, 0),
+              Qt::MiddleButton, Qt::NoButton);
+    QCOMPARE(view.horizontalScrollBar()->value(), hBefore);
+
+    // With Shift held the pan binding matches.
+    sendMouse(view.viewport(), QEvent::MouseButtonPress, empty, Qt::MiddleButton,
+              Qt::MiddleButton, Qt::ShiftModifier);
+    sendMouse(view.viewport(), QEvent::MouseMove, empty + QPoint(60, 0), Qt::NoButton,
+              Qt::MiddleButton, Qt::ShiftModifier);
+    sendMouse(view.viewport(), QEvent::MouseButtonRelease, empty + QPoint(60, 0),
+              Qt::MiddleButton, Qt::NoButton, Qt::ShiftModifier);
+    QVERIFY(view.horizontalScrollBar()->value() != hBefore);
+
+    // With the default bindings Middle+Ctrl drag-zooms.
+    {
+        ui::controls::Store store;
+        store.restoreDefaults();
+    }
+    view.setBindings(ui::controls::Bindings::load());
+    const double scaleBefore = view.transform().m11();
+    const QPoint centre = view.viewport()->rect().center();
+    sendMouse(view.viewport(), QEvent::MouseButtonPress, centre, Qt::MiddleButton,
+              Qt::MiddleButton, Qt::ControlModifier);
+    sendMouse(view.viewport(), QEvent::MouseMove, centre - QPoint(0, 60), Qt::NoButton,
+              Qt::MiddleButton, Qt::ControlModifier);
+    sendMouse(view.viewport(), QEvent::MouseButtonRelease, centre - QPoint(0, 60),
+              Qt::MiddleButton, Qt::NoButton, Qt::ControlModifier);
+    QVERIFY2(view.transform().m11() > scaleBefore,
+             qPrintable(QStringLiteral("scale %1 -> %2").arg(scaleBefore).arg(
+                 view.transform().m11())));
+
+    settings::setSettingsDir(QString());
 }
 
 QTEST_MAIN(TestUiScene)

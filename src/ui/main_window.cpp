@@ -13,6 +13,8 @@
 #include "logging.h"
 #include "opacity_dialog.h"
 #include "selection_ops.h"
+#include "controls.h"
+#include "controls_dialog.h"
 #include "settings_dialog.h"
 #include "settings.h"
 #include "util/format.h"
@@ -119,6 +121,7 @@ MainWindow::MainWindow(bool cacheDisabled, QWidget *parent)
     actions_ = new ActionRegistry(this);
     buildActions();
     buildMenus();
+    applyShortcuts();
 
     connect(view_, &View::colorSampled, this, &MainWindow::copySampledColor);
     connect(scene_, &QGraphicsScene::selectionChanged, this, [this]() { updateActions(); });
@@ -250,6 +253,61 @@ void MainWindow::openSettingsDialog()
         view_->lodManager()->evaluateNow();
     });
     dialog->show();
+}
+
+void MainWindow::openControlsDialog()
+{
+    auto *dialog =
+        new ControlsDialog(this, actions_, [this](const QString &id) { return actionLabel(id); });
+    dialog->setAttribute(Qt::WA_DeleteOnClose);
+    connect(dialog, &ControlsDialog::controlsChanged, this, [this]() {
+        // Both take effect at once: the bindings for new events, the
+        // shortcuts on the actions.
+        view_->setBindings(controls::Bindings::load());
+        applyShortcuts();
+    });
+    dialog->show();
+}
+
+void MainWindow::applyShortcuts()
+{
+    if (!actions_)
+        return;
+    const controls::Store store;
+    for (const QString &id : actions_->ids()) {
+        const QStringList defaults = actions_->defaultShortcuts(id);
+        actions_->setShortcuts(id, store.actionShortcuts(id, defaults));
+    }
+}
+
+QString MainWindow::actionLabel(const QString &id) const
+{
+    QAction *action = actions_ ? actions_->action(id) : nullptr;
+    if (!action)
+        return id;
+
+    // The reference shows the menu path joined with the action text.
+    QStringList path;
+    QList<QMenu *> menus = menuBar()->findChildren<QMenu *>();
+    for (QMenu *menu : menus) {
+        if (!menu->actions().contains(action))
+            continue;
+        // Walk upwards to the menu bar for the full path.
+        QWidget *owner = menu->parentWidget();
+        while (auto *parentMenu = qobject_cast<QMenu *>(owner)) {
+            path.prepend(QString(parentMenu->title()).remove(QLatin1Char('&')));
+            owner = parentMenu->parentWidget();
+        }
+        path.prepend(QString(menu->title()).remove(QLatin1Char('&')));
+        break;
+    }
+
+    QString text = action->text();
+    text.remove(QLatin1Char('&'));
+    if (text.endsWith(QStringLiteral("...")))
+        text.chop(3);
+    path.append(text);
+    return path.join(QStringLiteral(": "));
 }
 
 void MainWindow::openSettingsDir()
@@ -660,6 +718,8 @@ void MainWindow::buildActions()
     // Settings.
     actions_->add(QStringLiteral("settings"), QStringLiteral("&Settings"), {}, G::Always,
                   [this](bool) { openSettingsDialog(); });
+    actions_->add(QStringLiteral("keyboard_settings"), QStringLiteral("&Keyboard && Mouse"), {},
+                  G::Always, [this](bool) { openControlsDialog(); });
     actions_->add(QStringLiteral("open_settings_dir"), QStringLiteral("&Open Settings Folder"),
                   {}, G::Always, [this](bool) { openSettingsDir(); });
 }
@@ -736,6 +796,7 @@ void MainWindow::buildMenus()
     // Settings: the Keyboard & Mouse editor arrives with the bindings.
     auto *settingsMenu = menuBar()->addMenu(QStringLiteral("&Settings"));
     actions_->append(settingsMenu, QStringLiteral("settings"));
+    actions_->append(settingsMenu, QStringLiteral("keyboard_settings"));
     actions_->append(settingsMenu, QStringLiteral("open_settings_dir"));
 }
 

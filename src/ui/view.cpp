@@ -45,6 +45,7 @@ View::View(QWidget *parent)
     setFrameShape(QFrame::NoFrame);
     setMouseTracking(true);
     setAcceptDrops(true);
+    bindings_ = controls::Bindings::load();
 }
 
 View::~View()
@@ -296,23 +297,30 @@ void View::wheelEvent(QWheelEvent *event)
         QGraphicsView::wheelEvent(event);
         return;
     }
-    const Qt::KeyboardModifiers modifiers = event->modifiers();
     beginInteraction();
     QTimer::singleShot(150, this, [this]() { restoreSmoothing(); });
-    // The reference maps Shift (pan_horizontal) to the vertical
-    // scrollbar and Shift+Ctrl (pan_vertical) to the horizontal one,
-    // and pans by half the wheel delta. Kept for parity.
-    if (modifiers.testFlag(Qt::ShiftModifier)
-        && modifiers.testFlag(Qt::ControlModifier)) {
-        panBy(QPoint(qRound(0.5 * delta), 0));
+
+    // The configured wheel bindings decide what the wheel does; the
+    // defaults are zoom (bare), pan_horizontal (Shift, which scrolls the
+    // vertical bar, as the reference names it) and pan_vertical
+    // (Shift+Ctrl). Inverted bindings flip the delta.
+    const controls::Bindings::Match binding = bindings_.wheelAction(event->modifiers());
+    int step = delta;
+    if (binding.inverted)
+        step *= -1;
+    if (binding.valid && binding.group == QLatin1String("pan_horizontal")) {
+        panBy(QPoint(0, qRound(0.5 * step)));
         updateViewState();
         lod_->schedule();
-    } else if (modifiers.testFlag(Qt::ShiftModifier)) {
-        panBy(QPoint(0, qRound(0.5 * delta)));
+    } else if (binding.valid && binding.group == QLatin1String("pan_vertical")) {
+        panBy(QPoint(qRound(0.5 * step), 0));
         updateViewState();
         lod_->schedule();
+    } else if (binding.valid && binding.group == QLatin1String("zoom")) {
+        zoomAt(step, event->position().toPoint());
     } else {
-        zoomAt(delta, event->position().toPoint());
+        QGraphicsView::wheelEvent(event);
+        return;
     }
     event->accept();
 }
@@ -322,9 +330,23 @@ void View::mousePressEvent(QMouseEvent *event)
     beginInteraction();
     lod_->evaluateNow();
 
-    if (event->button() == Qt::MiddleButton) {
+    // The reference checks the configured mouse bindings before the
+    // item interactions: pan, drag-zoom and (not ported yet)
+    // move-window.
+    const controls::Bindings::Match binding =
+        bindings_.mouseAction(event->button(), event->modifiers());
+    if (binding.valid && binding.group == QLatin1String("pan")) {
         panning_ = true;
         panStart_ = event->position().toPoint();
+        viewport()->setCursor(Qt::ClosedHandCursor);
+        event->accept();
+        return;
+    }
+    if (binding.valid && binding.group == QLatin1String("zoom")) {
+        dragZoom_ = true;
+        dragZoomInverted_ = binding.inverted;
+        dragZoomStart_ = event->position().toPoint();
+        dragZoomAnchor_ = dragZoomStart_;
         event->accept();
         return;
     }
@@ -454,6 +476,18 @@ void View::mouseMoveEvent(QMouseEvent *event)
         return;
     }
 
+    if (dragZoom_) {
+        // The reference zooms by the vertical drag, twenty times the
+        // wheel step per pixel, anchored where the drag started.
+        int delta = dragZoomStart_.y() - position.y();
+        if (dragZoomInverted_)
+            delta *= -1;
+        dragZoomStart_ = position;
+        zoomAt(delta * 20, dragZoomAnchor_);
+        event->accept();
+        return;
+    }
+
     if (sampling_) {
         updateSampleSwatch(position);
         event->accept();
@@ -519,8 +553,17 @@ void View::mouseReleaseEvent(QMouseEvent *event)
 {
     restoreSmoothing();
 
-    if (panning_ && event->button() == Qt::MiddleButton) {
+    // A release ends pan and drag-zoom, whatever button it is, like the
+    // reference's PAN_MODE/ZOOM_MODE handling.
+    if (panning_) {
         panning_ = false;
+        viewport()->unsetCursor();
+        event->accept();
+        return;
+    }
+
+    if (dragZoom_) {
+        dragZoom_ = false;
         event->accept();
         return;
     }
