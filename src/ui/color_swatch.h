@@ -13,8 +13,11 @@ class ColorSwatch : public QWidget
     Q_OBJECT
 
 public:
-    // The reference's size and offset from the pointer.
+    // The reference's size and offset from the pointer, plus the two
+    // one-pixel frames (white inside, black outside) that make the
+    // patch readable on any background.
     static constexpr int kSize = 50;
+    static constexpr int kBorder = 1;
     static constexpr int kOffset = 10;
 
     explicit ColorSwatch(QWidget *parent = nullptr);

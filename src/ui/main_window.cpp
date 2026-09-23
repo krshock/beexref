@@ -5,7 +5,9 @@
 #include "color_gamut.h"
 #include "color_tools.h"
 #include "hud.h"
+#include "hud_preview.h"
 #include "info_dialogs.h"
+#include "metadata_panel.h"
 #include "constants.h"
 #include "input_controller.h"
 #include "layout_ops.h"
@@ -28,6 +30,7 @@
 #include <QPlainTextEdit>
 #include <QUrl>
 #include <QMenu>
+#include <QSplitter>
 #include <QClipboard>
 #include <QDesktopServices>
 #include <QCursor>
@@ -111,7 +114,38 @@ MainWindow::MainWindow(bool cacheDisabled, QWidget *parent)
         view_->lodManager()->evaluateNow();
         updateTitle();
     });
-    setCentralWidget(view_);
+    // The canvas and the metadata panel share a splitter: the panel is
+    // a real right-hand side panel, hidden until asked for, with a
+    // draggable divider (the Go port's layout).
+    metadataPanel_ = new MetadataPanel(scene_, &undoStack_, this);
+    splitter_ = new QSplitter(Qt::Horizontal, this);
+    splitter_->addWidget(view_);
+    splitter_->addWidget(metadataPanel_);
+    splitter_->setStretchFactor(0, 1);
+    splitter_->setStretchFactor(1, 0);
+    metadataPanel_->hide();
+    setCentralWidget(splitter_);
+    connect(splitter_, &QSplitter::splitterMoved, this, [this]() {
+        const QList<int> sizes = splitter_->sizes();
+        if (sizes.size() == 2 && metadataPanel_->isVisible() && sizes.at(1) > 0)
+            panelWidth_ = sizes.at(1);
+    });
+    connect(metadataPanel_, &MetadataPanel::visibilityChanged, this, [this]() {
+        if (!metadataPanel_->isVisible())
+            return;
+        // Restore the last width the user had, if the panel fits.
+        if (splitter_->width() <= 0)
+            return;
+        const int wanted = qMin(metadataPanel_->preferredWidth(),
+                                qMax(MetadataPanel::kMinWidth, splitter_->width() / 2));
+        splitter_->setSizes({splitter_->width() - wanted, wanted});
+    });
+    connect(metadataPanel_, &MetadataPanel::modified, this, [this]() {
+        updateActions();
+        updateTitle();
+    });
+    connect(scene_, &Scene::itemViewAboutToBeRemoved, this,
+            [this](SceneItem *view) { metadataPanel_->forgetItem(view); });
 
     // A window always has a document: a new unsaved board until a file
     // is opened, so paste, drops and undo/redo work from the start.
@@ -124,10 +158,18 @@ MainWindow::MainWindow(bool cacheDisabled, QWidget *parent)
     actions_ = new ActionRegistry(this);
     buildActions();
     buildMenus();
+    // Menu-less actions (Shift+I for the metadata panel, for example)
+    // only get live shortcuts once they are in the window's action list;
+    // actions inside menus are registered by the menu itself.
+    for (const QString &id : actions_->ids())
+        addAction(actions_->action(id));
     applyShortcuts();
 
     connect(view_, &View::colorSampled, this, &MainWindow::copySampledColor);
-    connect(scene_, &QGraphicsScene::selectionChanged, this, [this]() { updateActions(); });
+    connect(scene_, &QGraphicsScene::selectionChanged, this, [this]() {
+        updateActions();
+        metadataPanel_->refresh();
+    });
     connect(scene_, &Scene::itemsChanged, this, [this]() { updateActions(); });
     updateActions();
 
@@ -178,6 +220,7 @@ bool MainWindow::openBoard(const QString &path)
     view_->setLodSettings(loadLodSettings());
     view_->fitScene();
     view_->lodManager()->logAudit(QStringLiteral("open"));
+    metadataPanel_->closePanel();
 
     // Record it for Open Recent, like the reference's loading callback.
     {
@@ -258,16 +301,18 @@ void MainWindow::openSettingsDialog()
     dialog->show();
 }
 
-void MainWindow::openImageInfo()
+void MainWindow::toggleHudPreview()
 {
-    if (!scene_)
+    if (!hudPreview_) {
+        hudPreview_ = new HudPreview(view_);
+        hudPreview_->hide();
+    }
+    if (hudPreview_->isVisible()) {
+        hudPreview_->hide();
         return;
-    const QVector<SceneItem *> images = selection::imageSelection(*scene_);
-    if (images.size() != 1)
-        return;
-    auto *dialog = new ImageInfoDialog(this, images.first());
-    dialog->setAttribute(Qt::WA_DeleteOnClose);
-    dialog->show();
+    }
+    hudPreview_->moveToTopRight();
+    hudPreview_->show();
 }
 
 void MainWindow::openHelp()
@@ -418,6 +463,7 @@ void MainWindow::newScene()
     view_->setTransform(QTransform());
     view_->refreshSceneRect();
     view_->lodManager()->evaluateNow();
+    metadataPanel_->closePanel();
     updateActions();
     updateTitle();
 }
@@ -813,10 +859,19 @@ void MainWindow::buildActions()
                   QKeySequence(QStringLiteral("Ctrl+M")), G::Always,
                   [this](bool) { view_->toggleMoveWindow(); });
 
-    // Images: the metadata window.
-    actions_->add(QStringLiteral("show_image_info"), QStringLiteral("Show Image &Info"),
-                  QKeySequence(QStringLiteral("I")), G::SingleImage,
-                  [this](bool) { openImageInfo(); });
+    // Images: the metadata editor panel (shortcut only, like the
+    // reference) and the info window.
+    // The Go port's binding: the panel owns the I key, and its Info tab
+    // replaces the old Image Info window.
+    actions_->add(QStringLiteral("metadata_panel"), QStringLiteral("Edit Image &Metadata"),
+                  QKeySequence(Qt::Key_I), G::SingleImage,
+                  [this](bool) { metadataPanel_->toggle(); });
+
+    // A runtime preview of the HUD style, shortcut only like the
+    // reference (Ctrl+Shift+H).
+    actions_->add(QStringLiteral("hud_preview"), QStringLiteral("Toggle &HUD Preview"),
+                  QKeySequence(QStringLiteral("Ctrl+Shift+H")), G::Always,
+                  [this](bool) { toggleHudPreview(); });
 
     // Settings.
     actions_->add(QStringLiteral("settings"), QStringLiteral("&Settings"), {}, G::Always,
@@ -914,7 +969,6 @@ void MainWindow::buildMenus()
     actions_->append(imagesMenu, QStringLiteral("grayscale"));
     actions_->appendSeparator(imagesMenu);
     actions_->append(imagesMenu, QStringLiteral("show_color_gamut"));
-    actions_->append(imagesMenu, QStringLiteral("show_image_info"));
     actions_->append(imagesMenu, QStringLiteral("sample_color"));
 
     // Settings: the Keyboard & Mouse editor arrives with the bindings.

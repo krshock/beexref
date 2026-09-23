@@ -22,5 +22,9 @@ inline const QColor hudDanger(190, 80, 75);
 inline const QColor hudWarning(185, 145, 60);
 inline const QColor hudSuccess(95, 160, 100);
 inline const QColor hudInfo(120, 120, 120);
+inline const QColor hudHover(44, 44, 44, 225);
+inline const QColor hudPressed(16, 16, 16, 225);
+inline const QColor hudSelection(83, 167, 165);
+inline const QColor hudFocus(90, 181, 179);
 
 } // namespace ui::theme

@@ -12,6 +12,7 @@
 
 class QAction;
 class QMenu;
+class QSplitter;
 
 namespace cache {
 class SessionCache;
@@ -21,6 +22,8 @@ namespace ui {
 
 class ActionRegistry;
 class InputController;
+class HudPreview;
+class MetadataPanel;
 
 // Application window: the canvas plus the minimal actions the canvas
 // phase needs. The full action registry and HUD arrive later.
@@ -38,6 +41,7 @@ public:
     bool openBoard(const QString &path);
 
     View *view() const { return view_; }
+    MetadataPanel *metadataPanel() const { return metadataPanel_; }
     Scene *scene() const { return scene_; }
     InputController *input() const { return input_; }
 
@@ -64,7 +68,7 @@ private:
     // Opens the gamut wheel for the single selected image.
     void showColorGamut();
     // Settings menu: the settings dialog and the settings folder.
-    void openImageInfo();
+    void toggleHudPreview();
     void openHelp();
     void showAbout();
     void openDebugLog();
@@ -106,6 +110,10 @@ private:
     InputController *input_ = nullptr;
     ActionRegistry *actions_ = nullptr;
     QMenu *recentMenu_ = nullptr;
+    int panelWidth_ = 320;
+    QSplitter *splitter_ = nullptr;
+    MetadataPanel *metadataPanel_ = nullptr;
+    HudPreview *hudPreview_ = nullptr;
     doc::UndoStack undoStack_;
     std::shared_ptr<cache::SessionCache> sessionCache_;
     std::shared_ptr<doc::Document> document_;

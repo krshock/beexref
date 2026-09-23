@@ -51,6 +51,14 @@ void UndoStack::insertEntry(Entry entry)
     ++index_;
 }
 
+void UndoStack::notifyChanged()
+{
+    for (const auto &callback : changedCallbacks_) {
+        if (callback)
+            callback();
+    }
+}
+
 void UndoStack::push(std::unique_ptr<Command> command)
 {
     if (!command || !document_)
@@ -62,6 +70,7 @@ void UndoStack::push(std::unique_ptr<Command> command)
         return;
     }
     insertEntry(Entry{std::move(command), text});
+    notifyChanged();
 }
 
 bool UndoStack::undo()
@@ -70,6 +79,7 @@ bool UndoStack::undo()
         return false;
     --index_;
     entries_[static_cast<size_t>(index_)].command->undo(*document_);
+    notifyChanged();
     return true;
 }
 
@@ -79,6 +89,7 @@ bool UndoStack::redo()
         return false;
     entries_[static_cast<size_t>(index_)].command->redo(*document_);
     ++index_;
+    notifyChanged();
     return true;
 }
 
@@ -104,6 +115,7 @@ void UndoStack::endMacro()
         macro->add(std::move(entry.command));
     macroEntries_.clear();
     insertEntry(Entry{std::move(macro), macroText_});
+    notifyChanged();
 }
 
 void UndoStack::clear()
@@ -113,6 +125,7 @@ void UndoStack::clear()
     macro_ = false;
     index_ = 0;
     cleanIndex_ = 0;
+    notifyChanged();
 }
 
 QString UndoStack::undoText() const
@@ -191,6 +204,7 @@ void RemoveItemsCommand::undo(Document &document)
 ChangeItemCommand::State ChangeItemCommand::State::capture(const Item &item)
 {
     State state;
+    state.filename = item.filename;
     state.x = item.x;
     state.y = item.y;
     state.z = item.z;
@@ -204,6 +218,7 @@ ChangeItemCommand::State ChangeItemCommand::State::capture(const Item &item)
 
 void ChangeItemCommand::State::apply(Item &item) const
 {
+    item.filename = filename;
     item.x = x;
     item.y = y;
     item.z = z;
@@ -216,7 +231,7 @@ void ChangeItemCommand::State::apply(Item &item) const
 
 bool ChangeItemCommand::State::operator==(const State &other) const
 {
-    return qFuzzyCompare(x, other.x) && qFuzzyCompare(y, other.y) && qFuzzyCompare(z, other.z)
+    return filename == other.filename && qFuzzyCompare(x, other.x) && qFuzzyCompare(y, other.y) && qFuzzyCompare(z, other.z)
         && qFuzzyCompare(scale, other.scale) && qFuzzyCompare(rotation, other.rotation)
         && qFuzzyCompare(flip, other.flip) && data == other.data && meta == other.meta;
 }

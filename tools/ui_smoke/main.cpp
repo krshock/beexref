@@ -18,6 +18,7 @@
 #include <QMimeData>
 #include <QAction>
 #include <QDialog>
+#include <QPushButton>
 #include <QSlider>
 #include <QTabWidget>
 #include <QMouseEvent>
@@ -33,7 +34,9 @@
 #include "ui/color_gamut.h"
 #include "ui/input_controller.h"
 #include "ui/lod_manager.h"
+#include "ui/hud_preview.h"
 #include "ui/main_window.h"
+#include "ui/metadata_panel.h"
 #include "ui/scene.h"
 #include "ui/rendering.h"
 #include "ui/selection_ops.h"
@@ -501,6 +504,20 @@ public:
                 candidate->close();
             }
 
+            // The HUD preview, with a toast raised from it.
+            actionByText(QStringLiteral("Toggle &HUD Preview"))->trigger();
+            QTest::qWait(400);
+            if (auto *preview = window_.findChild<ui::HudPreview *>()) {
+                for (QPushButton *button : preview->findChildren<QPushButton *>()) {
+                    if (button->text() == QStringLiteral("Show toast"))
+                        button->click();
+                }
+            }
+            QTest::qWait(400);
+            out() << "hud preview: " << (window_.findChild<ui::HudPreview *>() != nullptr)
+                  << "\n";
+            snapshot(QStringLiteral("37-hud"));
+
             // Part 3: window toggles and the info dialogs.
             actionByText(QStringLiteral("Show &Scrollbars"))->trigger();
             QTest::qWait(300);
@@ -545,17 +562,20 @@ public:
             if (infoItem) {
                 infoItem->setSelected(true);
                 QTest::qWait(200);
-                actionByText(QStringLiteral("Show Image &Info"))->trigger();
-                QTest::qWait(600);
-                for (QDialog *candidate : window_.findChildren<QDialog *>()) {
-                    if (!candidate->windowTitle().endsWith(QStringLiteral("Image Info")))
-                        continue;
-                    const QString path = outputDir_ + QStringLiteral("/35-image-info.png");
-                    candidate->grab().save(path);
-                    out() << "image info dialog " << candidate->width() << "x"
-                          << candidate->height() << " -> " << path << "\n";
-                    candidate->close();
-                }
+                // Through the real shortcut, not trigger(), so a dead
+                // key binding would show up here.
+                window_.activateWindow();
+                QTest::qWait(50);
+                QTest::keyClick(&window_, Qt::Key_I);
+                QTest::qWait(500);
+                out() << "metadata panel via I: "
+                      << (window_.metadataPanel()
+                          && window_.metadataPanel()->item() != nullptr)
+                      << "\n";
+                snapshot(QStringLiteral("36-metadata-panel"));
+                QTest::keyClick(&window_, Qt::Key_I);
+                QTest::qWait(300);
+
             }
         }
 

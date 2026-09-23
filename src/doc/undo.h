@@ -5,6 +5,7 @@
 #include <QString>
 #include <QVector>
 
+#include <functional>
 #include <memory>
 #include <vector>
 
@@ -51,6 +52,14 @@ public:
     void endMacro();
     bool inMacro() const { return macro_; }
 
+    // Notified after every stack change (push, macro end, undo, redo,
+    // clear), so the UI can refresh; the reference's QUndoStack emits
+    // indexChanged for this.
+    void addChangedCallback(std::function<void()> callback)
+    {
+        changedCallbacks_.push_back(std::move(callback));
+    }
+
     void setClean() { cleanIndex_ = index_; }
     bool isClean() const { return index_ == cleanIndex_; }
     void clear();
@@ -71,6 +80,8 @@ private:
 
     std::vector<Entry> entries_;
     Document *document_ = nullptr;
+    void notifyChanged();
+    std::vector<std::function<void()>> changedCallbacks_;
     qsizetype index_ = 0; // number of executed entries
     qsizetype cleanIndex_ = 0;
     bool macro_ = false;
@@ -131,6 +142,7 @@ public:
         double scale = 1;
         double rotation = 0;
         double flip = 1;
+        QString filename;
         QJsonObject data;
         QJsonObject meta;
 

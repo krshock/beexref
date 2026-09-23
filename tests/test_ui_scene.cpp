@@ -9,9 +9,13 @@
 #include <QLabel>
 #include <QMenuBar>
 #include <QPlainTextEdit>
+#include <QFrame>
+#include <QRegion>
+#include <QPushButton>
 #include <QMouseEvent>
 #include <QScrollBar>
 #include <QCheckBox>
+#include <QTabWidget>
 #include <QComboBox>
 #include <QLineEdit>
 #include <QRadioButton>
@@ -35,10 +39,13 @@
 #include "ui/input_controller.h"
 #include "ui/main_window.h"
 #include "ui/color_gamut.h"
+#include "ui/color_swatch.h"
 #include "ui/controls.h"
 #include "ui/controls_dialog.h"
 #include "ui/hud.h"
+#include "ui/hud_preview.h"
 #include "ui/info_dialogs.h"
+#include "ui/metadata_panel.h"
 #include "ui/settings_dialog.h"
 #include "ui/grayscale.h"
 #include "ui/opacity_dialog.h"
@@ -193,6 +200,9 @@ private slots:
     void windowTogglesFollowTheActions();
     void moveWindowModeFollowsThePointer();
     void infoDialogsShowTheExpectedContent();
+    void metadataPanelEditsAndCommits();
+    void hudPreviewShowsTheStyledPanel();
+    void colorSwatchIsFramedBlackAndWhite();
 };
 
 void TestUiScene::buildsItemsFromDocument()
@@ -2002,67 +2012,6 @@ void TestUiScene::infoDialogsShowTheExpectedContent()
 {
     ui::MainWindow window;
 
-    // Metadata rows of a plain image.
-    QImage image(6, 4, QImage::Format_ARGB32);
-    image.fill(Qt::red);
-    QMimeData mime;
-    mime.setImageData(image);
-    window.input()->insertMimeData(mime, QPointF(10, 10));
-    SceneItem *view = window.scene()->pixmapItemViews().first();
-    QVERIFY(view);
-    view->setSelected(true);
-
-    const QVector<QPair<QString, QString>> rows = ui::itemMetadata(view);
-    const auto valueOf = [&rows](const QString &label) {
-        for (const auto &row : rows) {
-            if (row.first == label)
-                return row.second;
-        }
-        return QString();
-    };
-    QCOMPARE(valueOf(QStringLiteral("Size")), QStringLiteral("6 x 4"));
-    QCOMPARE(valueOf(QStringLiteral("Grayscale")), QStringLiteral("No"));
-    QCOMPARE(valueOf(QStringLiteral("Flipped")), QStringLiteral("No"));
-    QCOMPARE(valueOf(QStringLiteral("Opacity")), QStringLiteral("100%"));
-    QCOMPARE(valueOf(QStringLiteral("Scale")), QStringLiteral("1.00"));
-    QCOMPARE(valueOf(QStringLiteral("Rotation")), QStringLiteral("0.0°"));
-    QCOMPARE(valueOf(QStringLiteral("Save ID")), QStringLiteral("Not saved"));
-
-    // The metadata panel's fields show up when set.
-    view->item()->meta.insert(QStringLiteral("origin_url"), QStringLiteral("https://example.org"));
-    view->item()->meta.insert(QStringLiteral("notes"), QStringLiteral("a note"));
-    const QVector<QPair<QString, QString>> withMeta = ui::itemMetadata(view);
-    bool sawUrl = false;
-    bool sawNotes = false;
-    for (const auto &row : withMeta) {
-        if (row.first == QLatin1String("Origin URL") && row.second == QLatin1String("https://example.org"))
-            sawUrl = true;
-        if (row.first == QLatin1String("Notes") && row.second == QLatin1String("a note"))
-            sawNotes = true;
-    }
-    QVERIFY(sawUrl);
-    QVERIFY(sawNotes);
-
-    // The Image Info dialog lists them.
-    QAction *infoAction = actionByText(window, QStringLiteral("Show Image &Info"));
-    QVERIFY(infoAction);
-    QVERIFY(infoAction->isEnabled());
-    infoAction->trigger();
-    QDialog *info = nullptr;
-    for (QDialog *candidate : window.findChildren<QDialog *>()) {
-        if (candidate->windowTitle().endsWith(QStringLiteral("Image Info")))
-            info = candidate;
-    }
-    QVERIFY(info);
-    bool sawSizeLabel = false;
-    for (QLabel *label : info->findChildren<QLabel *>()) {
-        if (label->text() == QLatin1String("Size:"))
-            sawSizeLabel = true;
-    }
-    QVERIFY(sawSizeLabel);
-    QVERIFY(!info->findChildren<QPlainTextEdit *>().isEmpty()); // the Source row
-    info->close();
-
     // Help and Debug Log open with their expected content.
     actionByText(window, QStringLiteral("&Help"))->trigger();
     QDialog *help = nullptr;
@@ -2089,6 +2038,223 @@ void TestUiScene::infoDialogsShowTheExpectedContent()
     QVERIFY(debug);
     QVERIFY(debug->findChild<QPlainTextEdit *>());
     debug->close();
+
+    // The old Image Info window is gone: the panel's Info tab carries
+    // those rows (checked in the metadata panel test).
+    QVERIFY(!actionByText(window, QStringLiteral("Show Image &Info")));
+}
+
+void TestUiScene::metadataPanelEditsAndCommits()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    settings::setSettingsDir(dir.path());
+
+    ui::MainWindow window;
+    QImage image(6, 4, QImage::Format_ARGB32);
+    image.fill(Qt::red);
+    QMimeData mime;
+    mime.setImageData(image);
+    window.input()->insertMimeData(mime, QPointF(10, 10));
+    SceneItem *first = window.scene()->pixmapItemViews().first();
+    QVERIFY(first);
+    window.scene()->clearSelection();
+    first->setSelected(true);
+
+    QAction *metadataAction = actionByText(window, QStringLiteral("Edit Image &Metadata"));
+    QVERIFY(metadataAction);
+    QCOMPARE(metadataAction->shortcut(), QKeySequence(Qt::Key_I));
+    QVERIFY(metadataAction->isEnabled());
+
+    ui::MetadataPanel *panel = window.metadataPanel();
+    QVERIFY(panel);
+    QVERIFY(panel->isHidden());
+
+    // The real shortcut opens the side panel for the single image.
+    // A WindowShortcut needs an active window; the offscreen platform
+    // needs the explicit call (activateWindow is asynchronous there).
+    window.show();
+    QT_WARNING_PUSH
+    QT_WARNING_DISABLE_DEPRECATED
+    QApplication::setActiveWindow(&window);
+    QT_WARNING_POP
+    QTest::keyClick(&window, Qt::Key_I);
+    QVERIFY(!panel->isHidden());
+    QCOMPARE(panel->item(), first);
+    QCOMPARE(panel->findChild<QLabel *>(QStringLiteral("panelTitle"))->text(),
+             QStringLiteral("Image"));
+
+    // The Info tab carries the Go port's rows.
+    const QVector<QPair<QString, QString>> rows = ui::itemInfoRows(first);
+    const auto infoValue = [&rows](const QString &label) {
+        for (const auto &row : rows) {
+            if (row.first == label)
+                return row.second;
+        }
+        return QString();
+    };
+    QCOMPARE(rows.size(), 12);
+    QCOMPARE(infoValue(QStringLiteral("Size")), QStringLiteral("6 x 4"));
+    QCOMPARE(infoValue(QStringLiteral("Format")), QStringLiteral("png"));
+    QCOMPARE(infoValue(QStringLiteral("Save ID")), QStringLiteral("Not saved"));
+
+    // The Meta tab edits a draft; Save commits one undo step and keeps
+    // the panel open.
+    auto *notes = panel->findChild<QPlainTextEdit *>(QStringLiteral("panelNotes"));
+    auto *author = panel->findChild<QLineEdit *>(QStringLiteral("panelAuthor"));
+    auto *save = panel->findChild<QPushButton *>(QStringLiteral("panelSave"));
+    auto *close = panel->findChild<QPushButton *>(QStringLiteral("panelClose"));
+    QVERIFY(notes && author && save && close);
+    QVERIFY(!save->isEnabled());
+    notes->setPlainText(QStringLiteral("hello"));
+    author->setText(QStringLiteral("me"));
+    QVERIFY(panel->isDirty());
+    QVERIFY(save->isEnabled());
+    QCOMPARE(panel->findChild<QLabel *>(QStringLiteral("panelTitle"))->text(),
+             QStringLiteral("Image •"));
+
+    save->click();
+    QCOMPARE(first->item()->meta.value(QStringLiteral("notes")).toString(),
+             QStringLiteral("hello"));
+    QCOMPARE(first->item()->meta.value(QStringLiteral("author")).toString(),
+             QStringLiteral("me"));
+    QVERIFY(!save->isEnabled());
+    QVERIFY(!panel->isHidden());
+
+    // Undo restores the fields and the panel follows.
+    actionByText(window, QStringLiteral("&Undo"))->trigger();
+    QVERIFY(first->item()->meta.value(QStringLiteral("notes")).toString().isEmpty());
+    QVERIFY(notes->toPlainText().isEmpty());
+
+    // Close discards the draft.
+    notes->setPlainText(QStringLiteral("discarded"));
+    close->click();
+    QVERIFY(panel->isHidden());
+    QVERIFY(first->item()->meta.value(QStringLiteral("notes")).toString().isEmpty());
+
+    // One-shot: another selection commits the draft and closes.
+    metadataAction->trigger();
+    QCOMPARE(panel->item(), first);
+    notes->setPlainText(QStringLiteral("committed on switch"));
+    window.scene()->clearSelection();
+    QVERIFY(panel->isHidden());
+    QCOMPARE(first->item()->meta.value(QStringLiteral("notes")).toString(),
+             QStringLiteral("committed on switch"));
+
+    // Keep: opening on a single image keeps following the selection.
+    auto *keepBox = panel->findChild<QCheckBox *>(QStringLiteral("panelKeep"));
+    QVERIFY(keepBox);
+    keepBox->setChecked(true);
+    {
+        settings::File file(settings::iniPath());
+        file.load();
+        QCOMPARE(file.value(QStringLiteral("View"), QStringLiteral("panel_keep")),
+                 QStringLiteral("true"));
+    }
+    window.input()->insertMimeData(mime, QPointF(80, 10));
+    SceneItem *second = nullptr;
+    for (SceneItem *view : window.scene()->pixmapItemViews()) {
+        if (view != first)
+            second = view;
+    }
+    QVERIFY(second);
+    window.scene()->clearSelection();
+    second->setSelected(true);
+    // With Keep the panel appears on its own for a single image.
+    QCOMPARE(panel->item(), second);
+    QVERIFY(!panel->isHidden());
+    window.scene()->clearSelection();
+    first->setSelected(true);
+    QCOMPARE(panel->item(), first);
+    QVERIFY(!panel->isHidden());
+    // Several items: it commits and hides even with Keep.
+    second->setSelected(true);
+    QVERIFY(panel->isHidden());
+    QVERIFY(panel->item() == nullptr);
+
+    // Deleting the shown item closes the panel instead of dangling.
+    keepBox->setChecked(false);
+    window.scene()->clearSelection();
+    first->setSelected(true);
+    metadataAction->trigger();
+    QCOMPARE(panel->item(), first);
+    actionByText(window, QStringLiteral("&Delete"))->trigger();
+    QVERIFY(panel->item() == nullptr);
+    QVERIFY(panel->isHidden());
+
+    settings::setSettingsDir(QString());
+}
+
+void TestUiScene::hudPreviewShowsTheStyledPanel()
+{
+    ui::MainWindow window;
+    window.resize(800, 600);
+    window.show();
+    QTest::qWait(50);
+
+    QAction *previewAction = actionByText(window, QStringLiteral("Toggle &HUD Preview"));
+    QVERIFY(previewAction);
+    QCOMPARE(previewAction->shortcut(), QKeySequence(QStringLiteral("Ctrl+Shift+H")));
+
+    previewAction->trigger();
+    auto *preview = window.findChild<ui::HudPreview *>();
+    QVERIFY(preview);
+    QVERIFY(!preview->isHidden());
+    // Pinned to the top right of the view.
+    QCOMPARE(preview->y(), 0);
+    QCOMPARE(preview->x() + preview->width(), window.view()->width());
+
+    // The semantic token swatches and the sample buttons are there.
+    QCOMPARE(preview->findChildren<QFrame *>(QStringLiteral("HUDSwatch")).size(), 6);
+    QPushButton *toastButton = nullptr;
+    bool sawDisabled = false;
+    for (QPushButton *button : preview->findChildren<QPushButton *>()) {
+        if (button->text() == QStringLiteral("Show toast"))
+            toastButton = button;
+        if (button->text() == QStringLiteral("Disabled") && !button->isEnabled())
+            sawDisabled = true;
+    }
+    QVERIFY(toastButton);
+    QVERIFY(sawDisabled);
+
+    // Its button raises a toast in the view.
+    const int before =
+        window.view()->findChildren<QWidget *>(QStringLiteral("HUDToast")).size();
+    toastButton->click();
+    QCOMPARE(window.view()->findChildren<QWidget *>(QStringLiteral("HUDToast")).size(),
+             before + 1);
+
+    previewAction->trigger();
+    QVERIFY(preview->isHidden());
+}
+
+void TestUiScene::colorSwatchIsFramedBlackAndWhite()
+{
+    ui::ColorSwatch swatch;
+    // Render without the window background, so an unpainted centre stays
+    // transparent in the image.
+    const auto render = [&swatch]() {
+        QImage image(swatch.size(), QImage::Format_ARGB32_Premultiplied);
+        image.fill(Qt::transparent);
+        swatch.render(&image, QPoint(), QRegion(), QWidget::DrawChildren);
+        return image;
+    };
+
+    swatch.setColor(QColor(10, 20, 30));
+    const QImage image = render();
+    QCOMPARE(image.size(), QSize(ui::ColorSwatch::kSize + 2, ui::ColorSwatch::kSize + 2));
+    // One black pixel outside, one white pixel inside, then the colour.
+    QCOMPARE(image.pixelColor(0, 0), QColor(0, 0, 0));
+    QCOMPARE(image.pixelColor(1, 1), QColor(255, 255, 255));
+    QCOMPARE(image.pixelColor(2, 2), QColor(10, 20, 30));
+    QCOMPARE(image.pixelColor(image.width() / 2, image.height() / 2), QColor(10, 20, 30));
+
+    // Without a sampled colour the patch stays transparent.
+    swatch.setColor(QColor());
+    const QImage empty = render();
+    QCOMPARE(empty.pixelColor(0, 0), QColor(0, 0, 0));
+    QCOMPARE(empty.pixelColor(1, 1), QColor(255, 255, 255));
+    QCOMPARE(empty.pixelColor(empty.width() / 2, empty.height() / 2).alpha(), 0);
 }
 
 QTEST_MAIN(TestUiScene)
