@@ -42,6 +42,7 @@
 #include "ui/selection_ops.h"
 #include "ui/scene_item.h"
 #include "ui/view.h"
+#include "ui/welcome_overlay.h"
 
 #include "doc/undo.h"
 #include "util/memory.h"
@@ -456,6 +457,14 @@ public:
             actionByText(QStringLiteral("&Delete"))->trigger();
             QTest::qWait(800);
             out() << "after delete: " << window_.scene()->document()->items().size() << " items\n";
+            out() << "welcome overlay: "
+                  << (window_.welcomeOverlay() && !window_.welcomeOverlay()->isHidden())
+                  << " mode "
+                  << (window_.welcomeOverlay()
+                              && window_.welcomeOverlay()->mode() == ui::WelcomeOverlay::Mode::Empty
+                          ? "empty"
+                          : "start")
+                  << "\n";
             snapshot(QStringLiteral("23-deleted"));
 
             // Through the action, since the closed gamut dialog may
@@ -647,7 +656,19 @@ int main(int argc, char *argv[])
     const QString outputDir = arguments.value(1, QStringLiteral("/tmp/opencode/ui-smoke"));
 
     // Keep the run out of the user's real settings and cache.
-    settings::setSettingsDir(outputDir + QStringLiteral("/settings"));
+    // Work on a copy of the user's settings (so their LOD/cache tuning is
+    // honoured) inside the output directory: the run never writes to the
+    // real configuration.
+    const QString settingsDir = outputDir + QStringLiteral("/settings");
+    QDir().mkpath(settingsDir);
+    for (const QString &name : {QStringLiteral("BeeXRef.ini"),
+                                QStringLiteral("KeyboardSettings.ini")}) {
+        const QString source =
+            QDir(settings::configDir()).filePath(name);
+        if (QFile::exists(source))
+            QFile::copy(source, QDir(settingsDir).filePath(name));
+    }
+    settings::setSettingsDir(settingsDir);
 
     ui::MainWindow window;
     if (!board.isEmpty() && !window.openBoard(board)) {

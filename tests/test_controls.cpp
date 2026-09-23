@@ -4,6 +4,7 @@
 #include <QFile>
 
 #include "settings.h"
+#include "test_env.h"
 #include "ui/controls.h"
 
 using namespace ui::controls;
@@ -34,7 +35,9 @@ void TestControls::init()
 
 void TestControls::cleanup()
 {
-    settings::setSettingsDir(QString());
+    // Some tests clear the override; point the next one at the throwaway
+    // directory again rather than at the user's real configuration.
+    testenv::isolate();
 }
 
 void TestControls::modifierAndButtonNames()

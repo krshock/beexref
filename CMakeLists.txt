@@ -114,6 +114,8 @@ qt_add_library(beexref_core STATIC
     src/ui/rendering.cpp
     src/ui/rendering.h
     src/ui/theme.h
+    src/ui/welcome_overlay.cpp
+    src/ui/welcome_overlay.h
     src/ui/view.cpp
     src/ui/view.h
     src/util/format.cpp
@@ -130,7 +132,8 @@ qt_add_resources(beexref_core "beexref_assets"
         assets/cursors/cursor_flip_h.png
         assets/cursors/cursor_flip_v.png
         assets/cursors/cursor_rotate.png
-        assets/documentation/controls.html)
+        assets/documentation/controls.html
+        assets/logo.png)
 target_link_libraries(beexref_core
     PUBLIC Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Svg Qt6::Network Threads::Threads
     PRIVATE beexref_sqlite3)

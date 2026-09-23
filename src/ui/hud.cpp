@@ -80,7 +80,11 @@ QString hudStylesheet()
                " border: 1px solid %2; border-radius: 6px; padding: 4px 8px;"
                " selection-background-color: %10; }"
                "QPlainTextEdit#HUDNotes:focus { border: 1px solid %10; }"
-               "QPlainTextEdit#HUDNotes[dirty=\"true\"] { border: 1px solid %7; }")
+               "QPlainTextEdit#HUDNotes[dirty=\"true\"] { border: 1px solid %7; }"
+               "QListView#HUDRecentFiles { background: transparent; border: none;"
+               " color: %3; font-size: 10pt; outline: none; }"
+               "QListView#HUDRecentFiles::item:hover { color: %7; }"
+               "QListView#HUDRecentFiles::item:selected { background: %8; color: %3; }")
         .arg(background, border, foreground, emphasis, muted, surface, selection, hover,
              pressed, focus);
 }

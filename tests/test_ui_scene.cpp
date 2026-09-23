@@ -11,6 +11,7 @@
 #include <QPlainTextEdit>
 #include <QFrame>
 #include <QRegion>
+#include <QListWidget>
 #include <QPushButton>
 #include <QMouseEvent>
 #include <QScrollBar>
@@ -36,6 +37,7 @@
 #include "doc/undo.h"
 #include "constants.h"
 #include "settings.h"
+#include "test_env.h"
 #include "ui/input_controller.h"
 #include "ui/main_window.h"
 #include "ui/color_gamut.h"
@@ -55,6 +57,7 @@
 #include "ui/scene_item.h"
 #include "ui/theme.h"
 #include "ui/view.h"
+#include "ui/welcome_overlay.h"
 
 #include "settings.h"
 
@@ -150,6 +153,9 @@ class TestUiScene : public QObject
     Q_OBJECT
 
 private slots:
+    // One throwaway settings/cache/log directory for the whole suite.
+    void initTestCase() { testenv::isolate(); }
+    void cleanup() { testenv::isolate(); }
     void buildsItemsFromDocument();
     void floorBecomesPlaceholderLevel();
     void missingSourceIsErrorItem();
@@ -202,6 +208,8 @@ private slots:
     void infoDialogsShowTheExpectedContent();
     void metadataPanelEditsAndCommits();
     void hudPreviewShowsTheStyledPanel();
+    void welcomeOverlayTracksTheBoardState();
+    void welcomeOverlayListsRecentFiles();
     void colorSwatchIsFramedBlackAndWhite();
 };
 
@@ -2255,6 +2263,100 @@ void TestUiScene::colorSwatchIsFramedBlackAndWhite()
     QCOMPARE(empty.pixelColor(0, 0), QColor(0, 0, 0));
     QCOMPARE(empty.pixelColor(1, 1), QColor(255, 255, 255));
     QCOMPARE(empty.pixelColor(empty.width() / 2, empty.height() / 2).alpha(), 0);
+}
+
+void TestUiScene::welcomeOverlayTracksTheBoardState()
+{
+    ui::MainWindow window;
+    ui::WelcomeOverlay *overlay = window.welcomeOverlay();
+    QVERIFY(overlay);
+
+    // A fresh, untitled, empty board shows the start screen.
+    QVERIFY(!overlay->isHidden());
+    QCOMPARE(overlay->mode(), ui::WelcomeOverlay::Mode::Start);
+    QCOMPARE(overlay->findChild<QLabel *>(QStringLiteral("HUDDisplay"))->text(),
+             QStringLiteral("BeeXRef"));
+
+    const auto buttonByText = [overlay](const QString &text) -> QPushButton * {
+        for (QPushButton *button : overlay->findChildren<QPushButton *>()) {
+            if (button->text() == text)
+                return button;
+        }
+        return nullptr;
+    };
+    QPushButton *insert = buttonByText(QStringLiteral("Insert Images…"));
+    QPushButton *undo = buttonByText(QStringLiteral("Undo"));
+    QVERIFY(insert && undo);
+    // The start screen offers Open only.
+    QVERIFY(insert->isHidden());
+    QVERIFY(undo->isHidden());
+
+    // Adding an item hides it.
+    QImage image(6, 4, QImage::Format_ARGB32);
+    image.fill(Qt::red);
+    QMimeData mime;
+    mime.setImageData(image);
+    window.input()->insertMimeData(mime, QPointF(10, 10));
+    QVERIFY(overlay->isHidden());
+
+    // Emptying it again brings the start screen back (still untitled).
+    actionByText(window, QStringLiteral("&Select All"))->trigger();
+    actionByText(window, QStringLiteral("&Delete"))->trigger();
+    QVERIFY(!overlay->isHidden());
+    QCOMPARE(overlay->mode(), ui::WelcomeOverlay::Mode::Start);
+
+    // An opened board with no items shows the empty-board state.
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString path = dir.filePath(QStringLiteral("empty.beex"));
+    {
+        auto document = doc::Document::create();
+        QVERIFY(document.save(path, false));
+    }
+    QVERIFY(window.openBoard(path));
+    QVERIFY(!overlay->isHidden());
+    QCOMPARE(overlay->mode(), ui::WelcomeOverlay::Mode::Empty);
+    QCOMPARE(overlay->findChild<QLabel *>(QStringLiteral("HUDDisplay"))->text(),
+             QStringLiteral("empty.beex"));
+    QVERIFY(!insert->isHidden());
+    QVERIFY(insert->property("primary").toBool());
+}
+
+void TestUiScene::welcomeOverlayListsRecentFiles()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    settings::setSettingsDir(dir.path());
+
+    const QString recent = dir.filePath(QStringLiteral("recent.beex"));
+    {
+        auto document = doc::Document::create();
+        QVERIFY(document.save(recent, false));
+        settings::File file(settings::iniPath());
+        file.load();
+        file.updateRecentFiles(recent);
+    }
+
+    ui::MainWindow window;
+    window.resize(900, 700);
+    window.show();
+    QTest::qWait(50);
+
+    ui::WelcomeOverlay *overlay = window.welcomeOverlay();
+    QVERIFY(overlay);
+    auto *files = overlay->findChild<QListWidget *>(QStringLiteral("HUDRecentFiles"));
+    QVERIFY(files);
+    QCOMPARE(files->count(), 1);
+    QCOMPARE(files->item(0)->text(), QStringLiteral("recent.beex"));
+    QCOMPARE(files->item(0)->data(Qt::UserRole).toString(), recent);
+
+    QSignalSpy spy(overlay, &ui::WelcomeOverlay::recentFileActivated);
+    QTest::mouseClick(files->viewport(), Qt::LeftButton, Qt::NoModifier,
+                      files->visualItemRect(files->item(0)).center());
+    QCOMPARE(spy.count(), 1);
+    QCOMPARE(spy.first().first().toString(), recent);
+
+    settings::setSettingsDir(QString());
 }
 
 QTEST_MAIN(TestUiScene)

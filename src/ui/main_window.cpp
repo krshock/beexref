@@ -17,6 +17,7 @@
 #include "opacity_dialog.h"
 #include "rendering.h"
 #include "selection_ops.h"
+#include "welcome_overlay.h"
 #include "controls.h"
 #include "controls_dialog.h"
 #include "settings_dialog.h"
@@ -147,6 +148,24 @@ MainWindow::MainWindow(bool cacheDisabled, QWidget *parent)
     connect(scene_, &Scene::itemViewAboutToBeRemoved, this,
             [this](SceneItem *view) { metadataPanel_->forgetItem(view); });
 
+    // The empty-board overlay, a child of the canvas.
+    welcomeOverlay_ = new WelcomeOverlay(view_);
+    welcomeOverlay_->setMimeFilter(
+        [this](const QMimeData &data) { return input_->acceptsMimeData(data); });
+    connect(welcomeOverlay_, &WelcomeOverlay::openFileRequested, this,
+            &MainWindow::openFileDialog);
+    connect(welcomeOverlay_, &WelcomeOverlay::insertImagesRequested, this,
+            &MainWindow::insertImages);
+    connect(welcomeOverlay_, &WelcomeOverlay::undoRequested, this,
+            [this]() { applyHistoryStep(true); });
+    connect(welcomeOverlay_, &WelcomeOverlay::recentFileActivated, this,
+            [this](const QString &path) { openBoard(path); });
+    connect(welcomeOverlay_, &WelcomeOverlay::mimeDropped, this,
+            [this](const QMimeData *data, const QPointF &pos) {
+                input_->insertMimeData(*data, view_->mapToScene(pos.toPoint()),
+                                       view_->transform().m11());
+            });
+
     // A window always has a document: a new unsaved board until a file
     // is opened, so paste, drops and undo/redo work from the start.
     document_ = std::make_shared<doc::Document>(doc::Document::create());
@@ -170,11 +189,19 @@ MainWindow::MainWindow(bool cacheDisabled, QWidget *parent)
         updateActions();
         metadataPanel_->refresh();
     });
-    connect(scene_, &Scene::itemsChanged, this, [this]() { updateActions(); });
+    undoStack_.addChangedCallback([this]() {
+        updateActions();
+        updateWelcomeOverlay();
+    });
+    connect(scene_, &Scene::itemsChanged, this, [this]() {
+        updateActions();
+        updateWelcomeOverlay();
+    });
     updateActions();
 
     setMinimumSize(400, 300);
     resize(500, 300);
+    updateWelcomeOverlay();
     updateTitle();
 
     // The title shows live RAM usage and, for saved boards, the file
@@ -545,14 +572,43 @@ void MainWindow::insertImages()
     updateActions();
 }
 
+QStringList MainWindow::configuredRecentFiles() const
+{
+    settings::File file(settings::iniPath());
+    file.load();
+    return file.recentFiles(true);
+}
+
+void MainWindow::updateWelcomeOverlay()
+{
+    if (!welcomeOverlay_)
+        return;
+    const bool empty = !document_ || document_->items().isEmpty();
+    if (!empty) {
+        welcomeOverlay_->hideOverlay();
+        return;
+    }
+
+    const QString path = document_ ? document_->path() : QString();
+    if (path.isEmpty()) {
+        welcomeOverlay_->setMode(WelcomeOverlay::Mode::Start);
+        welcomeOverlay_->setRecentFiles(configuredRecentFiles());
+    } else {
+        welcomeOverlay_->setMode(WelcomeOverlay::Mode::Empty);
+        welcomeOverlay_->setBoardName(QFileInfo(path).fileName());
+        welcomeOverlay_->setRecentFiles({});
+    }
+    welcomeOverlay_->setUndoState(undoStack_.canUndo(), undoStack_.undoText());
+    welcomeOverlay_->resize(view_->size());
+    welcomeOverlay_->showOverlay();
+}
+
 void MainWindow::rebuildRecentMenu()
 {
     if (!recentMenu_)
         return;
     recentMenu_->clear();
-    settings::File file(settings::iniPath());
-    file.load();
-    const QStringList files = file.recentFiles(true);
+    const QStringList files = configuredRecentFiles();
     for (const QString &path : files) {
         const QString name = QFileInfo(path).fileName();
         QAction *action = recentMenu_->addAction(name.isEmpty() ? path : name);

@@ -24,6 +24,7 @@ class ActionRegistry;
 class InputController;
 class HudPreview;
 class MetadataPanel;
+class WelcomeOverlay;
 
 // Application window: the canvas plus the minimal actions the canvas
 // phase needs. The full action registry and HUD arrive later.
@@ -42,6 +43,7 @@ public:
 
     View *view() const { return view_; }
     MetadataPanel *metadataPanel() const { return metadataPanel_; }
+    WelcomeOverlay *welcomeOverlay() const { return welcomeOverlay_; }
     Scene *scene() const { return scene_; }
     InputController *input() const { return input_; }
 
@@ -69,6 +71,10 @@ private:
     void showColorGamut();
     // Settings menu: the settings dialog and the settings folder.
     void toggleHudPreview();
+    // Shows, hides and fills the empty-board overlay.
+    void updateWelcomeOverlay();
+    // The recent files from the settings, existing ones only.
+    QStringList configuredRecentFiles() const;
     void openHelp();
     void showAbout();
     void openDebugLog();
@@ -114,6 +120,7 @@ private:
     QSplitter *splitter_ = nullptr;
     MetadataPanel *metadataPanel_ = nullptr;
     HudPreview *hudPreview_ = nullptr;
+    WelcomeOverlay *welcomeOverlay_ = nullptr;
     doc::UndoStack undoStack_;
     std::shared_ptr<cache::SessionCache> sessionCache_;
     std::shared_ptr<doc::Document> document_;

@@ -3,12 +3,15 @@
 #include <QtTest>
 
 #include "settings.h"
+#include "test_env.h"
 
 class TestSettings : public QObject
 {
     Q_OBJECT
 
 private slots:
+    void initTestCase() { testenv::isolate(); }
+    void cleanup() { testenv::isolate(); }
     void missingFileUsesDefaults();
     void roundTrip();
     void syncFormatIsSorted();
