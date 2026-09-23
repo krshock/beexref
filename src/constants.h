@@ -15,6 +15,10 @@ inline constexpr char UserAgent[] =
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
 
+// Z-order step: raising an item puts it above the current maximum by
+// this much, as in the reference ports.
+inline constexpr double kZStep = 0.001;
+
 // Floor level size: the longest side of the coarsest level, used both
 // for the runtime minimum level size and for the loading thumbnail
 // stored on save. The Python and Go ports use 128 for both; this port

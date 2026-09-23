@@ -26,6 +26,10 @@ void resetScale(const Scene &scene, doc::UndoStack &stack);
 void resetRotation(const Scene &scene, doc::UndoStack &stack);
 void resetFlip(const Scene &scene, doc::UndoStack &stack);
 void resetCrop(const Scene &scene, doc::UndoStack &stack);
+// Z-order: the reference's raise_to_top/lower_to_bottom maths (above the
+// highest / below the lowest item by one step) as one undo step.
+void raiseToTop(const Scene &scene, doc::UndoStack &stack);
+void lowerToBottom(const Scene &scene, doc::UndoStack &stack);
 void resetTransforms(const Scene &scene, doc::UndoStack &stack);
 
 // The selected canvas items, error items excluded: the reference's

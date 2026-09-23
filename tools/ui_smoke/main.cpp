@@ -339,7 +339,7 @@ public:
 
             QAction *resetAll = nullptr;
             for (QAction *action : actions) {
-                if (action->text() == QStringLiteral("Reset &All Transformations"))
+                if (action->text() == QStringLiteral("Reset &All"))
                     resetAll = action;
             }
             resetAll->trigger();
@@ -364,11 +364,12 @@ public:
                   << viewport->width() << "x" << viewport->height() << "\n";
             snapshot(QStringLiteral("21-double-click-fit"));
 
+
             // E5: sample the colour under the pointer and copy it.
             QAction *sampleColor = nullptr;
             QAction *showGamut = nullptr;
             for (QAction *action : actions) {
-                if (action->text() == QStringLiteral("Sample &Color"))
+                if (action->text() == QStringLiteral("Sample Color"))
                     sampleColor = action;
                 else if (action->text() == QStringLiteral("Show &Color Gamut"))
                     showGamut = action;
@@ -380,14 +381,14 @@ public:
             QTest::qWait(300);
             out() << "sampling active: " << window_.view()->samplingColor()
                   << ", swatch " << window_.view()->sampledColor().name() << "\n";
-            snapshot(QStringLiteral("22-sample-swatch"));
+            snapshot(QStringLiteral("25-sample-swatch"));
 
             sendMouse(viewport, QEvent::MouseButtonPress, samplePoint, Qt::LeftButton,
                       Qt::LeftButton);
             QTest::qWait(300);
             out() << "sampled clipboard: " << QApplication::clipboard()->text()
                   << ", mode ended: " << !window_.view()->samplingColor() << "\n";
-            snapshot(QStringLiteral("23-sampled"));
+            snapshot(QStringLiteral("26-sampled"));
 
             // E5: the colour gamut wheel for a real photo item (the
             // pasted one is a flat colour); the histogram is counted off
@@ -403,7 +404,7 @@ public:
             for (QWidget *widget : QApplication::topLevelWidgets()) {
                 if (widget->windowTitle() != QStringLiteral("Color Gamut"))
                     continue;
-                const QString path = outputDir_ + QStringLiteral("/24-color-gamut.png");
+                const QString path = outputDir_ + QStringLiteral("/27-color-gamut.png");
                 widget->grab().save(path);
                 out() << "gamut dialog " << widget->width() << "x" << widget->height() << " -> "
                       << path << "\n";
@@ -424,6 +425,40 @@ public:
                       << "\n";
                 widget->close();
             }
+
+            // Chrome: the registry's selection actions on the whole
+            // board (select all, delete, undo).
+            auto actionByText = [&](const QString &text) -> QAction * {
+                for (QAction *action : actions) {
+                    if (action->text() == text)
+                        return action;
+                }
+                return nullptr;
+            };
+            actionByText(QStringLiteral("&Select All"))->trigger();
+            QTest::qWait(300);
+            out() << "select all: " << window_.scene()->selectedItemViews().size() << " selected\n";
+            snapshot(QStringLiteral("22-select-all"));
+
+            actionByText(QStringLiteral("Deselect &All"))->trigger();
+            QTest::qWait(200);
+            out() << "deselect all: " << window_.scene()->selectedItemViews().size()
+                  << " selected\n";
+
+            actionByText(QStringLiteral("&Select All"))->trigger();
+            QTest::qWait(300);
+            actionByText(QStringLiteral("&Delete"))->trigger();
+            QTest::qWait(800);
+            out() << "after delete: " << window_.scene()->document()->items().size() << " items\n";
+            snapshot(QStringLiteral("23-deleted"));
+
+            // Through the action, since the closed gamut dialog may
+            // still hold the active window in the offscreen platform.
+            actionByText(QStringLiteral("&Undo"))->trigger();
+            QTest::qWait(1200);
+            out() << "delete undone: " << window_.scene()->document()->items().size()
+                  << " items, " << window_.scene()->selectedItemViews().size() << " selected\n";
+            snapshot(QStringLiteral("24-delete-undone"));
         }
 
         const ui::LodManager::Stats stats = view->lodManager()->stats();

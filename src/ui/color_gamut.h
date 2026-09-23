@@ -5,6 +5,7 @@
 
 #include <QDialog>
 #include <QHash>
+#include <QPointer>
 #include <QImage>
 #include <QVector>
 #include <QThread>
@@ -96,7 +97,9 @@ public:
 private:
     GamutPlot *plot_ = nullptr;
     QSlider *threshold_ = nullptr;
-    GamutThread *thread_ = nullptr;
+    // The thread deletes itself when it finishes, so the pointer has to
+    // follow that (QPointer) instead of dangling.
+    QPointer<GamutThread> thread_;
 };
 
 } // namespace ui

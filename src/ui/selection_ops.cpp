@@ -1,5 +1,7 @@
 #include "selection_ops.h"
 
+#include "constants.h"
+
 #include "scene.h"
 #include "scene_item.h"
 
@@ -211,6 +213,78 @@ void resetFlip(const Scene &scene, doc::UndoStack &stack)
             QStringLiteral("Reset flip")));
     }
     stack.endMacro();
+}
+
+namespace {
+
+// Applies one z delta to the whole selection as a single history step.
+void changeZ(doc::UndoStack &stack, const QVector<SceneItem *> &items, double delta,
+             const QString &text)
+{
+    QVector<doc::ChangeItemCommand::State> before;
+    before.reserve(items.size());
+    for (SceneItem *view : items)
+        before.append(doc::ChangeItemCommand::State::capture(*view->item()));
+
+    stack.beginMacro(text);
+    for (qsizetype i = 0; i < items.size(); ++i) {
+        items.at(i)->item()->z += delta;
+        items.at(i)->applyModelState();
+        const doc::ChangeItemCommand::State after =
+            doc::ChangeItemCommand::State::capture(*items.at(i)->item());
+        if (after != before.at(i))
+            stack.push(std::make_unique<doc::ChangeItemCommand>(items.at(i)->item(), before.at(i),
+                                                                after, text));
+    }
+    stack.endMacro();
+}
+
+} // namespace
+
+void raiseToTop(const Scene &scene, doc::UndoStack &stack)
+{
+    const QVector<SceneItem *> items = actionItems(scene);
+    if (items.isEmpty())
+        return;
+
+    // delta = scene maximum + step - the selection's minimum, so the
+    // selection keeps its internal order and ends up above everything.
+    double maxZ = 0;
+    bool first = true;
+    for (SceneItem *view : scene.itemViews()) {
+        maxZ = first ? view->item()->z : qMax(maxZ, view->item()->z);
+        first = false;
+    }
+    double minSelected = 0;
+    first = true;
+    for (SceneItem *view : items) {
+        minSelected = first ? view->item()->z : qMin(minSelected, view->item()->z);
+        first = false;
+    }
+    changeZ(stack, items, maxZ + constants::kZStep - minSelected,
+            QStringLiteral("Raise to top"));
+}
+
+void lowerToBottom(const Scene &scene, doc::UndoStack &stack)
+{
+    const QVector<SceneItem *> items = actionItems(scene);
+    if (items.isEmpty())
+        return;
+
+    double minZ = 0;
+    bool first = true;
+    for (SceneItem *view : scene.itemViews()) {
+        minZ = first ? view->item()->z : qMin(minZ, view->item()->z);
+        first = false;
+    }
+    double maxSelected = 0;
+    first = true;
+    for (SceneItem *view : items) {
+        maxSelected = first ? view->item()->z : qMax(maxSelected, view->item()->z);
+        first = false;
+    }
+    changeZ(stack, items, minZ - constants::kZStep - maxSelected,
+            QStringLiteral("Lower to bottom"));
 }
 
 void resetCrop(const Scene &scene, doc::UndoStack &stack)

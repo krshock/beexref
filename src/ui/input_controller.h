@@ -44,6 +44,8 @@ public:
     void paste(const QPointF &scenePos, double viewScale = 1.0);
 
     bool hasInternalClipboard() const { return !internalClipboard_.isEmpty(); }
+    // Deletes the selection as one undo step (the reference's Delete).
+    void removeSelection();
     // Forget the copied items, so a paste does not restore them; the
     // reference clears its internal clipboard when a colour is copied.
     void clearInternalClipboard() { internalClipboard_.clear(); }
@@ -62,7 +64,6 @@ private:
     void insertItems(QVector<doc::ItemPtr> items, const QPointF &scenePos, const QString &text);
     void insertUrls(const QList<QUrl> &urls, const QPointF &scenePos);
     void insertText(const QString &text, const QPointF &scenePos, double viewScale);
-    void removeSelection();
     void spillToCache(const doc::ItemPtr &item);
     void arrangeInserted(const QVector<doc::ItemPtr> &items, const QPointF &scenePos);
 

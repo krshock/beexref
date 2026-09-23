@@ -156,8 +156,10 @@ GamutDialog::GamutDialog(QWidget *parent, const doc::ItemPtr &item, const QImage
     if (item && item->isPixmap())
         source = item->source;
     thread_ = new GamutThread(std::move(source), fallbackLevel, this);
-    connect(thread_, &GamutThread::gamutReady, this,
-            [this]() { plot_->setGamut(thread_->gamut()); });
+    connect(thread_, &GamutThread::gamutReady, this, [this]() {
+        if (thread_)
+            plot_->setGamut(thread_->gamut());
+    });
     connect(thread_, &QThread::finished, thread_, &QObject::deleteLater);
     thread_->start();
 }

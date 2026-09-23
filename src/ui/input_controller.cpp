@@ -1,5 +1,7 @@
 #include "input_controller.h"
 
+#include "constants.h"
+
 #include "cache/session_cache.h"
 #include "downloader.h"
 #include "drop.h"
@@ -21,7 +23,7 @@ namespace {
 
 constexpr double kInsertGap = 0.0;
 // Inserted items go above everything, as the reference does.
-constexpr double kZStep = 0.001;
+constexpr double kZStep = constants::kZStep;
 
 bool isRemote(const QUrl &url)
 {
@@ -278,7 +280,22 @@ void InputController::removeSelection()
 
     auto command = std::make_unique<doc::RemoveItemsCommand>(
         items, [this](const doc::ItemPtr &item) { spillToCache(item); },
-        QStringLiteral("Delete"));
+        QStringLiteral("Delete"),
+        // The reference's DeleteItems deselects before removing and
+        // selects the restored items again on undo; the scene is brought
+        // in line here because the views for restored items do not exist
+        // until it syncs.
+        [this](const QVector<doc::ItemPtr> &restored, bool removed) {
+            scene_->syncDocument();
+            if (removed) {
+                scene_->clearSelection();
+                return;
+            }
+            for (const doc::ItemPtr &item : restored) {
+                if (SceneItem *view = scene_->itemViewFor(item))
+                    view->setSelected(true);
+            }
+        });
     undoStack_->push(std::move(command));
     scene_->syncDocument();
     if (const auto &document = scene_->document())

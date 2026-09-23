@@ -11,6 +11,7 @@
 #include <memory>
 
 class QAction;
+class QMenu;
 
 namespace cache {
 class SessionCache;
@@ -18,6 +19,7 @@ class SessionCache;
 
 namespace ui {
 
+class ActionRegistry;
 class InputController;
 
 // Application window: the canvas plus the minimal actions the canvas
@@ -52,13 +54,29 @@ private:
     // The reference's Change Opacity...: live preview in the dialog,
     // one undo step on OK, nothing on Cancel.
     void changeOpacity();
-    // Keeps the Grayscale and Color Gamut actions in step with the
-    // selection.
-    void updateSelectionActions();
-    // Copies a sampled colour and says so (the reference's notification).
+    // Builds the action registry and the menus of actions/menu_structure.
+    void buildActions();
+    void buildMenus();
+    // Enables and checks every action for the current state.
+    void updateActions();
+    // Copies a sampled colour and says so (the reference's HUD toast).
     void copySampledColor(const QColor &color);
     // Opens the gamut wheel for the single selected image.
     void showColorGamut();
+    // File menu: new, open, recent, insert.
+    void newScene();
+    void insertImages();
+    void rebuildRecentMenu();
+    // Edit menu: selection and z-order.
+    void selectAll();
+    void deselectAll();
+    void deleteSelection();
+    void raiseSelectionToTop();
+    void lowerSelectionToBottom();
+    void pasteAtPointer();
+    // Asks before dropping unsaved changes, honouring
+    // Save/confirm_close_unsaved like the reference.
+    bool confirmDiscardChanges(const QString &message);
     // Items and Arrange menu handlers (Items/* settings are read at use
     // time, like the reference's valueOrDefault calls).
     void normalizeSelection(int mode); // 0 height, 1 width, 2 size
@@ -71,8 +89,8 @@ private:
     View *view_ = nullptr;
     LevelLoader *loader_ = nullptr;
     InputController *input_ = nullptr;
-    QAction *grayscaleAction_ = nullptr;
-    QAction *gamutAction_ = nullptr;
+    ActionRegistry *actions_ = nullptr;
+    QMenu *recentMenu_ = nullptr;
     doc::UndoStack undoStack_;
     std::shared_ptr<cache::SessionCache> sessionCache_;
     std::shared_ptr<doc::Document> document_;

@@ -100,9 +100,13 @@ class RemoveItemsCommand final : public Command
 {
 public:
     using Spill = std::function<void(const ItemPtr &)>;
+    // Called after the document changed, so the UI can bring the scene
+    // in line: the reference's DeleteItems deselects before removing and
+    // reselects the restored items on undo.
+    using Notify = std::function<void(const QVector<ItemPtr> &items, bool removed)>;
 
     explicit RemoveItemsCommand(QVector<ItemPtr> items, Spill spill = {},
-                                QString text = QString());
+                                QString text = QString(), Notify notify = {});
     void redo(Document &document) override;
     void undo(Document &document) override;
     QString text() const override { return text_; }
@@ -112,6 +116,7 @@ private:
     QVector<qsizetype> indices_;
     Spill spill_;
     QString text_;
+    Notify notify_;
 };
 
 // Changes one item's geometry, data and meta in a single step.

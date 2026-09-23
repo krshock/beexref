@@ -56,6 +56,8 @@ qt_add_library(beexref_core STATIC
     src/logging.h
     src/settings.cpp
     src/settings.h
+    src/ui/actions.cpp
+    src/ui/actions.h
     src/ui/color_gamut.cpp
     src/ui/color_gamut.h
     src/ui/color_swatch.cpp
@@ -68,6 +70,8 @@ qt_add_library(beexref_core STATIC
     src/ui/downloader.h
     src/ui/grayscale.cpp
     src/ui/grayscale.h
+    src/ui/hud.cpp
+    src/ui/hud.h
     src/ui/layout_ops.cpp
     src/ui/layout_ops.h
     src/ui/opacity_dialog.cpp

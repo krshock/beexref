@@ -147,10 +147,12 @@ void AddItemsCommand::undo(Document &document)
         document.removeItem(item);
 }
 
-RemoveItemsCommand::RemoveItemsCommand(QVector<ItemPtr> items, Spill spill, QString text)
+RemoveItemsCommand::RemoveItemsCommand(QVector<ItemPtr> items, Spill spill, QString text,
+                                       Notify notify)
     : items_(std::move(items))
     , spill_(std::move(spill))
     , text_(std::move(text))
+    , notify_(std::move(notify))
 {
 }
 
@@ -166,6 +168,8 @@ void RemoveItemsCommand::redo(Document &document)
             spill_(item);
         document.removeItem(item);
     }
+    if (notify_)
+        notify_(items_, true);
 }
 
 void RemoveItemsCommand::undo(Document &document)
@@ -180,6 +184,8 @@ void RemoveItemsCommand::undo(Document &document)
               });
     for (const auto &pair : pairs)
         document.insertItem(pair.first, pair.second);
+    if (notify_)
+        notify_(items_, false);
 }
 
 ChangeItemCommand::State ChangeItemCommand::State::capture(const Item &item)

@@ -1,4 +1,5 @@
 #include <QAction>
+#include <QFile>
 #include <QBuffer>
 #include <QColor>
 #include <QImage>
@@ -20,6 +21,7 @@
 #include "ui/input_controller.h"
 #include "ui/main_window.h"
 #include "ui/color_gamut.h"
+#include "ui/hud.h"
 #include "ui/grayscale.h"
 #include "ui/opacity_dialog.h"
 #include "ui/rendering.h"
@@ -28,6 +30,8 @@
 #include "ui/scene_item.h"
 #include "ui/theme.h"
 #include "ui/view.h"
+
+#include "settings.h"
 
 using ui::SceneItem;
 
@@ -61,6 +65,15 @@ QImage renderItem(SceneItem *view, const QSize &size)
     view->paint(&painter, nullptr, nullptr);
     painter.end();
     return image;
+}
+
+QAction *actionByText(ui::MainWindow &window, const QString &text)
+{
+    for (QAction *action : window.findChildren<QAction *>()) {
+        if (action->text() == text)
+            return action;
+    }
+    return nullptr;
 }
 
 QByteArray makePng(int width, int height, const QColor &color)
@@ -149,6 +162,12 @@ private slots:
     void gamutDialogCanCloseWhileCounting();
     void gamutPlotFiltersDotsByThreshold();
     void gamutDialogSliderUpdatesContinuously();
+    void actionsFollowTheSelectionState();
+    void selectAllAndDeselectAll();
+    void deleteSelectionUndoes();
+    void raiseAndLowerChangeZOrder();
+    void newSceneClearsTheBoard();
+    void hudToastsAppearAndExpire();
 };
 
 void TestUiScene::buildsItemsFromDocument()
@@ -1417,6 +1436,209 @@ void TestUiScene::gamutDialogSliderUpdatesContinuously()
     QVERIFY(slider->hasTracking());
     QCOMPARE(slider->minimum(), 0);
     QCOMPARE(slider->maximum(), 500);
+}
+
+void TestUiScene::actionsFollowTheSelectionState()
+{
+    ui::MainWindow window;
+    QAction *selectAllAction = actionByText(window, QStringLiteral("&Select All"));
+    QAction *deleteAction = actionByText(window, QStringLiteral("&Delete"));
+    QAction *cropAction = actionByText(window, QStringLiteral("&Crop"));
+    QAction *gamutAction = actionByText(window, QStringLiteral("Show &Color Gamut"));
+    QAction *sampleAction = actionByText(window, QStringLiteral("Sample Color"));
+    QAction *normalizeAction = actionByText(window, QStringLiteral("&Height"));
+    QAction *undoAction = actionByText(window, QStringLiteral("&Undo"));
+    QAction *fitSelectionAction = actionByText(window, QStringLiteral("Fit &Selection"));
+    QAction *optimalAction = actionByText(window, QStringLiteral("&Optimal"));
+    QAction *fitSceneAction = actionByText(window, QStringLiteral("&Fit Scene"));
+    QVERIFY(selectAllAction && deleteAction && cropAction && gamutAction && sampleAction
+            && normalizeAction && undoAction && fitSelectionAction && optimalAction
+            && fitSceneAction);
+
+    // Nothing on the board: only always-active actions (and Fit Scene)
+    // are enabled.
+    QVERIFY(selectAllAction->isEnabled());
+    QVERIFY(fitSceneAction->isEnabled());
+    QVERIFY(!undoAction->isEnabled());
+    QVERIFY(!deleteAction->isEnabled());
+    QVERIFY(!cropAction->isEnabled());
+    QVERIFY(!gamutAction->isEnabled());
+    QVERIFY(!sampleAction->isEnabled());
+    QVERIFY(!normalizeAction->isEnabled());
+    QVERIFY(!fitSelectionAction->isEnabled());
+    QVERIFY(!optimalAction->isEnabled());
+
+    QImage image(6, 4, QImage::Format_ARGB32);
+    image.fill(Qt::red);
+    QMimeData mime;
+    mime.setImageData(image);
+    window.input()->insertMimeData(mime, QPointF(10, 10));
+    SceneItem *view = window.scene()->pixmapItemViews().first();
+    view->setSelected(true);
+
+    QVERIFY(undoAction->isEnabled());
+    QVERIFY(deleteAction->isEnabled());
+    QVERIFY(cropAction->isEnabled());
+    QVERIFY(gamutAction->isEnabled());
+    QVERIFY(sampleAction->isEnabled());
+    QVERIFY(normalizeAction->isEnabled());
+    QVERIFY(fitSelectionAction->isEnabled());
+    QVERIFY(optimalAction->isEnabled());
+
+    // The grayscale check mark follows the first selected image.
+    QAction *grayscaleAction = actionByText(window, QStringLiteral("&Grayscale"));
+    QVERIFY(grayscaleAction);
+    QVERIFY(!grayscaleAction->isChecked());
+    grayscaleAction->trigger();
+    QVERIFY(view->item()->grayscale());
+    QVERIFY(grayscaleAction->isChecked());
+
+    // Adding a text item to the selection turns the single-image group
+    // off while the selection group stays on.
+    const doc::ItemPtr note = textItem(QStringLiteral("note"));
+    window.scene()->document()->addItem(note);
+    window.scene()->syncDocument();
+    window.scene()->itemViewFor(note)->setSelected(true);
+    QVERIFY(deleteAction->isEnabled());
+    QVERIFY(!cropAction->isEnabled());
+    QVERIFY(!gamutAction->isEnabled());
+}
+
+void TestUiScene::selectAllAndDeselectAll()
+{
+    ui::MainWindow window;
+    QImage image(6, 4, QImage::Format_ARGB32);
+    image.fill(Qt::red);
+    QMimeData mime;
+    mime.setImageData(image);
+    window.input()->insertMimeData(mime, QPointF(10, 10));
+    window.input()->insertMimeData(mime, QPointF(80, 10));
+    QCOMPARE(window.scene()->pixmapItemViews().size(), 2);
+    window.scene()->clearSelection();
+
+    actionByText(window, QStringLiteral("&Select All"))->trigger();
+    QCOMPARE(window.scene()->selectedItemViews().size(), 2);
+
+    actionByText(window, QStringLiteral("Deselect &All"))->trigger();
+    QVERIFY(window.scene()->selectedItemViews().isEmpty());
+}
+
+void TestUiScene::deleteSelectionUndoes()
+{
+    ui::MainWindow window;
+    QImage image(6, 4, QImage::Format_ARGB32);
+    image.fill(Qt::red);
+    QMimeData mime;
+    mime.setImageData(image);
+    window.input()->insertMimeData(mime, QPointF(10, 10));
+    window.input()->insertMimeData(mime, QPointF(80, 10));
+    QCOMPARE(window.scene()->pixmapItemViews().size(), 2);
+
+    const doc::ItemPtr removed = window.scene()->pixmapItemViews().first()->item();
+    window.scene()->clearSelection();
+    window.scene()->itemViewFor(removed)->setSelected(true);
+
+    actionByText(window, QStringLiteral("&Delete"))->trigger();
+    QCOMPARE(window.scene()->pixmapItemViews().size(), 1);
+    QCOMPARE(window.scene()->document()->items().size(), 1);
+
+    // One undo brings it back and selects it again.
+    actionByText(window, QStringLiteral("&Undo"))->trigger();
+    QCOMPARE(window.scene()->document()->items().size(), 2);
+    const QVector<SceneItem *> selected = window.scene()->selectedItemViews();
+    QCOMPARE(selected.size(), 1);
+    QCOMPARE(selected.first()->item(), removed);
+}
+
+void TestUiScene::raiseAndLowerChangeZOrder()
+{
+    ui::MainWindow window;
+    QImage image(6, 4, QImage::Format_ARGB32);
+    image.fill(Qt::red);
+    QMimeData mime;
+    mime.setImageData(image);
+    window.input()->insertMimeData(mime, QPointF(10, 10));
+    window.input()->insertMimeData(mime, QPointF(60, 10));
+    window.input()->insertMimeData(mime, QPointF(110, 10));
+    QCOMPARE(window.scene()->document()->items().size(), 3);
+
+    QVector<doc::ItemPtr> items;
+    for (const doc::ItemPtr &item : window.scene()->document()->items())
+        items.append(item);
+    // Inserted items stack upwards already; the order is what matters.
+    const double firstZ = items.at(0)->z;
+    const double secondZ = items.at(1)->z;
+    const double thirdZ = items.at(2)->z;
+    QVERIFY(firstZ < secondZ && secondZ < thirdZ);
+
+    window.scene()->clearSelection();
+    window.scene()->itemViewFor(items.at(0))->setSelected(true);
+    actionByText(window, QStringLiteral("&Raise to Top"))->trigger();
+    QVERIFY(items.at(0)->z > thirdZ);
+    QCOMPARE(items.at(1)->z, secondZ);
+    QCOMPARE(items.at(2)->z, thirdZ);
+
+    // One undo step restores the whole selection's z.
+    actionByText(window, QStringLiteral("&Undo"))->trigger();
+    QCOMPARE(items.at(0)->z, firstZ);
+
+    // Lowering another item puts it below everything, including the
+    // earlier positions.
+    window.scene()->clearSelection();
+    window.scene()->itemViewFor(items.at(1))->setSelected(true);
+    actionByText(window, QStringLiteral("Lower to Bottom"))->trigger();
+    QVERIFY(items.at(1)->z < items.at(0)->z);
+    QVERIFY(items.at(1)->z < items.at(2)->z);
+}
+
+void TestUiScene::newSceneClearsTheBoard()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    settings::setSettingsDir(dir.path());
+    {
+        // Skip the unsaved-changes question, as a user disabling it would.
+        settings::File file(settings::iniPath());
+        file.load();
+        file.setValue(QStringLiteral("Save"), QStringLiteral("confirm_close_unsaved"),
+                      QStringLiteral("false"));
+        QVERIFY(file.sync());
+    }
+
+    ui::MainWindow window;
+    QImage image(6, 4, QImage::Format_ARGB32);
+    image.fill(Qt::red);
+    QMimeData mime;
+    mime.setImageData(image);
+    window.input()->insertMimeData(mime, QPointF(10, 10));
+    QCOMPARE(window.scene()->pixmapItemViews().size(), 1);
+    QVERIFY(window.scene()->document()->isModified());
+
+    actionByText(window, QStringLiteral("&New Scene"))->trigger();
+    QCOMPARE(window.scene()->pixmapItemViews().size(), 0);
+    QVERIFY(!window.scene()->document()->isModified());
+    QVERIFY(!actionByText(window, QStringLiteral("&Undo"))->isEnabled());
+
+    settings::setSettingsDir(QString());
+}
+
+void TestUiScene::hudToastsAppearAndExpire()
+{
+    ui::View view;
+    ui::hud::toast(&view, QStringLiteral("hello"), 50);
+    QList<QWidget *> toasts = view.findChildren<QWidget *>(QStringLiteral("HUDToast"));
+    QCOMPARE(toasts.size(), 1);
+    QVERIFY(!toasts.first()->isHidden());
+
+    // A second toast stacks under the first.
+    ui::hud::toast(&view, QStringLiteral("world"), 50);
+    toasts = view.findChildren<QWidget *>(QStringLiteral("HUDToast"));
+    QCOMPARE(toasts.size(), 2);
+    QVERIFY(toasts.at(1)->y() > toasts.at(0)->y());
+
+    QTest::qWait(250);
+    QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+    QVERIFY(view.findChildren<QWidget *>(QStringLiteral("HUDToast")).isEmpty());
 }
 
 QTEST_MAIN(TestUiScene)
