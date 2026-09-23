@@ -348,6 +348,19 @@ public:
             snapshot(QStringLiteral("20-reset-undone"));
             out() << "reset all, one undo restores everything: "
                   << (layoutBoxes() == resetBefore) << "\n";
+
+            // Double-click on the image fits the view to it.
+            const double scaleBeforeDouble = view->transform().m11();
+            const QPoint doublePoint = view->mapFromScene(target->sceneBoundingRect().center());
+            sendMouse(viewport, QEvent::MouseButtonDblClick, doublePoint, Qt::LeftButton,
+                      Qt::LeftButton);
+            QTest::qWait(500);
+            const QRect fitted = view->mapFromScene(target->sceneBoundingRect()).boundingRect();
+            out() << "double-click fit: scale " << QString::number(scaleBeforeDouble, 'f', 3)
+                  << " -> " << QString::number(view->transform().m11(), 'f', 3) << ", item now "
+                  << fitted.width() << "x" << fitted.height() << " in viewport "
+                  << viewport->width() << "x" << viewport->height() << "\n";
+            snapshot(QStringLiteral("21-double-click-fit"));
         }
 
         const ui::LodManager::Stats stats = view->lodManager()->stats();

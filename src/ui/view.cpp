@@ -241,30 +241,50 @@ void View::zoomAt(int delta, const QPoint &anchor)
     lod_->evaluateNow();
 }
 
-void View::fitScene()
+void View::fitRect(const QRectF &rect)
 {
-    if (!scene() || scene()->items().isEmpty())
+    if (!scene() || rect.isEmpty())
         return;
-    const QRectF rect = scene()->itemsBoundingRect();
     fitInView(rect, Qt::KeepAspectRatio);
     recalculateSceneRect();
+    // Fitting a second time is more reliable: a changed scene rect can
+    // mess up the first fitting, as the reference notes.
     fitInView(rect, Qt::KeepAspectRatio);
     updateViewState();
     lod_->evaluateNow();
 }
 
+void View::fitScene()
+{
+    fitRect(scene() ? scene()->itemsBoundingRect() : QRectF());
+}
+
 void View::fitSelection()
 {
-    if (!boardScene_)
+    fitRect(boardScene_ ? boardScene_->selectionBounds() : QRectF());
+}
+
+void View::mouseDoubleClickEvent(QMouseEvent *event)
+{
+    if (event->button() != Qt::LeftButton) {
+        QGraphicsView::mouseDoubleClickEvent(event);
         return;
-    const QRectF rect = boardScene_->selectionBounds();
-    if (rect.isEmpty())
-        return;
-    fitInView(rect, Qt::KeepAspectRatio);
-    recalculateSceneRect();
-    fitInView(rect, Qt::KeepAspectRatio);
-    updateViewState();
-    lod_->evaluateNow();
+    }
+
+    // The reference cancels active modes first, then fits the item
+    // unless it is editable: text items enter edit mode there, which is
+    // not ported yet, so they keep the default behaviour.
+    cancelCrop();
+    if (auto *item = dynamic_cast<SceneItem *>(itemAt(event->position().toPoint()))) {
+        if (!item->isText()) {
+            if (!item->isSelected())
+                item->setSelected(true);
+            fitRect(item->sceneBoundingRect());
+            event->accept();
+            return;
+        }
+    }
+    QGraphicsView::mouseDoubleClickEvent(event);
 }
 
 void View::wheelEvent(QWheelEvent *event)

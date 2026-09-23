@@ -74,6 +74,7 @@ protected:
     void mousePressEvent(QMouseEvent *event) override;
     void mouseMoveEvent(QMouseEvent *event) override;
     void mouseReleaseEvent(QMouseEvent *event) override;
+    void mouseDoubleClickEvent(QMouseEvent *event) override;
     void keyPressEvent(QKeyEvent *event) override;
     void leaveEvent(QEvent *event) override;
     void resizeEvent(QResizeEvent *event) override;
@@ -113,6 +114,9 @@ private:
     void beginInteraction();
     void restoreSmoothing();
     double zoomExtent(bool maximum) const;
+    // Fits the view to a scene rectangle: the reference's fit_rect
+    // without its toggle-back behaviour, which is not ported.
+    void fitRect(const QRectF &rect);
 
     // Transform gestures.
     bool beginScaleGesture(int corner, const QPointF &scenePos);

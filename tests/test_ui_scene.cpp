@@ -141,6 +141,7 @@ private slots:
     void resetCropAndTransforms();
     void cropActionStartsAndUndoCancels();
     void resetActionsAreSingleUndoSteps();
+    void doubleClickFitsTheItem();
 };
 
 void TestUiScene::buildsItemsFromDocument()
@@ -1213,6 +1214,51 @@ void TestUiScene::resetActionsAreSingleUndoSteps()
         ui::selection::resetFlip(scene, fresh);
         QCOMPARE(fresh.count(), 0);
     }
+}
+
+void TestUiScene::doubleClickFitsTheItem()
+{
+    auto document = std::make_shared<doc::Document>(doc::Document::create());
+    const doc::ItemPtr item = pixmapItem(40, 30, Qt::red);
+    document->addItem(item);
+
+    ui::View view;
+    auto *scene = new ui::Scene(&view);
+    scene->setDocument(document);
+    view.setBoardScene(scene);
+    view.resize(600, 400);
+    view.setTransform(QTransform::fromScale(0.5, 0.5));
+    view.centerOn(QPointF(20, 15));
+
+    SceneItem *viewItem = scene->pixmapItemViews().first();
+    QVERIFY(!viewItem->isSelected());
+    const double before = view.transform().m11();
+
+    const QPoint centre = view.mapFromScene(viewItem->sceneBoundingRect().center());
+    sendMouse(view.viewport(), QEvent::MouseButtonDblClick, centre, Qt::LeftButton,
+              Qt::LeftButton);
+
+    // The double-click selects the item and fits the view to it.
+    QVERIFY(viewItem->isSelected());
+    const double after = view.transform().m11();
+    QVERIFY2(after > before, qPrintable(QStringLiteral("scale %1 -> %2").arg(before).arg(after)));
+
+    const QRect mapped = view.mapFromScene(viewItem->sceneBoundingRect()).boundingRect();
+    const QRect viewportRect = view.viewport()->rect();
+    QVERIFY(mapped.width() <= viewportRect.width() + 1);
+    QVERIFY(mapped.height() <= viewportRect.height() + 1);
+    // fitInView leaves a small margin (a couple of pixels); the item
+    // must still fill the viewport in one direction.
+    QVERIFY(mapped.width() >= viewportRect.width() - 6
+            || mapped.height() >= viewportRect.height() - 6);
+
+    // Away from the item (in the fitting margin) the double-click
+    // changes nothing.
+    const double afterFit = view.transform().m11();
+    QVERIFY(!mapped.contains(QPoint(0, 0)));
+    sendMouse(view.viewport(), QEvent::MouseButtonDblClick, QPoint(0, 0), Qt::LeftButton,
+              Qt::LeftButton);
+    QCOMPARE(view.transform().m11(), afterFit);
 }
 
 QTEST_MAIN(TestUiScene)
