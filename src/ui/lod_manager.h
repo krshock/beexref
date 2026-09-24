@@ -106,6 +106,8 @@ public:
         double lodBudgetMB = 0;
         // Bytes the loader's decoded-level LRU holds in RAM.
         double lodRamCacheMB = 0;
+        // Worker threads decoding levels.
+        int lodThreads = 0;
         int items = 0;
         int decodes = 0;
         int requests = 0;

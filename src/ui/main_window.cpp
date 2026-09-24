@@ -63,6 +63,8 @@ LodSettings loadLodSettings()
         settings::valueOrDefault(file, QStringLiteral("Items/lod_primary_budget_mb")).toInt();
     lod.ramCacheMB =
         settings::valueOrDefault(file, QStringLiteral("Items/lod_ram_cache_mb")).toInt();
+    lod.decodeThreads =
+        settings::valueOrDefault(file, QStringLiteral("Items/lod_decode_threads")).toInt();
     lod.quality = settings::valueOrDefault(file, QStringLiteral("Items/lod_quality")).toString();
     return normalized(lod);
 }

@@ -92,6 +92,12 @@ const QVector<FieldUi> &fieldTable()
                                     "example panning back) does not read or decode it again. "
                                     "Costs no extra memory for levels already on screen."),
                      0, 65536),
+        integerField(QStringLiteral("Items/lod_decode_threads"),
+                     QStringLiteral("LOD Decode Threads:"),
+                     QStringLiteral("How many worker threads decode image levels in the "
+                                    "background. More threads fill the screen faster on multi-core "
+                                    "machines; one is always enough to work."),
+                     1, 64),
         makeField(QStringLiteral("Items/lod_fractions"), QStringLiteral("LOD Fractions:"),
                   QStringLiteral("Comma-separated list of fractions (0-1) used by the fixed "
                                  "fractions and RAM budget LOD methods. E.g. "

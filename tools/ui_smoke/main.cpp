@@ -627,6 +627,8 @@ public:
         out() << "items=" << window_.scene()->itemViews().size()
               << " pixmaps=" << window_.scene()->pixmapItemViews().size()
               << " level_mb=" << QString::number(stats.levelMB, 'f', 1)
+              << " lod_threads=" << stats.lodThreads
+              << " lod_ram_cache_mb=" << QString::number(stats.lodRamCacheMB, 'f', 1)
               << " cache_mb=" << QString::number(stats.cacheMB, 'f', 1)
               << " decodes=" << stats.decodes << " cancelled=" << stats.cancelled
               << " rss_mb=" << QString::number(util::processRssBytes() / 1024.0 / 1024.0, 'f', 1)
@@ -696,10 +698,13 @@ int main(int argc, char *argv[])
     // real configuration.
     const QString settingsDir = outputDir + QStringLiteral("/settings");
     QDir().mkpath(settingsDir);
+    // An explicit source directory lets a run try different settings
+    // (e.g. more decode threads) without touching the real config.
+    const QString sourceDir = qEnvironmentVariable(
+        "BEEXREF_SMOKE_SETTINGS", settings::configDir());
     for (const QString &name : {QStringLiteral("BeeXRef.ini"),
                                 QStringLiteral("KeyboardSettings.ini")}) {
-        const QString source =
-            QDir(settings::configDir()).filePath(name);
+        const QString source = QDir(sourceDir).filePath(name);
         if (QFile::exists(source))
             QFile::copy(source, QDir(settingsDir).filePath(name));
     }

@@ -63,6 +63,7 @@ void LodManager::setLoader(LevelLoader *loader)
     if (loader_) {
         loader_->setLevelCache(levelCache_);
         loader_->setRamCacheBudget(qint64(settings_.ramCacheMB) * kBytesPerMB);
+        loader_->setThreads(settings_.decodeThreads);
         connect(loader_, &LevelLoader::levelReady, this, &LodManager::onLevelReady);
         connect(loader_, &LevelLoader::levelFailed, this, &LodManager::onLevelFailed);
         connect(loader_, &LevelLoader::levelCancelled, this, &LodManager::onLevelCancelled);
@@ -72,8 +73,10 @@ void LodManager::setLoader(LevelLoader *loader)
 void LodManager::setSettings(const LodSettings &settings)
 {
     settings_ = normalized(settings);
-    if (loader_)
+    if (loader_) {
         loader_->setRamCacheBudget(qint64(settings_.ramCacheMB) * kBytesPerMB);
+        loader_->setThreads(settings_.decodeThreads);
+    }
     reset();
 }
 
@@ -550,6 +553,14 @@ LodManager::Stats LodManager::stats() const
     stats.cancelled = cancelled_;
     stats.admissionRejects = admissionRejects_;
     stats.items = scene_ ? scene_->pixmapItemViews().size() : 0;
+    if (loader_) {
+        stats.lodRamCacheMB = loader_->ramCacheBytes() / kBytesPerMB;
+        stats.lodThreads = loader_->threads();
+    }
+    stats.lodReservedMB = reservedBytes_ / kBytesPerMB;
+    stats.lodBudgetMB = effectiveBudgetBytes() / kBytesPerMB;
+    if (levelCache_)
+        stats.cacheMB = levelCache_->fileBytes() / kBytesPerMB;
     if (!scene_)
         return stats;
 
@@ -560,12 +571,6 @@ LodManager::Stats LodManager::stats() const
         if (source)
             stats.encodedMB += source->residentBytes() / kBytesPerMB;
     }
-    stats.lodReservedMB = reservedBytes_ / kBytesPerMB;
-    stats.lodBudgetMB = effectiveBudgetBytes() / kBytesPerMB;
-    if (loader_)
-        stats.lodRamCacheMB = loader_->ramCacheBytes() / kBytesPerMB;
-    if (levelCache_)
-        stats.cacheMB = levelCache_->fileBytes() / kBytesPerMB;
     return stats;
 }
 
@@ -587,6 +592,7 @@ void LodManager::logAudit(const QString &label)
         {QStringLiteral("lod_reserved_mb"), QString::number(sample.lodReservedMB, 'f', 1)},
         {QStringLiteral("lod_budget_mb"), QString::number(sample.lodBudgetMB, 'f', 1)},
         {QStringLiteral("lod_ram_cache_mb"), QString::number(sample.lodRamCacheMB, 'f', 1)},
+        {QStringLiteral("lod_threads"), sample.lodThreads},
         {QStringLiteral("encoded_mb"), QString::number(sample.encodedMB, 'f', 1)},
         {QStringLiteral("cache_mb"), QString::number(sample.cacheMB, 'f', 1)},
         {QStringLiteral("items"), sample.items},

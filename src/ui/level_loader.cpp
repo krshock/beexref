@@ -6,30 +6,22 @@
 
 #include <QBuffer>
 #include <QCoreApplication>
-#include <QHash>
 #include <QImageReader>
 #include <QMetaObject>
-#include <QMutex>
+#include <QMutexLocker>
 #include <QTimer>
 
+#include <algorithm>
+#include <atomic>
 #include <utility>
 
 namespace ui {
 namespace {
 
-// The worker executes these events in its own thread's event loop; the
-// queue is that event queue, so the band maps onto the event priority.
-class QueueEvent : public QEvent
-{
-public:
-    static constexpr QEvent::Type kType = QEvent::Type(QEvent::User + 1);
-    explicit QueueEvent(std::function<void()> run)
-        : QEvent(kType)
-        , run(std::move(run))
-    {
-    }
-    std::function<void()> run;
-};
+// Short delay before the RAM-cache cost is recomputed, so the UI thread
+// is done with the result it just received and the reference count
+// reflects what is really resident.
+constexpr int kCacheCostDelayMs = 200;
 
 QImage decodeLevel(const doc::SourcePtr &source, const QSize &targetSize, const QString &quality)
 {
@@ -79,139 +71,73 @@ QImage decodeLevel(const doc::SourcePtr &source, const QSize &targetSize, const 
 
 } // namespace
 
-// The worker object: it only exists to have its event() run request
-// events in the loader thread.
+// A pool member: its own thread, its own decode arena and trim timer.
+// The queue and the level LRU are shared across the pool.
 class LevelLoader::Worker : public QObject
 {
 public:
-    Worker(std::shared_ptr<Shared> shared, QThread *thread_ptr)
-        : shared_(std::move(shared))
+    Worker(LevelLoader *loader)
+        : loader_(loader)
     {
-        // Move onto the loader thread: a member timer only starts in the
-        // thread it lives in, and moveToThread() does not move children
-        // (the timers are moved explicitly below).
-        moveToThread(thread_ptr);
-        // One heap trim shortly after the last decode of a burst, so a
-        // run of culled images does not call malloc_trim per image.
-        trimTimer_.setSingleShot(true);
-        trimTimer_.setInterval(kTrimCoalesceMs);
-        connect(&trimTimer_, &QTimer::timeout, this, []() { util::releaseFreeMemory(); });
-
-        // Delayed, and re-armed by the caller once a result is installed:
-        // a cached image shares its pixels with the installed level, so
-        // it only becomes a resident cost after the UI dropped its copy.
-        cacheCostTimer_.setSingleShot(true);
-        cacheCostTimer_.setInterval(kCacheCostDelayMs);
-        connect(&cacheCostTimer_, &QTimer::timeout, this, [this]() { updateRamCacheCost(); });
-
-        trimTimer_.moveToThread(thread_ptr);
-        cacheCostTimer_.moveToThread(thread_ptr);
     }
 
-    bool event(QEvent *event) override
-    {
-        if (event->type() == QueueEvent::kType) {
-            auto *request = static_cast<QueueEvent *>(event);
-            if (request->run)
-                request->run();
-            return true;
-        }
-        return QObject::event(event);
-    }
+    // Marks this worker for retirement; it stops after its current job.
+    void retire() { retire_.store(true); }
 
-    // Restarts the timer, so a burst coalesces into a single trim.
-    void scheduleTrim() { trimTimer_.start(); }
-
-    // Schedules a cache-cost recomputation (see updateRamCacheCost).
-    void scheduleCacheCost()
+    // Runs in the worker thread until shutdown or retirement.
+    void run()
     {
-        cacheCostTimer_.start();
-    }
+        trimTimer_ = new QTimer(this);
+        trimTimer_->setSingleShot(true);
+        trimTimer_->setInterval(kTrimCoalesceMs);
+        connect(trimTimer_, &QTimer::timeout, this, []() { util::releaseFreeMemory(); });
 
-    // Drops cached levels until the cache fits its budget.
-    void evictToBudget()
-    {
-        qint64 budget = 0;
-        {
-            QMutexLocker locker(&shared_->mutex);
-            budget = shared_->ramCacheBudget;
-        }
-        if (budget <= 0) {
-            if (!cache_.isEmpty()) {
-                cache_.clear();
-                publishCacheBytes(0);
-            }
-            return;
-        }
-        while (ramCacheBytes_ > budget && !cache_.isEmpty()) {
-            const QString *oldest = nullptr;
-            for (auto it = cache_.cbegin(); it != cache_.cend(); ++it) {
-                if (!oldest || it->lastUsed < cache_.value(*oldest).lastUsed)
-                    oldest = &it.key();
-            }
-            if (!oldest)
+        while (!retire_.load()) {
+            // Run any posted calls (the trim timer's control events)
+            // before blocking again.
+            QCoreApplication::processEvents();
+            Job job;
+            if (!loader_->takeJob(job, retire_))
                 break;
-            ramCacheBytes_ -= cache_.value(*oldest).bytes;
-            cache_.remove(*oldest);
+            loader_->runJob(job, this);
         }
-        publishCacheBytes(ramCacheBytes_);
+        // Leave the thread cleanly: the timer is stopped and deleted on
+        // the thread that owns it, before run() returns.
+        trimTimer_->stop();
+        delete trimTimer_;
+        trimTimer_ = nullptr;
+        QThread::currentThread()->quit();
     }
 
-    // Recomputes the cache cost, evicting if it now exceeds the budget.
-    void updateRamCacheCost()
+    // Restarts the timer, so a burst coalesces into a single trim. The
+    // caller posts this to the worker's thread.
+    void scheduleTrim()
     {
-        qint64 total = 0;
-        for (auto it = cache_.cbegin(); it != cache_.cend(); ++it)
-            total += it->image.sizeInBytes();
-        ramCacheBytes_ = total;
-        publishCacheBytes(ramCacheBytes_);
-        evictToBudget();
+        if (trimTimer_)
+            trimTimer_->start();
     }
 
-private:
-    void publishCacheBytes(qint64 bytes)
-    {
-        QMutexLocker locker(&shared_->mutex);
-        shared_->ramCacheBytes = bytes;
-    }
-
-public:
     // Long enough to span the decode of one burst on this thread, short
     // enough that transients do not linger until the idle release.
     static constexpr int kTrimCoalesceMs = 50;
-    // Short delay so the UI thread is done with the result it just
-    // received before the reference count is checked.
-    static constexpr int kCacheCostDelayMs = 200;
-
-    struct CachedLevel
-    {
-        QImage image; // holds the level its caller installed
-        qint64 bytes = 0;
-        quint64 lastUsed = 0;
-    };
-
-    // The decoded-level LRU, owned by this thread. Image buffers are
-    // shared with the installed levels, so holding one keeps its pixels
-    // alive at no extra cost until the UI releases them.
-    QHash<QString, CachedLevel> cache_;
-    qint64 ramCacheBytes_ = 0;
-    quint64 useCounter_ = 0;
 
 private:
-    std::shared_ptr<Shared> shared_;
-    QTimer trimTimer_;
-    QTimer cacheCostTimer_;
+    LevelLoader *loader_ = nullptr;
+    QTimer *trimTimer_ = nullptr;
+    std::atomic<bool> retire_{false};
 };
 
 LevelLoader::LevelLoader(QObject *parent)
     : QObject(parent)
 {
-    thread_.setObjectName(QStringLiteral("level-loader"));
-    thread_.start();
-    // The worker moves itself (and its timers) onto the thread once it
-    // is running; posting events to it from this point on is safe,
-    // because they queue until its loop runs.
-    worker_ = new Worker(shared_, &thread_);
+    // Lives on the UI thread. A shared image only becomes a resident
+    // cost after the caller dropped its copy, hence the delay.
+    cacheCostTimer_ = new QTimer(this);
+    cacheCostTimer_->setSingleShot(true);
+    cacheCostTimer_->setInterval(kCacheCostDelayMs);
+    connect(cacheCostTimer_, &QTimer::timeout, this, [this]() { updateRamCacheCost(); });
+    // The default pool size; LodManager applies the user's setting.
+    setThreads(3);
 }
 
 LevelLoader::~LevelLoader()
@@ -219,8 +145,45 @@ LevelLoader::~LevelLoader()
     shutdown();
 }
 
+void LevelLoader::setThreads(int threads)
+{
+    threads = qMax(1, threads);
+    if (shutdown_)
+        return;
+    // Retire the surplus workers: each finishes its current decode, sees
+    // the flag and leaves; the thread and object are then reclaimed.
+    while (threads_.size() > threads) {
+        QThread *thread = threads_.takeLast();
+        Worker *worker = workers_.takeLast();
+        // Retirement is seen within the queue poll interval.
+        worker->retire();
+        thread->wait();
+        delete worker;
+        delete thread;
+    }
+    while (threads_.size() < threads) {
+        auto *thread = new QThread;
+        thread->setObjectName(QStringLiteral("level-loader"));
+        auto *worker = new Worker(this);
+        worker->moveToThread(thread);
+        connect(thread, &QThread::started, worker, &Worker::run);
+        threads_.append(thread);
+        workers_.append(worker);
+        thread->start();
+        // The new worker waits on the shared semaphore like the rest.
+        work_.release();
+    }
+}
+
+int LevelLoader::threads() const
+{
+    QMutexLocker locker(&queueMutex_);
+    return threads_.size();
+}
+
 void LevelLoader::setLevelCache(std::shared_ptr<cache::SessionCache> cache)
 {
+    QMutexLocker locker(&queueMutex_);
     cache_ = std::move(cache);
 }
 
@@ -230,9 +193,7 @@ void LevelLoader::setRamCacheBudget(qint64 bytes)
         QMutexLocker locker(&shared_->mutex);
         shared_->ramCacheBudget = qMax(qint64(0), bytes);
     }
-    // The worker recomputes its cost once the UI is done with the levels
-    // it just received.
-    enqueueRamCacheBudget();
+    reconsiderRamCache();
 }
 
 qint64 LevelLoader::ramCacheBytes() const
@@ -243,18 +204,12 @@ qint64 LevelLoader::ramCacheBytes() const
 
 void LevelLoader::reconsiderRamCache()
 {
-    if (shutdown_ || !worker_)
+    if (shutdown_)
         return;
-    Worker *const worker = worker_;
-    enqueue([worker]() { worker->scheduleCacheCost(); }, RequestBand::Deferred);
-}
-
-void LevelLoader::enqueueRamCacheBudget()
-{
-    if (shutdown_ || !worker_)
-        return;
-    Worker *const worker = worker_;
-    enqueue([worker]() { worker->updateRamCacheCost(); }, RequestBand::Deferred);
+    // Delayed on the UI thread: the cached buffer only becomes resident
+    // once the caller released its copy. Re-armed, so a burst costs one
+    // pass.
+    cacheCostTimer_->start();
 }
 
 void LevelLoader::request(quint64 requestId, doc::SourcePtr source, const QSize &targetSize,
@@ -267,102 +222,183 @@ void LevelLoader::request(quint64 requestId, doc::SourcePtr source, const QSize 
         QMutexLocker locker(&shared_->mutex);
         shared_->latest.insert(coalesceKey, requestId);
     }
-    const auto cache = cache_;
-    const auto shared = shared_;
-    Worker *const worker = worker_;
-    enqueue(
-        [this, requestId, source = std::move(source), targetSize, quality, cacheKey, coalesceKey,
-         cache, shared, worker]() {
-            // A newer request for the same item supersedes this one; it
-            // is dropped before any decode work happens.
-            if (!coalesceKey.isEmpty()) {
-                QMutexLocker locker(&shared->mutex);
-                if (shared->latest.value(coalesceKey) != requestId) {
-                    emit levelCancelled(requestId);
-                    return;
-                }
-            }
-            QImage image;
-            const bool cacheable =
-                cache && cache->isAvailable() && !cacheKey.isEmpty() && targetSize.isValid()
-                && !targetSize.isEmpty();
-
-            // Cache first, lightest to heaviest: the worker's RAM LRU
-            // (a reference to a buffer that may already be alive), then
-            // the session cache (a PNG read), then a decode.
-            if (!cacheKey.isEmpty() && worker) {
-                const auto hit = worker->cache_.constFind(cacheKey);
-                if (hit != worker->cache_.cend() && hit->image.size() == targetSize) {
-                    image = hit->image;
-                    worker->cache_[cacheKey].lastUsed = ++worker->useCounter_;
-                }
-            }
-            if (image.isNull() && cacheable) {
-                if (auto cached = cache->get(QStringLiteral("lod"), cacheKey)) {
-                    const QImage fromCache = QImage::fromData(*cached);
-                    if (!fromCache.isNull() && fromCache.size() == targetSize) {
-                        image = fromCache;
-                    } else {
-                        // A stale or corrupt entry: drop it.
-                        cache->remove(QStringLiteral("lod"), cacheKey);
-                    }
-                }
-            }
-            if (image.isNull()) {
-                image = decodeLevel(source, targetSize, quality);
-                if (!image.isNull() && cacheable) {
-                    cache->put(QStringLiteral("lod"), cacheKey, QStringLiteral("png"),
-                               doc::encodePng(image));
-                }
-            }
-            // Keep the freshly produced level in the RAM LRU, bounded by
-            // its own budget; the bytes are shared with the installed
-            // level, so this costs nothing while it is displayed.
-            if (!image.isNull() && !cacheKey.isEmpty() && worker) {
-                qint64 budget = 0;
-                {
-                    QMutexLocker locker(&shared->mutex);
-                    budget = shared->ramCacheBudget;
-                }
-                if (budget > 0 && (image.size().isEmpty() || !cacheable
-                                   || image.size() == targetSize)) {
-                    if (!cacheable || image.size() != targetSize)
-                        worker->cache_.remove(cacheKey);
-                    Worker::CachedLevel entry;
-                    entry.image = image;
-                    entry.bytes = image.sizeInBytes();
-                    entry.lastUsed = ++worker->useCounter_;
-                    worker->cache_.insert(cacheKey, entry);
-                    worker->scheduleCacheCost();
-                }
-            }
-            if (image.isNull())
-                emit levelFailed(requestId);
-            else
-                emit levelReady(requestId, image);
-            // Drop the decode transients. Coalesced: a burst of decodes
-            // trims the heap once, not once per image.
-            if (worker)
-                worker->scheduleTrim();
-        },
-        band);
+    {
+        QMutexLocker locker(&queueMutex_);
+        if (!coalesceKey.isEmpty())
+            dropQueuedLocked(coalesceKey);
+        Job job;
+        job.requestId = requestId;
+        job.source = std::move(source);
+        job.targetSize = targetSize;
+        job.quality = quality;
+        job.cacheKey = cacheKey;
+        job.coalesceKey = coalesceKey;
+        job.band = band;
+        job.seq = nextSeq_++;
+        // Keep the queue in priority order, so any worker can take the
+        // head without scanning.
+        const auto at = std::lower_bound(
+            queue_.cbegin(), queue_.cend(), job,
+            [](const Job &a, const Job &b) {
+                if (a.band != b.band)
+                    return static_cast<int>(a.band) < static_cast<int>(b.band);
+                return a.seq < b.seq;
+            });
+        queue_.insert(at - queue_.cbegin(), std::move(job));
+    }
+    work_.release();
 }
 
-void LevelLoader::enqueue(std::function<void()> run, RequestBand band)
+bool LevelLoader::takeJob(Job &job, const std::atomic<bool> &stop)
 {
-    if (shutdown_ || !worker_)
+    while (!shutdown_ && !stop.load()) {
+        if (!work_.tryAcquire(1, 50))
+            continue;
+        QMutexLocker locker(&queueMutex_);
+        if (shutdown_ || stop.load()) {
+            work_.release();
+            return false;
+        }
+        if (queue_.isEmpty())
+            continue;
+        job = queue_.takeFirst();
+        return true;
+    }
+    return false;
+}
+
+void LevelLoader::dropQueuedLocked(const QString &coalesceKey)
+{
+    for (qsizetype i = queue_.size() - 1; i >= 0; --i) {
+        if (queue_.at(i).coalesceKey == coalesceKey) {
+            const quint64 id = queue_.at(i).requestId;
+            queue_.removeAt(i);
+            work_.tryAcquire(1);
+            QMetaObject::invokeMethod(
+                this, [this, id]() { emit levelCancelled(id); }, Qt::QueuedConnection);
+            // One queued request per item.
+            break;
+        }
+    }
+}
+
+void LevelLoader::runJob(const Job &job, Worker *worker)
+{
+    // A newer request for the same item supersedes this one; it is
+    // dropped before any decode work happens.
+    if (!job.coalesceKey.isEmpty()) {
+        QMutexLocker locker(&shared_->mutex);
+        if (shared_->latest.value(job.coalesceKey) != job.requestId) {
+            emit levelCancelled(job.requestId);
+            if (worker)
+                worker->scheduleTrim();
+            return;
+        }
+    }
+
+    std::shared_ptr<cache::SessionCache> cache;
+    {
+        QMutexLocker locker(&queueMutex_);
+        cache = cache_;
+    }
+    const bool cacheable = cache && cache->isAvailable() && !job.cacheKey.isEmpty()
+        && job.targetSize.isValid() && !job.targetSize.isEmpty();
+
+    QImage image;
+    // Cache first, lightest to heaviest: the pool's RAM LRU (a reference
+    // to a buffer that may already be alive), the session cache (a PNG
+    // read), then a decode.
+    if (!job.cacheKey.isEmpty()) {
+        QMutexLocker locker(&shared_->mutex);
+        const auto hit = shared_->ramCache.constFind(job.cacheKey);
+        if (hit != shared_->ramCache.cend() && hit->image.size() == job.targetSize) {
+            image = hit->image;
+            shared_->ramCache[job.cacheKey].lastUsed = ++shared_->ramCacheUse;
+        }
+    }
+    if (image.isNull() && cacheable) {
+        if (auto cached = cache->get(QStringLiteral("lod"), job.cacheKey)) {
+            const QImage fromCache = QImage::fromData(*cached);
+            if (!fromCache.isNull() && fromCache.size() == job.targetSize) {
+                image = fromCache;
+            } else {
+                // A stale or corrupt entry: drop it.
+                cache->remove(QStringLiteral("lod"), job.cacheKey);
+            }
+        }
+    }
+    if (image.isNull()) {
+        image = decodeLevel(job.source, job.targetSize, job.quality);
+        if (!image.isNull() && cacheable) {
+            cache->put(QStringLiteral("lod"), job.cacheKey, QStringLiteral("png"),
+                       doc::encodePng(image));
+        }
+    }
+    if (image.isNull()) {
+        emit levelFailed(job.requestId);
+    } else {
+        publishRamCache(job, image);
+        emit levelReady(job.requestId, image);
+    }
+    if (worker)
+        worker->scheduleTrim();
+}
+
+void LevelLoader::publishRamCache(const Job &job, const QImage &image)
+{
+    QMutexLocker locker(&shared_->mutex);
+    if (shared_->ramCacheBudget <= 0 || job.cacheKey.isEmpty())
         return;
-    const Qt::EventPriority priority = band == RequestBand::Selected ? Qt::HighEventPriority
-        : band == RequestBand::Visible                                 ? Qt::NormalEventPriority
-                                                                      : Qt::LowEventPriority;
-    QCoreApplication::postEvent(worker_, new QueueEvent(std::move(run)), priority);
+    Shared::CachedLevel entry;
+    entry.image = image;
+    entry.bytes = image.sizeInBytes();
+    entry.lastUsed = ++shared_->ramCacheUse;
+    shared_->ramCache.insert(job.cacheKey, entry);
+}
+
+void LevelLoader::updateRamCacheCost()
+{
+    QImage evicted;
+    qint64 budget = 0;
+    {
+        QMutexLocker locker(&shared_->mutex);
+        budget = shared_->ramCacheBudget;
+        if (budget <= 0) {
+            shared_->ramCache.clear();
+            shared_->ramCacheBytes = 0;
+            return;
+        }
+        qint64 total = 0;
+        for (auto it = shared_->ramCache.cbegin(); it != shared_->ramCache.cend(); ++it)
+            total += it->image.sizeInBytes();
+        shared_->ramCacheBytes = total;
+        while (shared_->ramCacheBytes > budget) {
+            auto oldest = shared_->ramCache.cend();
+            for (auto it = shared_->ramCache.cbegin(); it != shared_->ramCache.cend(); ++it) {
+                if (oldest == shared_->ramCache.cend() || it->lastUsed < oldest->lastUsed)
+                    oldest = it;
+            }
+            if (oldest == shared_->ramCache.cend())
+                break;
+            shared_->ramCacheBytes -= oldest->bytes;
+            shared_->ramCache.erase(oldest);
+        }
+    }
 }
 
 void LevelLoader::releaseMemory()
 {
     if (shutdown_)
         return;
-    enqueue([]() { util::releaseFreeMemory(); }, RequestBand::Deferred);
+    QVector<Worker *> workers;
+    {
+        QMutexLocker locker(&queueMutex_);
+        workers = workers_;
+    }
+    for (Worker *worker : workers) {
+        QMetaObject::invokeMethod(
+            worker, [worker]() { util::releaseFreeMemory(); }, Qt::QueuedConnection);
+    }
 }
 
 void LevelLoader::shutdown()
@@ -374,21 +410,26 @@ void LevelLoader::shutdown()
         QMutexLocker locker(&shared_->mutex);
         shared_->latest.clear();
     }
-    // Delete the worker on its own thread, so its timers are stopped
-    // from the thread that owns them.
-    QMetaObject::invokeMethod(
-        worker_,
-        [this]() {
-            delete worker_;
-            worker_ = nullptr;
-        },
-        Qt::BlockingQueuedConnection);
-    thread_.quit();
-    thread_.wait();
-    // Requests queued while the event loop was winding down are of no
-    // interest anymore.
-    QCoreApplication::removePostedEvents(worker_);
+    {
+        QMutexLocker locker(&queueMutex_);
+        queue_.clear();
+    }
+    // Retire every worker: each sees the flag after its current job and
+    // leaves its loop, then quits its own thread.
+    for (Worker *worker : std::as_const(workers_))
+        worker->retire();
+    for (QThread *thread : std::as_const(threads_))
+        thread->wait();
+    for (Worker *worker : std::as_const(workers_)) {
+        QCoreApplication::removePostedEvents(worker);
+        delete worker;
+    }
+    for (QThread *thread : std::as_const(threads_))
+        delete thread;
+    threads_.clear();
+    workers_.clear();
     QMutexLocker locker(&shared_->mutex);
+    shared_->ramCache.clear();
     shared_->ramCacheBytes = 0;
 }
 

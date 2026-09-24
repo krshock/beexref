@@ -1,6 +1,7 @@
 #include <QBuffer>
 #include <QColor>
 #include <QImage>
+#include <QSet>
 #include <QSignalSpy>
 #include <QTemporaryDir>
 #include <QtTest>
@@ -103,6 +104,9 @@ private slots:
     void offScreenDowngradesOrderByBytesFreed();
     void primaryBudgetSkipsRequestsThatDoNotFit();
     void ramCacheServesRepeatLevelsAndEvicts();
+    void threadPoolClampsAndResizes();
+    void threadPoolDecodesInParallel();
+    void settingsThreadCountReachesTheLoader();
 };
 
 void TestLodManager::defersUpgradesUntilInteraction()
@@ -378,6 +382,8 @@ void TestLodManager::holdDelaysEvaluationsUntilItExpires()
 void TestLodManager::deprioritizedRequestsQueueBehindVisibleOnes()
 {
     ui::LevelLoader loader;
+    // One worker: completion order is what this test asserts.
+    loader.setThreads(1);
     QSignalSpy ready(&loader, &ui::LevelLoader::levelReady);
 
     auto offScreen = std::make_shared<doc::BytesSource>(makePng(1200, 900, Qt::darkBlue));
@@ -410,6 +416,10 @@ void TestLodManager::offScreenDecodesWaitBehindVisibleOnes()
     ui::LodManager manager;
     manager.setScene(&scene);
     manager.setLoader(&loader);
+    // One worker: completion order is what this test asserts.
+    ui::LodSettings one;
+    one.decodeThreads = 1;
+    manager.setSettings(one);
     scene.setDocument(document);
     // Only the first item's area is on screen.
     manager.setViewState(QRectF(0, 0, 1200, 900), 0.1);
@@ -436,6 +446,10 @@ void TestLodManager::nearestVisibleItemsDecodeFirst()
     ui::LodManager manager;
     manager.setScene(&scene);
     manager.setLoader(&loader);
+    // One worker: completion order is what this test asserts.
+    ui::LodSettings one;
+    one.decodeThreads = 1;
+    manager.setSettings(one);
     scene.setDocument(document);
     manager.setViewState(QRectF(0, 0, 6000, 1200), 0.1);
     manager.evaluateNow();
@@ -457,6 +471,10 @@ void TestLodManager::selectedItemDecodesFirst()
     ui::LodManager manager;
     manager.setScene(&scene);
     manager.setLoader(&loader);
+    // One worker: completion order is what this test asserts.
+    ui::LodSettings one;
+    one.decodeThreads = 1;
+    manager.setSettings(one);
     scene.setDocument(document);
     manager.setViewState(QRectF(0, 0, 6000, 1200), 0.1);
 
@@ -480,6 +498,10 @@ void TestLodManager::priorityPointOrdersByDistance()
     ui::LodManager manager;
     manager.setScene(&scene);
     manager.setLoader(&loader);
+    // One worker: completion order is what this test asserts.
+    ui::LodSettings one;
+    one.decodeThreads = 1;
+    manager.setSettings(one);
     scene.setDocument(document);
     manager.setViewState(QRectF(0, 0, 6000, 1200), 0.1);
     // An explicit point near the right-hand image.
@@ -495,6 +517,8 @@ void TestLodManager::priorityPointOrdersByDistance()
 void TestLodManager::selectedRequestsRunFirst()
 {
     ui::LevelLoader loader;
+    // One worker: completion order is what this test asserts.
+    loader.setThreads(1);
     QSignalSpy ready(&loader, &ui::LevelLoader::levelReady);
 
     auto visible = std::make_shared<doc::BytesSource>(makePng(1200, 900, Qt::darkRed));
@@ -659,6 +683,10 @@ void TestLodManager::offScreenDowngradesOrderByBytesFreed()
     ui::LodManager manager;
     manager.setScene(&scene);
     manager.setLoader(&loader);
+    // One worker: completion order is what this test asserts.
+    ui::LodSettings one;
+    one.decodeThreads = 1;
+    manager.setSettings(one);
     scene.setDocument(document);
 
     // Both on screen, so both upgrade to full size.
@@ -769,6 +797,88 @@ void TestLodManager::ramCacheServesRepeatLevelsAndEvicts()
     settings.ramCacheMB = 0;
     manager.setSettings(settings);
     QTRY_COMPARE_WITH_TIMEOUT(manager.stats().lodRamCacheMB, 0.0, 5000);
+}
+
+void TestLodManager::threadPoolClampsAndResizes()
+{
+    ui::LevelLoader loader;
+    // The default is three; the minimum is one, so the loader always runs.
+    QCOMPARE(loader.threads(), 3);
+    loader.setThreads(0);
+    QCOMPARE(loader.threads(), 1);
+    loader.setThreads(-4);
+    QCOMPARE(loader.threads(), 1);
+    loader.setThreads(3);
+    QCOMPARE(loader.threads(), 3);
+    loader.setThreads(1);
+    QCOMPARE(loader.threads(), 1);
+
+    // A request queued through a resize still completes.
+    QSignalSpy ready(&loader, &ui::LevelLoader::levelReady);
+    loader.setThreads(2);
+    auto source = std::make_shared<doc::BytesSource>(makePng(400, 300, Qt::darkGreen));
+    loader.request(1, source, QSize(100, 75), QStringLiteral("fast"), QString(),
+                   QStringLiteral("resize"));
+    loader.setThreads(1);
+    QTRY_COMPARE_WITH_TIMEOUT(ready.count(), 1, 15000);
+    QCOMPARE(ready.at(0).at(0).toULongLong(), quint64(1));
+}
+
+void TestLodManager::threadPoolDecodesInParallel()
+{
+    ui::LevelLoader loader;
+    loader.setThreads(4);
+    QCOMPARE(loader.threads(), 4);
+
+    // Four distinct items, queued at once: the pool must serve them all
+    // without losing or duplicating any.
+    QSignalSpy ready(&loader, &ui::LevelLoader::levelReady);
+    const QVector<QColor> colours = {Qt::red, Qt::green, Qt::blue, Qt::yellow};
+    for (int i = 0; i < colours.size(); ++i) {
+        auto source = std::make_shared<doc::BytesSource>(makePng(400, 300, colours.at(i)));
+        loader.request(quint64(i + 1), source, QSize(100, 75), QStringLiteral("fast"), QString(),
+                       QStringLiteral("item-%1").arg(i));
+    }
+    QTRY_COMPARE_WITH_TIMEOUT(ready.count(), 4, 20000);
+
+    QSet<quint64> ids;
+    for (int i = 0; i < ready.count(); ++i)
+        ids.insert(ready.at(i).at(0).toULongLong());
+    QCOMPARE(ids.size(), 4);
+
+    // Coalescing still holds across workers: two requests for one item
+    // leave only the newest, which decodes once.
+    QSignalSpy second(&loader, &ui::LevelLoader::levelReady);
+    QSignalSpy cancelled(&loader, &ui::LevelLoader::levelCancelled);
+    auto source = std::make_shared<doc::BytesSource>(makePng(800, 600, Qt::magenta));
+    loader.request(11, source, QSize(100, 75), QStringLiteral("fast"), QString(),
+                   QStringLiteral("coalesce"));
+    loader.request(12, source, QSize(200, 150), QStringLiteral("fast"), QString(),
+                   QStringLiteral("coalesce"));
+    QTRY_COMPARE_WITH_TIMEOUT(second.count() + cancelled.count(), 2, 15000);
+    // Only the newest request may produce a level.
+    for (int i = 0; i < second.count(); ++i)
+        QVERIFY(second.at(i).at(0).toULongLong() != quint64(11));
+}
+
+void TestLodManager::settingsThreadCountReachesTheLoader()
+{
+    ui::LevelLoader loader;
+    ui::LodManager manager;
+    manager.setLoader(&loader);
+    // The default settings ask for three decode threads.
+    QCOMPARE(loader.threads(), 3);
+
+    ui::LodSettings settings;
+    settings.decodeThreads = 4;
+    manager.setSettings(settings);
+    QCOMPARE(loader.threads(), 4);
+    QCOMPARE(manager.stats().lodThreads, 4);
+
+    // A too-small value is clamped to the required one.
+    settings.decodeThreads = 0;
+    manager.setSettings(settings);
+    QCOMPARE(loader.threads(), 1);
 }
 
 QTEST_MAIN(TestLodManager)

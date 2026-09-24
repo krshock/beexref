@@ -18,7 +18,9 @@ struct LodSettings
     int primaryBudgetMB = 0;
     // Cap on the loader's in-RAM LRU of decoded levels, in MB; 0
     // disables it. A sub-budget inside the primary one.
-    int ramCacheMB = 300;
+    int ramCacheMB = 150;
+    // Decode worker threads. Always at least one.
+    int decodeThreads = 3;
 };
 
 // Fills unset fields with the reference defaults.

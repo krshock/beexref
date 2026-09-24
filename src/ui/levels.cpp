@@ -40,6 +40,8 @@ LodSettings normalized(const LodSettings &settings)
         result.primaryBudgetMB = 0;
     if (result.ramCacheMB < 0)
         result.ramCacheMB = 0;
+    if (result.decodeThreads < 1)
+        result.decodeThreads = 1;
     return result;
 }
 

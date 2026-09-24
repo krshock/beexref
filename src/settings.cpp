@@ -301,7 +301,9 @@ const QVector<FieldSpec> &fields()
         {QStringLiteral("Items/lod_primary_budget_mb"), 0, intCast(), atLeast(0)},
         // In-RAM LRU of decoded levels held by the decode worker; 0
         // disables it.
-        {QStringLiteral("Items/lod_ram_cache_mb"), 300, intCast(), atLeast(0)},
+        {QStringLiteral("Items/lod_ram_cache_mb"), 150, intCast(), atLeast(0)},
+        // Decode worker threads; always at least one.
+        {QStringLiteral("Items/lod_decode_threads"), 3, intCast(), atLeast(1)},
         {QStringLiteral("Items/lod_quality"), QStringLiteral("smooth"), nullptr,
          oneOf({QStringLiteral("fast"), QStringLiteral("smooth")})},
         {QStringLiteral("Items/lod_store_thumbnails"), true, boolCast(), nullptr},
