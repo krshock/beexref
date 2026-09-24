@@ -27,6 +27,7 @@
 
 #include <QAction>
 #include <QApplication>
+#include <QCloseEvent>
 #include <QImageReader>
 #include <QPlainTextEdit>
 #include <QUrl>
@@ -41,6 +42,7 @@
 #include <QMenuBar>
 #include <QMessageBox>
 #include <QMimeData>
+#include <QProgressDialog>
 #include <QTimer>
 #include <QToolTip>
 
@@ -273,6 +275,98 @@ void MainWindow::openFileDialog()
         openBoard(path);
 }
 
+void MainWindow::saveDocument()
+{
+    view_->cancelCrop();
+    view_->cancelSampleColor();
+    const QString path = document_ ? document_->path() : QString();
+    // A legacy .bee file is import-only; a document without a file must
+    // be saved as one (the reference's on_action_save).
+    if (path.isEmpty() || path.endsWith(QStringLiteral(".bee"), Qt::CaseInsensitive))
+        saveDocumentAs();
+    else
+        saveDocumentTo(path, false);
+}
+
+void MainWindow::saveDocumentAs()
+{
+    view_->cancelCrop();
+    view_->cancelSampleColor();
+    const QString path = document_ ? document_->path() : QString();
+    const QString startDir =
+        path.isEmpty() ? settings::configDir() : QFileInfo(path).absolutePath();
+    const QString filename = QFileDialog::getSaveFileName(
+        this, QStringLiteral("Save file"), startDir,
+        QStringLiteral("BeeXRef File (*.beex)"));
+    if (!filename.isEmpty())
+        saveDocumentTo(filename, true);
+}
+
+bool MainWindow::saveDocumentTo(const QString &path, bool createNew)
+{
+    if (!document_)
+        return false;
+
+    // Native saves always use .beex; .bee is import only.
+    QString filename = path;
+    if (!filename.endsWith(QStringLiteral(".beex"), Qt::CaseInsensitive))
+        filename += QStringLiteral(".beex");
+
+    settings::File file(settings::iniPath());
+    file.load();
+    const bool storeThumbnails =
+        file.boolValue(QStringLiteral("Items"), QStringLiteral("lod_store_thumbnails"), true);
+
+    // Appears only if writing takes longer than the minimum duration.
+    QProgressDialog progress(QStringLiteral("Saving %1").arg(filename), QString(), 0, 100, this);
+    progress.setWindowModality(Qt::WindowModal);
+    progress.setMinimumDuration(300);
+    const board::Progress report = [&progress](int done, int total) {
+        if (total <= 0)
+            return;
+        progress.setMaximum(total);
+        progress.setValue(done);
+        QCoreApplication::processEvents();
+    };
+
+    const board::Status status = document_->save(filename, storeThumbnails, report, createNew);
+    progress.close();
+    if (!status) {
+        logging::error(QStringLiteral("Cannot save file"),
+                       {{QStringLiteral("file"), filename},
+                        {QStringLiteral("error"), status.error().toString()}});
+        QMessageBox::warning(this, QStringLiteral("Problem saving file"), status.error().toString());
+        return false;
+    }
+
+    document_->setPath(filename);
+    undoStack_.setClean();
+    document_->setModified(false);
+    // The bytes now live in the file; free the in-RAM copies. LOD
+    // levels stay in RAM.
+    document_->adoptFileSources();
+    view_->lodManager()->evaluateNow();
+
+    file.updateRecentFiles(filename);
+    rebuildRecentMenu();
+    updateActions();
+    updateTitle();
+    logging::info(QStringLiteral("File saved"),
+                  {{QStringLiteral("file"), filename},
+                   {QStringLiteral("items"), document_->items().size()}});
+    return true;
+}
+
+void MainWindow::closeEvent(QCloseEvent *event)
+{
+    if (!confirmDiscardChanges(
+            QStringLiteral("There are unsaved changes. Are you sure you want to quit?"))) {
+        event->ignore();
+        return;
+    }
+    event->accept();
+}
+
 void MainWindow::startMemoryAudit(int seconds)
 {
     if (seconds <= 0)
@@ -468,8 +562,8 @@ bool MainWindow::confirmDiscardChanges(const QString &message)
     file.load();
     if (!file.boolValue(QStringLiteral("Save"), QStringLiteral("confirm_close_unsaved"), true))
         return true;
-    return QMessageBox::question(this, QStringLiteral("Unsaved changes"), message,
-                                 QMessageBox::Yes | QMessageBox::No)
+    return QMessageBox::question(this, QStringLiteral("Discard unsaved changes?"), message,
+                                 QMessageBox::Yes | QMessageBox::Cancel)
         == QMessageBox::Yes;
 }
 
@@ -728,6 +822,12 @@ void MainWindow::buildActions()
                   [this](bool) { newScene(); });
     actions_->add(QStringLiteral("open"), QStringLiteral("&Open"), QKeySequence::Open, G::Always,
                   [this](bool) { openFileDialog(); });
+    actions_->add(QStringLiteral("save"), QStringLiteral("&Save"),
+                  QKeySequence(QStringLiteral("Ctrl+S")), G::ItemsInScene,
+                  [this](bool) { saveDocument(); });
+    actions_->add(QStringLiteral("save_as"), QStringLiteral("Save &As..."),
+                  QKeySequence(QStringLiteral("Ctrl+Shift+S")), G::ItemsInScene,
+                  [this](bool) { saveDocumentAs(); });
     actions_->add(QStringLiteral("quit"), QStringLiteral("&Quit"), QKeySequence::Quit, G::Always,
                   [this](bool) { close(); });
 
@@ -951,14 +1051,17 @@ void MainWindow::buildActions()
 
 void MainWindow::buildMenus()
 {
-    // File: save/export arrive with the save phase; the reference's
-    // Open Recent submenu is rebuilt whenever it is shown.
+    // File: the Export submenu arrives with the export phase; the
+    // reference's Open Recent submenu is rebuilt whenever it is shown.
     auto *fileMenu = menuBar()->addMenu(QStringLiteral("&File"));
     actions_->append(fileMenu, QStringLiteral("new_scene"));
     actions_->append(fileMenu, QStringLiteral("open"));
     recentMenu_ = fileMenu->addMenu(QStringLiteral("Open &Recent"));
     connect(recentMenu_, &QMenu::aboutToShow, this, &MainWindow::rebuildRecentMenu);
     rebuildRecentMenu();
+    actions_->appendSeparator(fileMenu);
+    actions_->append(fileMenu, QStringLiteral("save"));
+    actions_->append(fileMenu, QStringLiteral("save_as"));
     actions_->appendSeparator(fileMenu);
     actions_->append(fileMenu, QStringLiteral("quit"));
 

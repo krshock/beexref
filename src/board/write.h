@@ -47,7 +47,10 @@ using Progress = std::function<void(int done, int total)>;
 // is written and renamed over the target, so a failure leaves any
 // existing file untouched. With storeThumbnails, a floor level is
 // generated for every pixmap record that carries none.
+// assignedIds, when given, receives the row id of every record in the
+// same order, so the caller can write them back to its items.
 Status save(const QString &path, const QVector<Record> &records,
-            bool storeThumbnails = true, const Progress &progress = {});
+            bool storeThumbnails = true, const Progress &progress = {},
+            QVector<qint64> *assignedIds = nullptr);
 
 } // namespace board

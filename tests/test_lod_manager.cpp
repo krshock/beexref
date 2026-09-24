@@ -96,6 +96,8 @@ private slots:
     void priorityPointOrdersByDistance();
     void deprioritizedRequestsQueueBehindVisibleOnes();
     void offScreenDecodesWaitBehindVisibleOnes();
+    void retainedFloorCopyAvoidsDecodeOnCull();
+    void coarsestDecodeIsRetainedForLaterCulls();
 };
 
 void TestLodManager::defersUpgradesUntilInteraction()
@@ -498,6 +500,90 @@ void TestLodManager::selectedRequestsRunFirst()
     QTRY_COMPARE_WITH_TIMEOUT(ready.count(), 2, 15000);
     QCOMPARE(ready.at(0).at(0).toULongLong(), quint64(2));
     QCOMPARE(ready.at(1).at(0).toULongLong(), quint64(1));
+}
+
+void TestLodManager::retainedFloorCopyAvoidsDecodeOnCull()
+{
+    auto document = std::make_shared<doc::Document>(doc::Document::create());
+    const doc::ItemPtr item = bigItem(2000, 1000, Qt::red);
+    // A stored floor level, as a loaded board would carry.
+    item->floorData = makePng(64, 32, Qt::darkGray);
+    item->floorFraction = 64.0 / 2000.0;
+    document->addItem(item);
+
+    ui::Scene scene;
+    ui::LevelLoader loader;
+    ui::LodManager manager;
+    manager.setScene(&scene);
+    manager.setLoader(&loader);
+    scene.setDocument(document);
+
+    SceneItem *view = firstPixmap(scene);
+    QVERIFY(view);
+    // The placeholder floor is the coarsest level, so its copy is kept.
+    QCOMPARE(view->coarsestFraction(), item->floorFraction);
+    QVERIFY(view->hasCoarsestCopy());
+
+    // Bring it on screen and let it upgrade: that costs one decode.
+    manager.setViewState(QRectF(0, 0, 2000, 1000), 0.1);
+    manager.evaluateNow();
+    QTRY_COMPARE_WITH_TIMEOUT(view->levelFraction(), 0.125, 5000);
+    const int decodesAfterUpgrade = manager.stats().decodes;
+    QVERIFY(decodesAfterUpgrade >= 1);
+
+    // Move the viewport far away. The pass in which it leaves keeps the
+    // current level; the next pass culls it back to the floor from the
+    // retained copy, without another decode.
+    manager.setViewState(QRectF(100000, 100000, 400, 300), 0.1);
+    manager.evaluateNow();
+    QCOMPARE(view->levelFraction(), 0.125);
+    manager.evaluateNow();
+    QCOMPARE(view->levelFraction(), item->floorFraction);
+    QCOMPARE(manager.stats().decodes, decodesAfterUpgrade);
+}
+
+void TestLodManager::coarsestDecodeIsRetainedForLaterCulls()
+{
+    auto document = std::make_shared<doc::Document>(doc::Document::create());
+    document->addItem(bigItem(2000, 1000, Qt::red));
+
+    ui::Scene scene;
+    ui::LevelLoader loader;
+    ui::LodManager manager;
+    manager.setScene(&scene);
+    manager.setLoader(&loader);
+    scene.setDocument(document);
+
+    SceneItem *view = firstPixmap(scene);
+    QVERIFY(view);
+    // No stored floor: the coarsest level is a ladder fraction.
+    QCOMPARE(view->coarsestFraction(), 0.0625);
+    QVERIFY(!view->hasCoarsestCopy());
+
+    // Visible: upgrades from the ladder, one decode.
+    manager.setViewState(QRectF(0, 0, 2000, 1000), 0.1);
+    manager.evaluateNow();
+    QTRY_COMPARE_WITH_TIMEOUT(view->levelFraction(), 0.125, 5000);
+    const int afterUpgrade = manager.stats().decodes;
+
+    // Culled to the coarsest: this still needs one decode, and keeps it.
+    manager.setViewState(QRectF(100000, 100000, 400, 300), 0.1);
+    manager.evaluateNow();
+    manager.evaluateNow();
+    QTRY_COMPARE_WITH_TIMEOUT(view->levelFraction(), 0.0625, 5000);
+    QVERIFY(view->hasCoarsestCopy());
+    const int afterFirstCull = manager.stats().decodes;
+    QVERIFY(afterFirstCull > afterUpgrade);
+
+    // Back on screen and off again: the second cull is a swap.
+    manager.setViewState(QRectF(0, 0, 2000, 1000), 0.1);
+    manager.evaluateNow();
+    QTRY_COMPARE_WITH_TIMEOUT(view->levelFraction(), 0.125, 5000);
+    manager.setViewState(QRectF(100000, 100000, 400, 300), 0.1);
+    manager.evaluateNow();
+    manager.evaluateNow();
+    QCOMPARE(view->levelFraction(), 0.0625);
+    QCOMPARE(manager.stats().decodes, afterFirstCull + 1);
 }
 
 QTEST_MAIN(TestLodManager)

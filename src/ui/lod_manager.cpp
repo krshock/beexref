@@ -411,6 +411,9 @@ void LodManager::onLevelReady(quint64 requestId, const QImage &image)
         return;
 
     pending.item->setLevel(image, pending.fraction);
+    // Keep the coarsest level once it is decoded, so a later cull back
+    // to the floor is a swap instead of another decode.
+    pending.item->rememberCoarsestLevel();
     ++decodes_;
     emit levelsChanged();
     scheduleRelease();

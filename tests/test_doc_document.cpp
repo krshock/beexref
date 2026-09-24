@@ -1,6 +1,7 @@
 #include <QBuffer>
 #include <QColor>
 #include <QImage>
+#include <QJsonArray>
 #include <QTemporaryDir>
 #include <QtTest>
 
@@ -52,6 +53,8 @@ private slots:
     void sourceIsReadableWhileItemsChange();
     void openMissingFileFails();
     void unsavedItemsGetIdsOnSave();
+    void saveWritesTheDataDefaults();
+    void saveAdoptsTheFileAsSource();
 };
 
 void TestDocument::savesAndReopensEveryField()
@@ -94,6 +97,15 @@ void TestDocument::savesAndReopensEveryField()
     auto blob = reopened.value().blob(*item);
     QVERIFY(blob.isOk());
     QCOMPARE(blob.value(), png);
+
+    // The item field is populated from the saved data, so a further save
+    // does not overwrite the filename with an empty string.
+    QCOMPARE(item->filename, QStringLiteral("x.png"));
+    QVERIFY(reopened.value().save(path).isOk());
+    auto again = doc::Document::open(path, dir.filePath(QStringLiteral("cache")));
+    QVERIFY(again.isOk());
+    QCOMPARE(again.value().items().first()->data.value(QStringLiteral("filename")).toString(),
+             QStringLiteral("x.png"));
 }
 
 void TestDocument::reusesSavedFloors()
@@ -264,6 +276,67 @@ void TestDocument::unsavedItemsGetIdsOnSave()
     QVERIFY(again.isOk());
     QCOMPARE(again.value().items().at(0)->id, qint64(1));
     QCOMPARE(again.value().items().at(1)->id, qint64(2));
+}
+
+void TestDocument::saveWritesTheDataDefaults()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString path = dir.filePath(QStringLiteral("defaults.beex"));
+
+    auto document = doc::Document::create();
+    const doc::ItemPtr cropped = pixmapItem(makePng(300, 200, Qt::green));
+    cropped->setOpacity(0.4);
+    cropped->setGrayscale(true);
+    cropped->setCrop(QRectF(5, 6, 100, 80));
+    cropped->filename = QStringLiteral("photo.jpg");
+    document.addItem(cropped);
+
+    // An image that never had these set still gets the default keys.
+    const doc::ItemPtr plain = pixmapItem(makePng(120, 90, Qt::blue));
+    document.addItem(plain);
+
+    QVERIFY(document.save(path).isOk());
+
+    auto reopened = doc::Document::open(path, dir.filePath(QStringLiteral("cache")));
+    QVERIFY(reopened.isOk());
+    const doc::ItemPtr saved = reopened.value().items().at(0);
+    QCOMPARE(saved->data.value(QStringLiteral("filename")).toString(),
+             QStringLiteral("photo.jpg"));
+    QCOMPARE(saved->opacity(), 0.4);
+    QCOMPARE(saved->grayscale(), true);
+    QCOMPARE(saved->crop(), QRectF(5, 6, 100, 80));
+
+    const doc::ItemPtr defaults = reopened.value().items().at(1);
+    QCOMPARE(defaults->data.value(QStringLiteral("filename")).toString(),
+             QStringLiteral("x.png"));
+    QCOMPARE(defaults->opacity(), 1.0);
+    QCOMPARE(defaults->grayscale(), false);
+    QCOMPARE(defaults->crop(), QRectF(0, 0, 300, 200));
+}
+
+void TestDocument::saveAdoptsTheFileAsSource()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString path = dir.filePath(QStringLiteral("adopt.beex"));
+    const QByteArray png = makePng(120, 90, Qt::blue);
+
+    auto document = doc::Document::create();
+    const doc::ItemPtr item = pixmapItem(png);
+    document.addItem(item);
+    QVERIFY(dynamic_cast<const doc::BytesSource *>(item->source.get()) != nullptr);
+
+    QVERIFY(document.save(path).isOk());
+    // Writing assigned the row id but kept the in-RAM bytes.
+    QVERIFY(item->id > 0);
+    QVERIFY(dynamic_cast<const doc::BytesSource *>(item->source.get()) != nullptr);
+
+    document.setPath(path);
+    document.adoptFileSources();
+    QVERIFY(dynamic_cast<const doc::BoardSource *>(item->source.get()) != nullptr);
+    // The board now serves the very same bytes.
+    QCOMPARE(item->source->bytes(), png);
 }
 
 QTEST_GUILESS_MAIN(TestDocument)

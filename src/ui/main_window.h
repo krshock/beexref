@@ -11,6 +11,7 @@
 #include <memory>
 
 class QAction;
+class QCloseEvent;
 class QMenu;
 class QSplitter;
 
@@ -41,6 +42,13 @@ public:
     // with a dialog and returns false.
     bool openBoard(const QString &path);
 
+    // Writes the document to path (the engine behind Save and Save As;
+    // also used by tests and the smoke harness). createNew clears the
+    // item ids first and appends the .beex extension if missing. On
+    // success the path, clean state, recent files and LOD sources are
+    // updated. Reports failures with a dialog and returns false.
+    bool saveDocumentTo(const QString &path, bool createNew);
+
     View *view() const { return view_; }
     MetadataPanel *metadataPanel() const { return metadataPanel_; }
     WelcomeOverlay *welcomeOverlay() const { return welcomeOverlay_; }
@@ -50,8 +58,15 @@ public:
     // Enables the periodic memory audit line (0 disables it).
     void startMemoryAudit(int seconds);
 
+protected:
+    void closeEvent(QCloseEvent *event) override;
+
 private:
     void openFileDialog();
+    // Save (Ctrl+S) and Save As (Ctrl+Shift+S), mirroring the
+    // reference's on_action_save / on_action_save_as.
+    void saveDocument();
+    void saveDocumentAs();
     void updateTitle();
     // Applies an undo/redo step and brings the scene in line.
     void applyHistoryStep(bool undo);

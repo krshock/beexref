@@ -10,6 +10,7 @@
 #include <QImageReader>
 #include <QMetaObject>
 #include <QMutex>
+#include <QTimer>
 
 #include <utility>
 
@@ -83,6 +84,15 @@ QImage decodeLevel(const doc::SourcePtr &source, const QSize &targetSize, const 
 class LevelLoader::Worker : public QObject
 {
 public:
+    Worker()
+    {
+        // One heap trim shortly after the last decode of a burst, so a
+        // run of culled images does not call malloc_trim per image.
+        trimTimer_.setSingleShot(true);
+        trimTimer_.setInterval(kTrimCoalesceMs);
+        connect(&trimTimer_, &QTimer::timeout, this, []() { util::releaseFreeMemory(); });
+    }
+
     bool event(QEvent *event) override
     {
         if (event->type() == QueueEvent::kType) {
@@ -93,6 +103,15 @@ public:
         }
         return QObject::event(event);
     }
+
+    // Restarts the timer, so a burst coalesces into a single trim.
+    void scheduleTrim() { trimTimer_.start(); }
+
+private:
+    // Long enough to span the decode of one burst on this thread, short
+    // enough that transients do not linger until the idle release.
+    static constexpr int kTrimCoalesceMs = 50;
+    QTimer trimTimer_;
 };
 
 LevelLoader::LevelLoader(QObject *parent)
@@ -126,9 +145,10 @@ void LevelLoader::request(quint64 requestId, doc::SourcePtr source, const QSize 
     }
     const auto cache = cache_;
     const auto shared = shared_;
+    Worker *const worker = worker_;
     enqueue(
         [this, requestId, source = std::move(source), targetSize, quality, cacheKey, coalesceKey,
-         cache, shared]() {
+         cache, shared, worker]() {
             // A newer request for the same item supersedes this one; it
             // is dropped before any decode work happens.
             if (!coalesceKey.isEmpty()) {
@@ -164,9 +184,10 @@ void LevelLoader::request(quint64 requestId, doc::SourcePtr source, const QSize 
                 emit levelFailed(requestId);
             else
                 emit levelReady(requestId, image);
-            // Drop the decode transients right away: they live in this
-            // thread's arena and are the largest churn the app creates.
-            util::releaseFreeMemory();
+            // Drop the decode transients. Coalesced: a burst of decodes
+            // trims the heap once, not once per image.
+            if (worker)
+                worker->scheduleTrim();
         },
         band);
 }

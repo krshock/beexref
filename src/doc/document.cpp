@@ -2,6 +2,7 @@
 
 #include <QBuffer>
 #include <QImageReader>
+#include <QJsonArray>
 #include <QJsonDocument>
 
 #include <utility>
@@ -15,6 +16,27 @@ QJsonObject parseJsonObject(const QString &text)
         return {};
     const QJsonDocument document = QJsonDocument::fromJson(text.toUtf8());
     return document.isObject() ? document.object() : QJsonObject();
+}
+
+// The reference's get_extra_save_data: images always carry their
+// filename, opacity, grayscale flag and crop, even at their defaults, so
+// a freshly created item serializes like the Python and Go ports.
+QJsonObject savedData(const Item &item)
+{
+    QJsonObject data = item.data;
+    if (!item.isPixmap())
+        return data;
+    data.insert(QStringLiteral("filename"), item.filename);
+    data.insert(QStringLiteral("opacity"), item.opacity());
+    data.insert(QStringLiteral("grayscale"), item.grayscale());
+    const QSize size = item.originalSize();
+    if (size.isValid() && !size.isEmpty()) {
+        const QRectF crop =
+            item.hasCrop() ? item.crop() : QRectF(0, 0, size.width(), size.height());
+        data.insert(QStringLiteral("crop"),
+                    QJsonArray{crop.x(), crop.y(), crop.width(), crop.height()});
+    }
+    return data;
 }
 
 QString jsonString(const QJsonObject &object)
@@ -41,6 +63,7 @@ Document::~Document()
 
 Document::Document(Document &&other) noexcept
     : path_(std::move(other.path_))
+    , tempDir_(std::move(other.tempDir_))
     , items_(std::move(other.items_))
     , modified_(other.modified_)
     , board_(std::move(other.board_))
@@ -54,6 +77,7 @@ Document &Document::operator=(Document &&other) noexcept
         return *this;
     close();
     path_ = std::move(other.path_);
+    tempDir_ = std::move(other.tempDir_);
     items_ = std::move(other.items_);
     modified_ = other.modified_;
     board_ = std::move(other.board_);
@@ -95,6 +119,7 @@ board::Result<Document> Document::open(const QString &path, const QString &tempD
         item->meta = parseJsonObject(row.meta);
 
         if (item->isPixmap()) {
+            item->filename = item->data.value(QStringLiteral("filename")).toString();
             item->source = std::make_shared<BoardSource>(board, item->id);
             if (sizes.isOk() && sizes.value().contains(item->id)) {
                 item->setOriginalSize(sizes.value().value(item->id));
@@ -117,6 +142,7 @@ board::Result<Document> Document::open(const QString &path, const QString &tempD
 
     Document document;
     document.path_ = path;
+    document.tempDir_ = tempDir;
     document.items_ = std::move(items);
     document.board_ = std::move(board);
     return document;
@@ -189,8 +215,15 @@ board::Result<QByteArray> Document::blob(const Item &item) const
 }
 
 board::Status Document::save(const QString &path, bool storeThumbnails,
-                      const board::Progress &progress) const
+                      const board::Progress &progress, bool createNew) const
 {
+    if (createNew) {
+        // A new file gets fresh row ids, like the reference's
+        // clear_save_ids().
+        for (const ItemPtr &item : items_)
+            item->id = 0;
+    }
+
     QVector<board::Record> records;
     records.reserve(items_.size());
     for (const ItemPtr &item : items_) {
@@ -203,7 +236,7 @@ board::Status Document::save(const QString &path, bool storeThumbnails,
         record.scale = item->scale;
         record.rotation = item->rotation;
         record.flip = item->flip;
-        record.dataJson = jsonString(item->data);
+        record.dataJson = jsonString(savedData(*item));
         record.metaJson = jsonString(item->meta);
         record.uuid = item->uuid;
 
@@ -226,7 +259,36 @@ board::Status Document::save(const QString &path, bool storeThumbnails,
         }
         records.append(record);
     }
-    return board::save(path, records, storeThumbnails, progress);
+    QVector<qint64> ids;
+    const board::Status status = board::save(path, records, storeThumbnails, progress, &ids);
+    if (!status)
+        return status;
+    // The writer assigned a row id to every record, in order.
+    if (ids.size() == items_.size()) {
+        for (qsizetype i = 0; i < items_.size(); ++i)
+            items_.at(i)->id = ids.at(i);
+    }
+    return status;
+}
+
+void Document::adoptFileSources()
+{
+    if (path_.isEmpty())
+        return;
+    // The save replaced the file; an old connection would keep reading
+    // the previous bytes, so reopen the board on the current path.
+    auto opened = board::Board::open(path_, tempDir_);
+    if (!opened)
+        return;
+    board_ = std::make_shared<board::Board>(opened.take());
+
+    for (const ItemPtr &item : items_) {
+        if (!item->isPixmap() || item->id == 0)
+            continue;
+        // The encoded bytes now live in the file; reading them through
+        // the board frees the in-RAM copy (levels stay in RAM).
+        item->source = std::make_shared<BoardSource>(board_, item->id);
+    }
 }
 
 void Document::close()

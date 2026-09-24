@@ -258,7 +258,7 @@ Status writeThumbnail(Connection &db, qint64 id, const Record &record, const QBy
 }
 
 Status writeAll(Connection &db, const QVector<Record> &records, bool storeThumbnails,
-                const Progress &progress)
+                const Progress &progress, QVector<qint64> *assignedIds)
 {
     if (Status status = db.exec(QStringLiteral("PRAGMA foreign_keys=ON")); !status)
         return status;
@@ -285,6 +285,8 @@ Status writeAll(Connection &db, const QVector<Record> &records, bool storeThumbn
 
         const Record &record = records.at(i);
         const qint64 id = record.saveId > 0 ? record.saveId : nextId++;
+        if (assignedIds)
+            assignedIds->append(id);
 
         if (Status status = insertItem(db, record, id); !status)
             return status;
@@ -324,7 +326,7 @@ bool renameOverwrite(const QString &from, const QString &to)
 } // namespace
 
 Status save(const QString &path, const QVector<Record> &records, bool storeThumbnails,
-            const Progress &progress)
+            const Progress &progress, QVector<qint64> *assignedIds)
 {
     const QFileInfo target(path);
     const QDir dir(target.absolutePath());
@@ -351,7 +353,8 @@ Status save(const QString &path, const QVector<Record> &records, bool storeThumb
             QFile::remove(tempPath);
             return db.error();
         }
-        if (Status status = writeAll(db.value(), records, storeThumbnails, progress); !status) {
+        if (Status status = writeAll(db.value(), records, storeThumbnails, progress, assignedIds);
+            !status) {
             QFile::remove(tempPath);
             return status;
         }

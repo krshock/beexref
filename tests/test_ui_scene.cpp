@@ -198,6 +198,8 @@ private slots:
     void deleteSelectionUndoes();
     void raiseAndLowerChangeZOrder();
     void newSceneClearsTheBoard();
+    void windowSavesToFile();
+    void closeHonoursTheUnsavedSetting();
     void hudToastsAppearAndExpire();
     void settingsDialogWritesAndRestores();
     void settingsActionOpensTheDialog();
@@ -1661,6 +1663,79 @@ void TestUiScene::newSceneClearsTheBoard()
     QCOMPARE(window.scene()->pixmapItemViews().size(), 0);
     QVERIFY(!window.scene()->document()->isModified());
     QVERIFY(!actionByText(window, QStringLiteral("&Undo"))->isEnabled());
+
+    settings::setSettingsDir(QString());
+}
+
+void TestUiScene::windowSavesToFile()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    settings::setSettingsDir(dir.path());
+
+    ui::MainWindow window;
+    QImage image(8, 6, QImage::Format_ARGB32);
+    image.fill(Qt::red);
+    QMimeData mime;
+    mime.setImageData(image);
+    window.input()->insertMimeData(mime, QPointF(10, 10));
+    QCOMPARE(window.scene()->pixmapItemViews().size(), 1);
+    QVERIFY(window.scene()->document()->isModified());
+
+    // The Save action is only offered while items exist.
+    QAction *save = actionByText(window, QStringLiteral("&Save"));
+    QVERIFY(save);
+    QVERIFY(save->isEnabled());
+
+    const QString path = dir.filePath(QStringLiteral("saved.beex"));
+    QVERIFY(window.saveDocumentTo(path, true));
+    QVERIFY(QFile::exists(path));
+    QCOMPARE(window.scene()->document()->path(), path);
+    QVERIFY(!window.scene()->document()->isModified());
+    QVERIFY(!window.windowTitle().contains(QLatin1Char('*')));
+
+    // The image is now read from the file, not from RAM.
+    const doc::ItemPtr item = window.scene()->document()->items().first();
+    QVERIFY(item->id > 0);
+    QVERIFY(dynamic_cast<const doc::BoardSource *>(item->source.get()) != nullptr);
+
+    // The file is recorded for Open Recent.
+    settings::File file(settings::iniPath());
+    file.load();
+    QVERIFY(file.recentFiles().contains(path));
+
+    // The board round-trips.
+    auto reopened = doc::Document::open(path, dir.filePath(QStringLiteral("cache")));
+    QVERIFY(reopened.isOk());
+    QCOMPARE(reopened.value().items().size(), 1);
+    QCOMPARE(reopened.value().items().first()->id, item->id);
+
+    settings::setSettingsDir(QString());
+}
+
+void TestUiScene::closeHonoursTheUnsavedSetting()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    settings::setSettingsDir(dir.path());
+    {
+        // A user who disabled the question closes without a prompt.
+        settings::File file(settings::iniPath());
+        file.load();
+        file.setValue(QStringLiteral("Save"), QStringLiteral("confirm_close_unsaved"),
+                      QStringLiteral("false"));
+        QVERIFY(file.sync());
+    }
+
+    ui::MainWindow window;
+    QImage image(4, 4, QImage::Format_ARGB32);
+    image.fill(Qt::blue);
+    QMimeData mime;
+    mime.setImageData(image);
+    window.input()->insertMimeData(mime, QPointF(0, 0));
+    QVERIFY(window.scene()->document()->isModified());
+
+    QVERIFY(window.close());
 
     settings::setSettingsDir(QString());
 }

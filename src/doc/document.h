@@ -40,6 +40,14 @@ public:
     static Document create();
 
     const QString &path() const { return path_; }
+    // Records the file the document was last written to (or opened from).
+    void setPath(const QString &path) { path_ = path; }
+    // Points saved images at the board as their LOD source and releases
+    // the encoded buffers that now live in the file (the reference's
+    // adopt_lod). Reopens the board on the current path first, because
+    // the save replaced the file and an old connection would read stale
+    // bytes.
+    void adoptFileSources();
     bool isModified() const { return modified_; }
     void setModified(bool modified) { modified_ = modified; }
 
@@ -59,15 +67,22 @@ public:
 
     // Writes the document in the native format. Blobs are read one at a
     // time through the item sources, so a save never holds the whole
-    // board's payloads in memory. Does not mutate the document.
+    // board's payloads in memory.
+    // Writing assigns every item its row id in the saved file. On a
+    // "create new" save (Save As) the ids are cleared first, so a new
+    // file starts with fresh ids, like the reference.
+    //
+    // After a successful save, adoptFileSources() points the images at
+    // the file and frees their in-RAM encoded buffers.
     board::Status save(const QString &path, bool storeThumbnails = true,
-                       const board::Progress &progress = {}) const;
+                       const board::Progress &progress = {}, bool createNew = false) const;
 
     std::shared_ptr<board::Board> board() const { return board_; }
     void close();
 
 private:
     QString path_;
+    QString tempDir_;
     QVector<ItemPtr> items_;
     bool modified_ = false;
     std::shared_ptr<board::Board> board_;

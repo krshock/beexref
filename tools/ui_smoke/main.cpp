@@ -14,6 +14,7 @@
 #include <QClipboard>
 #include <QColor>
 #include <QDir>
+#include <QFileInfo>
 #include <QImage>
 #include <QMimeData>
 #include <QAction>
@@ -586,6 +587,20 @@ public:
                 QTest::qWait(300);
 
             }
+        }
+
+        // Save a copy of the board (with images adopted to the file) to
+        // exercise the save path end to end.
+        {
+            const qint64 rssBefore = util::processRssBytes();
+            const QString savedPath = outputDir_ + QStringLiteral("/saved.beex");
+            const bool saved = window_.saveDocumentTo(savedPath, true);
+            const qint64 rssAfter = util::processRssBytes();
+            out() << "saved=" << saved << " path=" << savedPath
+                  << " bytes=" << QFileInfo(savedPath).size()
+                  << " rss_before_mb=" << QString::number(rssBefore / 1024.0 / 1024.0, 'f', 1)
+                  << " rss_after_mb=" << QString::number(rssAfter / 1024.0 / 1024.0, 'f', 1)
+                  << "\n";
         }
 
         const ui::LodManager::Stats stats = view->lodManager()->stats();
