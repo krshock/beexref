@@ -59,6 +59,10 @@ LodSettings loadLodSettings()
     lod.fractions =
         settings::valueOrDefault(file, QStringLiteral("Items/lod_fractions")).toString();
     lod.budgetMB = settings::valueOrDefault(file, QStringLiteral("Items/lod_ram_budget_mb")).toInt();
+    lod.primaryBudgetMB =
+        settings::valueOrDefault(file, QStringLiteral("Items/lod_primary_budget_mb")).toInt();
+    lod.ramCacheMB =
+        settings::valueOrDefault(file, QStringLiteral("Items/lod_ram_cache_mb")).toInt();
     lod.quality = settings::valueOrDefault(file, QStringLiteral("Items/lod_quality")).toString();
     return normalized(lod);
 }
@@ -98,6 +102,7 @@ MainWindow::MainWindow(bool cacheDisabled, QWidget *parent)
             logging::info(QStringLiteral("Session cache: disabled"));
         }
         view_->lodManager()->setLevelCache(sessionCache_);
+        view_->lodManager()->setSettings(view_->lodManager()->settings());
         input_->setSessionCache(sessionCache_);
     }
     view_->setMimeFilter([this](const QMimeData &data) { return input_->acceptsMimeData(data); });

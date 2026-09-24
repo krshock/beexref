@@ -38,6 +38,20 @@ public:
 
     void setLevelCache(std::shared_ptr<cache::SessionCache> cache);
 
+    // Cap the worker's in-RAM LRU of decoded levels at this many bytes.
+    // 0 disables the RAM cache (levels then come from the session cache
+    // or a decode).
+    void setRamCacheBudget(qint64 bytes);
+    // Bytes currently held by that LRU.
+    qint64 ramCacheBytes() const;
+
+    // Schedules a cache-cost recomputation. The cost is a delayed
+    // timer, because a cached image shares its pixels with the installed
+    // level, so it only becomes a resident cost some time after the
+    // result was delivered. Callers call this once the result is
+    // installed (or overridden by an equal level).
+    void reconsiderRamCache();
+
     // requestId is the caller's token; it is echoed back with the
     // result. targetSize is the wanted pixel size (aspect preserved);
     // quality is "fast" (single step) or "smooth" (progressive halving).
@@ -75,10 +89,18 @@ private:
     // priority.
     void enqueue(std::function<void()> run, RequestBand band);
 
+    // Posts a watchdog event that makes the worker recompute its RAM
+    // cache cost (call after handing it a new level).
+    void enqueueRamCacheBudget();
+
     struct Shared
     {
         QMutex mutex;
         QHash<QString, quint64> latest;
+        // Cache budget, written by the UI thread, read by the worker.
+        qint64 ramCacheBudget = 0;
+        // Bytes the worker's LRU holds, published for the UI thread.
+        qint64 ramCacheBytes = 0;
     };
 
     QThread thread_;

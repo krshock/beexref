@@ -80,6 +80,18 @@ const QVector<FieldUi> &fieldTable()
                      QStringLiteral("Target maximum memory usage for image levels with the RAM "
                                     "budget LOD method."),
                      1, 65536),
+        integerField(QStringLiteral("Items/lod_primary_budget_mb"),
+                     QStringLiteral("LOD Memory Budget (MB, 0 = off):"),
+                     QStringLiteral("Always-on cap on the decoded LOD bytes kept in memory, "
+                                    "whatever the LOD method. Requests that would exceed it are "
+                                    "not decoded. 0 leaves it unlimited."),
+                     0, 65536),
+        integerField(QStringLiteral("Items/lod_ram_cache_mb"),
+                     QStringLiteral("LOD Decoded Cache (MB, 0 = off):"),
+                     QStringLiteral("Decoded levels kept in memory so revisiting an image (for "
+                                    "example panning back) does not read or decode it again. "
+                                    "Costs no extra memory for levels already on screen."),
+                     0, 65536),
         makeField(QStringLiteral("Items/lod_fractions"), QStringLiteral("LOD Fractions:"),
                   QStringLiteral("Comma-separated list of fractions (0-1) used by the fixed "
                                  "fractions and RAM budget LOD methods. E.g. "

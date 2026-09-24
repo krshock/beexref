@@ -192,6 +192,16 @@ qint64 SceneItem::displayedLevelBytes() const
     return bytes;
 }
 
+qint64 SceneItem::residentLodBytes() const
+{
+    qint64 bytes = displayedLevelBytes();
+    // The retained coarsest level shares its pixels with the displayed
+    // level while it is the one shown; only a detached copy adds bytes.
+    if (!coarsestLevel_.isNull() && coarsestLevel_.constBits() != level_.constBits())
+        bytes += qint64(coarsestLevel_.width()) * coarsestLevel_.height() * 4;
+    return bytes;
+}
+
 void SceneItem::rememberCoarsestLevel()
 {
     if (level_.isNull() || levels_.isEmpty())

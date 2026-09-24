@@ -589,6 +589,26 @@ public:
             }
         }
 
+        // Stress the RAM cache: pan far away so the visible items are
+        // culled, then back, and compare the decode count. The second
+        // pass should be served from the worker's RAM cache.
+        {
+            const ui::LodManager::Stats before = view->lodManager()->stats();
+            const QRectF visible = view->mapToScene(view->viewport()->rect()).boundingRect();
+            const QRectF away(visible.x() + visible.width() * 4,
+                              visible.y() + visible.height() * 4, visible.width(),
+                              visible.height());
+            view->centerOn(away.center());
+            QTest::qWait(400);
+            view->centerOn(visible.center());
+            QTest::qWait(400);
+            const ui::LodManager::Stats after = view->lodManager()->stats();
+            out() << "ram cache: mb=" << QString::number(after.lodRamCacheMB, 'f', 1)
+                  << " decodes_delta=" << (after.decodes - before.decodes)
+                  << " requests_delta=" << (after.requests - before.requests)
+                  << "\n";
+        }
+
         // Save a copy of the board (with images adopted to the file) to
         // exercise the save path end to end.
         {

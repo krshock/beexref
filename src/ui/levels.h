@@ -13,6 +13,12 @@ struct LodSettings
     QString fractions = QStringLiteral("1,0.5,0.25,0.125,0.0625");
     int budgetMB = 1024;
     QString quality = QStringLiteral("smooth"); // fast | smooth
+    // Always-on cap on the decoded LOD bytes the manager keeps, in MB.
+    // 0 means unlimited. Independent of the LOD method.
+    int primaryBudgetMB = 0;
+    // Cap on the loader's in-RAM LRU of decoded levels, in MB; 0
+    // disables it. A sub-budget inside the primary one.
+    int ramCacheMB = 300;
 };
 
 // Fills unset fields with the reference defaults.

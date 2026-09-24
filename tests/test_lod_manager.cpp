@@ -98,6 +98,11 @@ private slots:
     void offScreenDecodesWaitBehindVisibleOnes();
     void retainedFloorCopyAvoidsDecodeOnCull();
     void coarsestDecodeIsRetainedForLaterCulls();
+    void residentLodBytesCountsSharedFloorOnce();
+    void reservedBytesTrackInFlightDecodes();
+    void offScreenDowngradesOrderByBytesFreed();
+    void primaryBudgetSkipsRequestsThatDoNotFit();
+    void ramCacheServesRepeatLevelsAndEvicts();
 };
 
 void TestLodManager::defersUpgradesUntilInteraction()
@@ -169,6 +174,9 @@ void TestLodManager::ramBudgetDowngradesLevels()
     ui::LodSettings settings;
     settings.method = QStringLiteral("ram_budget");
     settings.budgetMB = 1; // far below the two full levels (16 MB)
+    // The ram_budget method caps how much stays resident, not what may
+    // be decoded, so admission is not the limiter here.
+    settings.primaryBudgetMB = 0;
     manager.setSettings(settings);
     scene.setDocument(document);
     manager.setViewState(QRectF(0, 0, 6000, 1000), 0.5);
@@ -584,6 +592,183 @@ void TestLodManager::coarsestDecodeIsRetainedForLaterCulls()
     manager.evaluateNow();
     QCOMPARE(view->levelFraction(), 0.0625);
     QCOMPARE(manager.stats().decodes, afterFirstCull + 1);
+}
+
+void TestLodManager::residentLodBytesCountsSharedFloorOnce()
+{
+    auto model = std::make_shared<doc::Item>(doc::kTypePixmap);
+    model->setOriginalSize(QSize(2000, 1000));
+
+    SceneItem view(model);
+    const double floorFraction = 0.032;
+    view.setLevels({{floorFraction, QSize(64, 32)}, {0.125, QSize(250, 125)}});
+
+    const QImage floor(64, 32, QImage::Format_ARGB32);
+    view.setLevel(floor, floorFraction);
+    view.rememberCoarsestLevel();
+    QVERIFY(view.hasCoarsestCopy());
+    // Displayed and coarsest level share their pixels: counted once.
+    QCOMPARE(view.residentLodBytes(), qint64(64) * 32 * 4);
+
+    const QImage fine(250, 125, QImage::Format_ARGB32);
+    view.setLevel(fine, 0.125);
+    // The retained floor is now a separate buffer.
+    QCOMPARE(view.residentLodBytes(), qint64(250) * 125 * 4 + qint64(64) * 32 * 4);
+}
+
+void TestLodManager::reservedBytesTrackInFlightDecodes()
+{
+    auto document = std::make_shared<doc::Document>(doc::Document::create());
+    document->addItem(bigItem(2000, 1000, Qt::red));
+
+    ui::Scene scene;
+    ui::LevelLoader loader;
+    ui::LodManager manager;
+    manager.setScene(&scene);
+    manager.setLoader(&loader);
+    scene.setDocument(document);
+    manager.setViewState(QRectF(0, 0, 2000, 1000), 0.1);
+    manager.evaluateNow();
+
+    // The decode is queued but its result has not been delivered yet.
+    QVERIFY(manager.stats().lodReservedMB > 0);
+    QCOMPARE(manager.stats().lodCommittedMB, 0.0);
+
+    SceneItem *view = firstPixmap(scene);
+    QVERIFY(view);
+    QTRY_COMPARE_WITH_TIMEOUT(view->levelFraction(), 0.125, 5000);
+
+    // Resolved: the reservation moved into the committed bytes.
+    const ui::LodManager::Stats settled = manager.stats();
+    QCOMPARE(settled.lodReservedMB, 0.0);
+    QVERIFY(settled.lodCommittedMB > 0.0);
+    QCOMPARE(settled.lodCommittedMB, view->residentLodBytes() / (1024.0 * 1024.0));
+}
+
+void TestLodManager::offScreenDowngradesOrderByBytesFreed()
+{
+    auto document = std::make_shared<doc::Document>(doc::Document::create());
+    document->addItem(bigItem(2000, 1000, Qt::darkRed));
+    const doc::ItemPtr small = bigItem(400, 200, Qt::darkBlue);
+    small->x = 4000;
+    document->addItem(small);
+
+    ui::Scene scene;
+    ui::LevelLoader loader;
+    QSignalSpy ready(&loader, &ui::LevelLoader::levelReady);
+    ui::LodManager manager;
+    manager.setScene(&scene);
+    manager.setLoader(&loader);
+    scene.setDocument(document);
+
+    // Both on screen, so both upgrade to full size.
+    manager.setViewState(QRectF(0, 0, 5000, 1200), 0.5);
+    manager.evaluateNow();
+    SceneItem *red = scene.itemViewFor(document->items().value(0));
+    SceneItem *blue = scene.itemViewFor(document->items().value(1));
+    QVERIFY(red && blue);
+    QTRY_COMPARE_WITH_TIMEOUT(red->levelFraction(), 1.0, 5000);
+    QTRY_COMPARE_WITH_TIMEOUT(blue->levelFraction(), 1.0, 5000);
+    const int afterUpgrades = ready.count();
+    QCOMPARE(afterUpgrades, 2);
+
+    // Both leave the viewport. By distance the small blue one is nearer
+    // to the far centre, but the big red one frees far more RAM, so its
+    // downgrade decodes first.
+    manager.setViewState(QRectF(100000, 100000, 400, 300), 0.5);
+    manager.evaluateNow();
+    manager.evaluateNow();
+    QTRY_COMPARE_WITH_TIMEOUT(ready.count(), afterUpgrades + 2, 15000);
+    QCOMPARE(decodedChannel(ready, afterUpgrades), QLatin1Char('r'));
+    QCOMPARE(decodedChannel(ready, afterUpgrades + 1), QLatin1Char('b'));
+}
+
+void TestLodManager::primaryBudgetSkipsRequestsThatDoNotFit()
+{
+    auto document = std::make_shared<doc::Document>(doc::Document::create());
+    document->addItem(bigItem(2000, 1000, Qt::red));
+
+    ui::Scene scene;
+    ui::LevelLoader loader;
+    QSignalSpy ready(&loader, &ui::LevelLoader::levelReady);
+    ui::LodManager manager;
+    manager.setScene(&scene);
+    manager.setLoader(&loader);
+    // 1 MB total: below what the full level (8 MB) needs, so the request
+    // is refused instead of overflowing the budget.
+    ui::LodSettings tight;
+    tight.method = QStringLiteral("fixed");
+    tight.primaryBudgetMB = 1;
+    manager.setSettings(tight);
+    scene.setDocument(document);
+    manager.setViewState(QRectF(0, 0, 2000, 1000), 1.0);
+    manager.evaluateNow();
+    QTest::qWait(200);
+
+    SceneItem *view = firstPixmap(scene);
+    QVERIFY(view);
+    QCOMPARE(view->levelFraction(), 0.0);
+    QCOMPARE(manager.stats().requests, 0);
+    QVERIFY(manager.stats().admissionRejects > 0);
+    QCOMPARE(ready.count(), 0);
+
+    // With no budget the same evaluation requests the level.
+    ui::LodSettings open;
+    open.method = QStringLiteral("fixed");
+    open.primaryBudgetMB = 0;
+    manager.setSettings(open);
+    manager.evaluateNow();
+    QTRY_VERIFY_WITH_TIMEOUT(manager.stats().requests > 0, 5000);
+    QTRY_VERIFY_WITH_TIMEOUT(ready.count() >= 1, 5000);
+}
+
+void TestLodManager::ramCacheServesRepeatLevelsAndEvicts()
+{
+    auto document = std::make_shared<doc::Document>(doc::Document::create());
+    document->addItem(bigItem(2000, 1000, Qt::red));
+
+    ui::Scene scene;
+    ui::LevelLoader loader;
+    QSignalSpy ready(&loader, &ui::LevelLoader::levelReady);
+    ui::LodManager manager;
+    ui::LodSettings settings;
+    settings.method = QStringLiteral("fixed");
+    settings.primaryBudgetMB = 0;
+    settings.ramCacheMB = 1; // the 0.125 level (about 122 KB) fits
+    manager.setScene(&scene);
+    manager.setLoader(&loader);
+    manager.setSettings(settings);
+    scene.setDocument(document);
+    manager.setViewState(QRectF(0, 0, 2000, 1000), 0.1);
+    manager.evaluateNow();
+
+    SceneItem *view = firstPixmap(scene);
+    QVERIFY(view);
+    QTRY_COMPARE_WITH_TIMEOUT(view->levelFraction(), 0.125, 5000);
+    // Give the worker its delayed cost pass a moment to run.
+    QTest::qWait(300);
+    QVERIFY(manager.stats().lodRamCacheMB > 0);
+
+    // Off screen and back. Leaving keeps the current level for one pass
+    // and only the next pass culls; coming back re-requests 0.125, which
+    // the worker serves from its RAM cache instead of decoding. The
+    // session cache is empty, so a decode would be a real one.
+    manager.setViewState(QRectF(100000, 100000, 400, 300), 0.1);
+    manager.evaluateNow();
+    manager.evaluateNow();
+    QTRY_COMPARE_WITH_TIMEOUT(view->levelFraction(), 0.0625, 5000);
+    QTest::qWait(100);
+    const int decodesBeforeReturn = manager.stats().decodes;
+    manager.setViewState(QRectF(0, 0, 2000, 1000), 0.1);
+    manager.evaluateNow();
+    QTRY_COMPARE_WITH_TIMEOUT(view->levelFraction(), 0.125, 5000);
+    // One more decode (the cull to 0.0625); the return did not decode.
+    QVERIFY(manager.stats().decodes <= decodesBeforeReturn + 1);
+
+    // Tighten the cache to nothing: it empties once the cost pass runs.
+    settings.ramCacheMB = 0;
+    manager.setSettings(settings);
+    QTRY_COMPARE_WITH_TIMEOUT(manager.stats().lodRamCacheMB, 0.0, 5000);
 }
 
 QTEST_MAIN(TestLodManager)

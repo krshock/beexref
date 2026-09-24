@@ -296,6 +296,12 @@ const QVector<FieldSpec> &fields()
         {QStringLiteral("Items/lod_fractions"), QStringLiteral("1,0.5,0.25,0.125,0.0625"), nullptr,
          [](const QVariant &value) { return !value.toString().isEmpty(); }},
         {QStringLiteral("Items/lod_ram_budget_mb"), 1024, intCast(), atLeast(1)},
+        // Always-on cap on the decoded LOD bytes the manager keeps; 0 is
+        // unlimited. The ram_budget method tightens it further.
+        {QStringLiteral("Items/lod_primary_budget_mb"), 0, intCast(), atLeast(0)},
+        // In-RAM LRU of decoded levels held by the decode worker; 0
+        // disables it.
+        {QStringLiteral("Items/lod_ram_cache_mb"), 300, intCast(), atLeast(0)},
         {QStringLiteral("Items/lod_quality"), QStringLiteral("smooth"), nullptr,
          oneOf({QStringLiteral("fast"), QStringLiteral("smooth")})},
         {QStringLiteral("Items/lod_store_thumbnails"), true, boolCast(), nullptr},

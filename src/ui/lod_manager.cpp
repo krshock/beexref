@@ -62,6 +62,7 @@ void LodManager::setLoader(LevelLoader *loader)
     loader_ = loader;
     if (loader_) {
         loader_->setLevelCache(levelCache_);
+        loader_->setRamCacheBudget(qint64(settings_.ramCacheMB) * kBytesPerMB);
         connect(loader_, &LevelLoader::levelReady, this, &LodManager::onLevelReady);
         connect(loader_, &LevelLoader::levelFailed, this, &LodManager::onLevelFailed);
         connect(loader_, &LevelLoader::levelCancelled, this, &LodManager::onLevelCancelled);
@@ -71,6 +72,8 @@ void LodManager::setLoader(LevelLoader *loader)
 void LodManager::setSettings(const LodSettings &settings)
 {
     settings_ = normalized(settings);
+    if (loader_)
+        loader_->setRamCacheBudget(qint64(settings_.ramCacheMB) * kBytesPerMB);
     reset();
 }
 
@@ -83,13 +86,13 @@ void LodManager::setLevelCache(std::shared_ptr<cache::SessionCache> cache)
 
 QString LodManager::cacheKey(const SceneItem *item, double fraction) const
 {
-    if (!levelCache_ || !levelCache_->isAvailable())
-        return {};
     // Stable identity, independent of the board row: a level stays
     // cached across saves and reopens.
     const QString uuid = item->item()->ensureUuid();
     if (uuid.isEmpty())
         return {};
+    // The key is handed to the loader even without a session cache: the
+    // loader uses it to coalesce and to index its RAM cache.
     return QStringLiteral("%1|%2|%3").arg(uuid, settings_.quality,
                                           QString::number(fraction, 'g', 17));
 }
@@ -122,6 +125,7 @@ void LodManager::reset()
 {
     inFlight_.clear();
     pending_.clear();
+    reservedBytes_ = 0;
     deferUpgrades_ = true;
     if (!scene_)
         return;
@@ -246,6 +250,17 @@ void LodManager::applyRAMBudget(QHash<SceneItem *, double> &desired, qint64 budg
     }
 }
 
+qint64 LodManager::effectiveBudgetBytes() const
+{
+    const qint64 primary = qint64(settings_.primaryBudgetMB) * kBytesPerMB;
+    const qint64 method = levelBudgetBytes(settings_);
+    if (primary <= 0)
+        return method;
+    if (method <= 0)
+        return primary;
+    return std::min(primary, method);
+}
+
 QVector<SceneItem *> LodManager::hintOrder(
     const QVector<SceneItem *> &items, const QHash<SceneItem *, RequestHint> &hints) const
 {
@@ -257,6 +272,15 @@ QVector<SceneItem *> LodManager::hintOrder(
     const QVector<HintFn> methods = {
         [&hints](SceneItem *a, SceneItem *b) {
             return static_cast<int>(hints.value(a).band) < static_cast<int>(hints.value(b).band);
+        },
+        // Within the deferred band, the request that frees the most
+        // RAM goes first, so a cull burst reaches the budget sooner.
+        [&hints](SceneItem *a, SceneItem *b) {
+            const RequestHint &ha = hints.value(a);
+            const RequestHint &hb = hints.value(b);
+            if (ha.band != RequestBand::Deferred || hb.band != RequestBand::Deferred)
+                return false;
+            return ha.deltaBytes < hb.deltaBytes;
         },
         [&hints](SceneItem *a, SceneItem *b) {
             return hints.value(a).distance < hints.value(b).distance;
@@ -295,6 +319,9 @@ void LodManager::evaluate()
             hint.selected = selectedItems.contains(item);
             hint.band = hint.selected ? RequestBand::Selected : RequestBand::Visible;
             hint.distance = QLineF(item->sceneBoundingRect().center(), origin).length();
+            hint.targetBytes = item->levelBytesFor(item->levelFraction());
+            hint.currentBytes = item->residentLodBytes();
+            hint.deltaBytes = 0;
             hints.insert(item, hint);
             continue;
         }
@@ -319,19 +346,45 @@ void LodManager::evaluate()
             : visibleNow           ? RequestBand::Visible
                                    : RequestBand::Deferred;
         hint.distance = QLineF(item->sceneBoundingRect().center(), origin).length();
+        hint.targetBytes = item->levelBytesFor(fraction);
+        hint.currentBytes = item->residentLodBytes();
+        hint.deltaBytes = hint.targetBytes - hint.currentBytes;
         hints.insert(item, hint);
     }
 
-    const qint64 budget = levelBudgetBytes(settings_);
+    const qint64 budget = effectiveBudgetBytes();
     if (budget > 0)
         applyRAMBudget(desired, budget);
 
-    for (SceneItem *item : hintOrder(desired.keys().toVector(), hints)) {
+    const QVector<SceneItem *> order = hintOrder(desired.keys().toVector(), hints);
+    for (SceneItem *item : order) {
         const double fraction = desired.value(item);
         if (item->retryBlocked())
             continue;
         if (deferUpgrades_ && fraction > item->coarsestFraction())
             continue;
+
+        // Budget headroom: a request that would not fit is not queued,
+        // so a burst cannot push the decoded set past the cap. The
+        // method's own cap is excluded because applyRAMBudget already
+        // steered the desired levels under it.
+        const qint64 primaryBudget = qint64(settings_.primaryBudgetMB) * kBytesPerMB;
+        if (primaryBudget > 0) {
+            const qint64 add = qMax(qint64(0), hints.value(item).deltaBytes);
+            qint64 reserved = reservedBytes_;
+            // An in-flight decode for the same item is superseded, so
+            // its reservation is released.
+            const auto flight = inFlight_.find(item);
+            if (flight != inFlight_.end()) {
+                const auto superseded = pending_.find(flight.value());
+                if (superseded != pending_.end())
+                    reserved -= superseded.value().bytes;
+            }
+            if (primaryBudget - reserved - add < 0) {
+                ++admissionRejects_;
+                continue;
+            }
+        }
 
         const auto flightIt = inFlight_.find(item);
         const bool inFlight = flightIt != inFlight_.end();
@@ -354,6 +407,10 @@ void LodManager::evaluate()
             item->levelFraction() > 0 && qFuzzyCompare(fraction, item->levelFraction());
         if (currentIsWanted && !item->requeue()) {
             cancelLevel(item);
+            // The same level may sit in the loader's RAM cache; it costs
+            // memory only once nothing displays it.
+            if (loader_)
+                loader_->reconsiderRamCache();
             continue;
         }
         if (inFlight && qFuzzyCompare(fraction, pendingFraction) && !item->requeue())
@@ -377,8 +434,10 @@ void LodManager::requestLevel(SceneItem *item, double fraction, RequestBand band
     pending.item = item;
     pending.fraction = fraction;
     pending.generation = item->generation();
+    pending.bytes = item->levelBytesFor(fraction);
     pending_.insert(requestId, pending);
     inFlight_.insert(item, requestId);
+    reservedBytes_ += pending.bytes;
 
     loader_->request(requestId, item->item()->source, item->levelSizeFor(fraction),
                      settings_.quality, cacheKey(item, fraction),
@@ -390,7 +449,11 @@ void LodManager::cancelLevel(SceneItem *item)
     const auto it = inFlight_.find(item);
     if (it == inFlight_.end())
         return;
-    pending_.remove(it.value());
+    const auto pending = pending_.find(it.value());
+    if (pending != pending_.end()) {
+        reservedBytes_ -= pending.value().bytes;
+        pending_.erase(pending);
+    }
     inFlight_.erase(it);
     // The in-flight decode result is now unknown to us, so it is
     // ignored when it arrives.
@@ -404,6 +467,7 @@ void LodManager::onLevelReady(quint64 requestId, const QImage &image)
         return;
     const Pending pending = it.value();
     pending_.erase(it);
+    reservedBytes_ -= pending.bytes;
     inFlight_.remove(pending.item);
 
     // A newer request superseded this decode.
@@ -417,6 +481,9 @@ void LodManager::onLevelReady(quint64 requestId, const QImage &image)
     ++decodes_;
     emit levelsChanged();
     scheduleRelease();
+    // The result is now installed, so the loader may cost its RAM cache.
+    if (loader_)
+        loader_->reconsiderRamCache();
 }
 
 void LodManager::onLevelFailed(quint64 requestId)
@@ -426,6 +493,7 @@ void LodManager::onLevelFailed(quint64 requestId)
         return;
     const Pending pending = it.value();
     pending_.erase(it);
+    reservedBytes_ -= pending.bytes;
     inFlight_.remove(pending.item);
 
     if (pending.generation != pending.item->generation())
@@ -446,6 +514,7 @@ void LodManager::onLevelCancelled(quint64 requestId)
         return;
     const Pending pending = it.value();
     pending_.erase(it);
+    reservedBytes_ -= pending.bytes;
     inFlight_.remove(pending.item);
     ++cancelled_;
 }
@@ -479,16 +548,22 @@ LodManager::Stats LodManager::stats() const
     stats.releases = releases_;
     stats.pending = static_cast<int>(pending_.size());
     stats.cancelled = cancelled_;
+    stats.admissionRejects = admissionRejects_;
     stats.items = scene_ ? scene_->pixmapItemViews().size() : 0;
     if (!scene_)
         return stats;
 
     for (SceneItem *item : scene_->pixmapItemViews()) {
         stats.levelMB += item->displayedLevelBytes() / kBytesPerMB;
+        stats.lodCommittedMB += item->residentLodBytes() / kBytesPerMB;
         const doc::SourcePtr &source = item->item()->source;
         if (source)
             stats.encodedMB += source->residentBytes() / kBytesPerMB;
     }
+    stats.lodReservedMB = reservedBytes_ / kBytesPerMB;
+    stats.lodBudgetMB = effectiveBudgetBytes() / kBytesPerMB;
+    if (loader_)
+        stats.lodRamCacheMB = loader_->ramCacheBytes() / kBytesPerMB;
     if (levelCache_)
         stats.cacheMB = levelCache_->fileBytes() / kBytesPerMB;
     return stats;
@@ -508,6 +583,10 @@ void LodManager::logAudit(const QString &label)
         {QStringLiteral("label"), label},
         {QStringLiteral("rss_mb"), QString::number(rssMB, 'f', 1)},
         {QStringLiteral("level_mb"), QString::number(sample.levelMB, 'f', 1)},
+        {QStringLiteral("lod_committed_mb"), QString::number(sample.lodCommittedMB, 'f', 1)},
+        {QStringLiteral("lod_reserved_mb"), QString::number(sample.lodReservedMB, 'f', 1)},
+        {QStringLiteral("lod_budget_mb"), QString::number(sample.lodBudgetMB, 'f', 1)},
+        {QStringLiteral("lod_ram_cache_mb"), QString::number(sample.lodRamCacheMB, 'f', 1)},
         {QStringLiteral("encoded_mb"), QString::number(sample.encodedMB, 'f', 1)},
         {QStringLiteral("cache_mb"), QString::number(sample.cacheMB, 'f', 1)},
         {QStringLiteral("items"), sample.items},
@@ -517,6 +596,7 @@ void LodManager::logAudit(const QString &label)
         {QStringLiteral("releases"), sample.releases},
         {QStringLiteral("pending"), sample.pending},
         {QStringLiteral("cancelled"), sample.cancelled},
+        {QStringLiteral("admission_rejects"), sample.admissionRejects},
     };
     if (previousAt.isValid()) {
         attrs.append({QStringLiteral("since_ms"),

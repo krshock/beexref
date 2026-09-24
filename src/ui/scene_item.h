@@ -91,6 +91,11 @@ public:
     QSize levelSizeFor(double fraction) const;
     // Bytes of the currently displayed level (0 when none).
     qint64 displayedLevelBytes() const;
+    // Bytes of every decoded LOD buffer this item holds: the displayed
+    // level, its grayscale copy, and the retained coarsest copy when it
+    // is a separate buffer. Counted once even though QImage sharing can
+    // make the displayed and coarsest level the same pixels.
+    qint64 residentLodBytes() const;
 
     // The coarsest level is kept once decoded: culling an item back to
     // it then costs no decode and no full-size transient, only the few

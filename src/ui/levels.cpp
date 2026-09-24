@@ -36,6 +36,10 @@ LodSettings normalized(const LodSettings &settings)
         result.budgetMB = 1024;
     if (result.quality.isEmpty())
         result.quality = QStringLiteral("smooth");
+    if (result.primaryBudgetMB < 0)
+        result.primaryBudgetMB = 0;
+    if (result.ramCacheMB < 0)
+        result.ramCacheMB = 0;
     return result;
 }
 
