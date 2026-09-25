@@ -171,6 +171,7 @@ private slots:
     void missingSourceIsErrorItem();
     void selectionBoundsCoversSelectedItems();
     void dragMovesItemAndModel();
+    void dragThresholdProtectsFromTinyGestures();
     void fitSceneFramesTheItems();
     void zoomLimitsHold();
     void middleDragPansWithTheCursor();
@@ -353,6 +354,71 @@ void TestUiScene::dragMovesItemAndModel()
     scene->syncDocument();
     QVERIFY(item->x > 0);
     QCOMPARE(viewItem->pos().x(), item->x);
+}
+
+void TestUiScene::dragThresholdProtectsFromTinyGestures()
+{
+    auto document = std::make_shared<doc::Document>(doc::Document::create());
+    const doc::ItemPtr item = pixmapItem(200, 100, Qt::red);
+    document->addItem(item);
+
+    ui::View view;
+    auto *scene = new ui::Scene(&view);
+    scene->setDocument(document);
+    view.setBoardScene(scene);
+    doc::UndoStack stack(document.get());
+    view.setUndoStack(&stack);
+    view.resize(600, 400);
+    view.fitScene();
+
+    SceneItem *viewItem = scene->pixmapItemViews().first();
+    viewItem->setSelected(true);
+
+    // A move under the 20 px threshold (about 17 px here) does not shift
+    // the item and leaves no undo step.
+    const QPoint centre = view.mapFromScene(viewItem->sceneBoundingRect().center());
+    sendMouse(view.viewport(), QEvent::MouseButtonPress, centre, Qt::LeftButton, Qt::LeftButton);
+    sendMouse(view.viewport(), QEvent::MouseMove, centre + QPoint(12, 12), Qt::NoButton,
+              Qt::LeftButton);
+    sendMouse(view.viewport(), QEvent::MouseButtonRelease, centre + QPoint(12, 12), Qt::LeftButton,
+              Qt::NoButton);
+    QCOMPARE(item->x, 0.0);
+    QCOMPARE(item->y, 0.0);
+    QVERIFY(!stack.canUndo());
+
+    // A tiny scale drag leaves the scale alone.
+    const QPoint scalePress = view.mapFromScene(QPointF(197, 97));
+    sendMouse(view.viewport(), QEvent::MouseButtonPress, scalePress, Qt::LeftButton,
+              Qt::LeftButton);
+    sendMouse(view.viewport(), QEvent::MouseMove, scalePress + QPoint(18, 0), Qt::NoButton,
+              Qt::LeftButton);
+    sendMouse(view.viewport(), QEvent::MouseButtonRelease, scalePress + QPoint(18, 0),
+              Qt::LeftButton, Qt::NoButton);
+    QCOMPARE(item->scale, 1.0);
+    QVERIFY(!stack.canUndo());
+
+    // A tiny rotate drag leaves the rotation alone.
+    const double viewScale = view.transform().m11();
+    const QPointF unit(1.0 / std::sqrt(2.0), 1.0 / std::sqrt(2.0));
+    const QPoint rotatePress = view.mapFromScene(QPointF(200, 100) + unit * (15.0 / viewScale));
+    sendMouse(view.viewport(), QEvent::MouseButtonPress, rotatePress, Qt::LeftButton,
+              Qt::LeftButton);
+    sendMouse(view.viewport(), QEvent::MouseMove, rotatePress + QPoint(18, 0), Qt::NoButton,
+              Qt::LeftButton);
+    sendMouse(view.viewport(), QEvent::MouseButtonRelease, rotatePress + QPoint(18, 0),
+              Qt::LeftButton, Qt::NoButton);
+    QCOMPARE(item->rotation, 0.0);
+    QVERIFY(!stack.canUndo());
+
+    // Beyond the threshold the move still happens (20 px).
+    const QPoint start = view.mapFromScene(viewItem->sceneBoundingRect().center());
+    sendMouse(view.viewport(), QEvent::MouseButtonPress, start, Qt::LeftButton, Qt::LeftButton);
+    sendMouse(view.viewport(), QEvent::MouseMove, start + QPoint(40, 0), Qt::NoButton,
+              Qt::LeftButton);
+    sendMouse(view.viewport(), QEvent::MouseButtonRelease, start + QPoint(40, 0), Qt::LeftButton,
+              Qt::NoButton);
+    QVERIFY(item->x > 0);
+    QVERIFY(stack.canUndo());
 }
 
 void TestUiScene::fitSceneFramesTheItems()

@@ -417,6 +417,8 @@ void View::mousePressEvent(QMouseEvent *event)
         const QPoint viewportPos = event->position().toPoint();
         const QPointF scenePos = mapToScene(viewportPos);
         gestureInverse_ = viewportTransform().inverted();
+        // The drag threshold measures from here, whatever gesture starts.
+        pressPos_ = viewportPos;
 
         // Selection handles first: the rotation and flip areas lie
         // partly outside the items, so they are hit-tested against the
@@ -470,7 +472,6 @@ void View::mousePressEvent(QMouseEvent *event)
             // Plain move.
             moving_ = true;
             moveStarted_ = false;
-            pressPos_ = viewportPos;
             pressScenePos_ = scenePos;
             moveStarts_.clear();
             for (QGraphicsItem *selected : scene()->selectedItems()) {
@@ -548,6 +549,16 @@ void View::mouseMoveEvent(QMouseEvent *event)
     }
 
     if (drag_ == Drag::Scale || drag_ == Drag::Rotate) {
+        // Wait for the drag threshold, like the Go port: a shaky click on
+        // a handle must not scale or rotate the selection.
+        if (!transformStarted_) {
+            const QPoint delta = position - pressPos_;
+            if (std::hypot(delta.x(), delta.y()) < kDragThreshold) {
+                event->accept();
+                return;
+            }
+            transformStarted_ = true;
+        }
         const bool snap = event->modifiers().testFlag(Qt::ControlModifier)
             || event->modifiers().testFlag(Qt::ShiftModifier);
         applyTransformGesture(gestureInverse_.map(QPointF(position)), snap);
@@ -556,9 +567,12 @@ void View::mouseMoveEvent(QMouseEvent *event)
     }
 
     if (moving_) {
-        if (!moveStarted_ && (position - pressPos_).manhattanLength() < kMoveThreshold) {
-            event->accept();
-            return;
+        if (!moveStarted_) {
+            const QPoint delta = position - pressPos_;
+            if (std::hypot(delta.x(), delta.y()) < kDragThreshold) {
+                event->accept();
+                return;
+            }
         }
         if (!moveStarted_) {
             // The gesture freezes the levels of the items being moved.
@@ -623,6 +637,7 @@ void View::mouseReleaseEvent(QMouseEvent *event)
     if ((drag_ == Drag::Scale || drag_ == Drag::Rotate) && event->button() == Qt::LeftButton) {
         finishTransformGesture();
         drag_ = Drag::None;
+        transformStarted_ = false;
         event->accept();
         return;
     }
@@ -703,6 +718,7 @@ bool View::beginScaleGesture(int corner, const QPointF &scenePos)
     }
     setGestureFrozen(true);
     drag_ = Drag::Scale;
+    transformStarted_ = false;
     return true;
 }
 
@@ -730,6 +746,7 @@ bool View::beginRotateGesture(const QPointF &scenePos)
     }
     setGestureFrozen(true);
     drag_ = Drag::Rotate;
+    transformStarted_ = false;
     return true;
 }
 

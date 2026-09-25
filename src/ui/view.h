@@ -175,6 +175,7 @@ private:
     QPoint panStart_;
     bool moving_ = false;
     bool moveStarted_ = false;
+    bool transformStarted_ = false;
     // Drag-zoom (the reference's ZOOM_MODE): a bound button drag zooms.
     bool dragZoom_ = false;
     bool movingWindow_ = false;
@@ -221,7 +222,10 @@ private:
     };
     QVector<MoveEntry> moveStarts_;
 
-    static constexpr double kMoveThreshold = 3.0; // viewport pixels
+    // The Go port's drag threshold: a click with a shaky hand must not
+    // disturb the selection, so moving, scaling and rotating only start
+    // once the pointer has travelled this many viewport pixels.
+    static constexpr double kDragThreshold = 20.0;
     // Zoom bursts hold LOD work for this long after the last zoom event,
     // so level decodes happen once the view has settled.
     static constexpr int kZoomInhibitMs = 300;
