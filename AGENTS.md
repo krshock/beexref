@@ -32,6 +32,7 @@ ctest --preset linux-debug
 - Formatting: `.clang-format` (LLVM base, Allman braces, 4 spaces, 100 cols).
 - Adding a test target means editing `tests/CMakeLists.txt` (one
   `qt_add_executable` + `add_test` per suite).
+- Windows build requirements and steps: `docs/building-windows.md`.
 
 ## Hard rules
 
