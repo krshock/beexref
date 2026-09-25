@@ -6,11 +6,15 @@
 #include <QImage>
 #include <QMimeData>
 #include <QSignalSpy>
+#include <QTcpServer>
+#include <QTcpSocket>
 #include <QTemporaryDir>
+#include <QUrl>
 #include <QtTest>
 
 #include "cache/session_cache.h"
 #include "doc/document.h"
+#include "doc/image_export.h"
 #include "ui/drop.h"
 #include "ui/input_controller.h"
 #include "ui/scene.h"
@@ -41,6 +45,39 @@ QByteArray fileBytes(const QString &path)
     return file.readAll();
 }
 
+// Serves one canned response per connection, so a dropped URL can be
+// downloaded without a network (same helper as test_downloader).
+class TinyServer : public QTcpServer
+{
+public:
+    explicit TinyServer(QObject *parent = nullptr)
+        : QTcpServer(parent)
+    {
+        connect(this, &QTcpServer::newConnection, this, &TinyServer::serve);
+    }
+
+    QByteArray responseBody;
+
+private:
+    void serve()
+    {
+        QTcpSocket *socket = nextPendingConnection();
+        QByteArray request;
+        connect(socket, &QTcpSocket::readyRead, this, [this, socket, request]() mutable {
+            request += socket->readAll();
+            if (!request.contains("\r\n\r\n"))
+                return;
+            const QByteArray response = QByteArrayLiteral("HTTP/1.1 200 OK\r\n")
+                + QByteArrayLiteral("Content-Type: image/png\r\nContent-Length: ")
+                + QByteArray::number(responseBody.size())
+                + QByteArrayLiteral("\r\nConnection: close\r\n\r\n") + responseBody;
+            socket->write(response);
+            socket->flush();
+            socket->disconnectFromHost();
+        });
+    }
+};
+
 } // namespace
 
 class TestInput : public QObject
@@ -51,6 +88,7 @@ private slots:
     void dropsImageMimeData();
     void textDropIsRejectedButPasteInserts();
     void dropsFileUriKeepsOriginalBytes();
+    void dropsRemoteUrlKeepsTheExtractedName();
     void dropsExifFileBakesPng();
     void internalCopyPasteCreatesCopies();
     void pasteSystemClipboardText();
@@ -149,6 +187,48 @@ void TestInput::dropsFileUriKeepsOriginalBytes()
     QCOMPARE(item->filename, QStringLiteral("photo.png"));
     QCOMPARE(item->source->bytes(), bytes);
     QCOMPARE(item->originalSize(), QSize(5, 3));
+}
+
+void TestInput::dropsRemoteUrlKeepsTheExtractedName()
+{
+    TinyServer server;
+    QVERIFY(server.listen(QHostAddress::LocalHost));
+    server.responseBody = makePng(6, 4, Qt::green);
+
+    auto document = std::make_shared<doc::Document>(doc::Document::create());
+    ui::Scene scene;
+    scene.setDocument(document);
+    doc::UndoStack stack(document.get());
+    ui::InputController controller(&scene, &stack);
+    QSignalSpy inserted(&controller, &ui::InputController::itemsInserted);
+
+    // A browser drag: the URL's query holds dots, as Instagram's does.
+    const QString url = QStringLiteral(
+        "http://127.0.0.1:%1/v/t51/783947786_n.jpg"
+        "?stp=dst-jpg_e35&ig_cache_key=Mzk3%3D%3D.3-ccb7-5")
+        .arg(server.serverPort());
+    QMimeData mime;
+    mime.setUrls({QUrl(url)});
+    controller.insertMimeData(mime, QPointF(0, 0));
+
+    QTRY_COMPARE(inserted.count(), 1);
+    QCOMPARE(document->items().size(), 1);
+    const doc::ItemPtr item = document->items().first();
+    // The import applies the same rule as the images exporter.
+    QCOMPARE(item->filename, QStringLiteral("783947786_n.jpg"));
+    QCOMPARE(item->meta.value(QStringLiteral("origin_url")).toString(), url);
+    QCOMPARE(item->source->bytes(), server.responseBody);
+    QCOMPARE(doc::exportFilename(item->filename, item->format, 7),
+             QStringLiteral("0007-783947786_n.png"));
+
+    // No usable path segment: the filename stays empty and the export
+    // falls back to the item's id.
+    QMimeData bare;
+    bare.setUrls({QUrl(QStringLiteral("http://127.0.0.1:%1/").arg(server.serverPort()))});
+    controller.insertMimeData(bare, QPointF(0, 0));
+    QTRY_COMPARE(inserted.count(), 2);
+    QCOMPARE(document->items().size(), 2);
+    QVERIFY(document->items().at(1)->filename.isEmpty());
 }
 
 void TestInput::dropsExifFileBakesPng()

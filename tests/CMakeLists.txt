@@ -67,6 +67,11 @@ target_compile_definitions(test_image_io PRIVATE
 beexref_set_warnings(test_image_io)
 add_test(NAME image_io COMMAND test_image_io)
 
+qt_add_executable(test_image_export test_image_export.cpp)
+target_link_libraries(test_image_export PRIVATE beexref_core Qt6::Test)
+beexref_set_warnings(test_image_export)
+add_test(NAME image_export COMMAND test_image_export)
+
 qt_add_executable(test_drop test_drop.cpp)
 target_link_libraries(test_drop PRIVATE beexref_core Qt6::Test)
 beexref_set_warnings(test_drop)

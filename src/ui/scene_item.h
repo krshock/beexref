@@ -36,6 +36,10 @@ public:
     // The whole image in local coordinates.
     QRectF imageBounds() const;
 
+    // The text font (only meaningful for text items); scene export needs
+    // it to build the SVG styles.
+    const QFont &font() const { return font_; }
+
     // Crop mode (the reference's CropEditor): the item shows the whole
     // image with the editable rectangle on top; the model is untouched
     // until commitCrop().

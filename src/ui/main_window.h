@@ -1,6 +1,7 @@
 #pragma once
 
 #include "doc/undo.h"
+#include "doc/image_export.h"
 #include "level_loader.h"
 #include "scene.h"
 #include "view.h"
@@ -8,6 +9,7 @@
 #include <QColor>
 #include <QMainWindow>
 
+#include <functional>
 #include <memory>
 
 class QAction;
@@ -54,6 +56,20 @@ public:
     // returns false. The document's path and clean state are untouched.
     bool exportBeeTo(const QString &path);
 
+    // Renders the scene to path (the engine behind Export Scene; also
+    // used by tests). PNG/JPEG ask for a size first; SVG exports at the
+    // default size. Returns false on a cancelled dialog or a write
+    // failure.
+    bool exportSceneTo(const QString &path);
+
+    // Exports every pixmap item into dir (the engine behind Export
+    // Images; also used by tests). `resolve` answers file conflicts;
+    // pass an empty function to overwrite silently. Returns false when
+    // the user cancels a conflict prompt.
+    bool exportImagesTo(
+        const QString &dir,
+        const std::function<std::optional<doc::ExportConflict>(const QString &)> &resolve = {});
+
     View *view() const { return view_; }
     MetadataPanel *metadataPanel() const { return metadataPanel_; }
     WelcomeOverlay *welcomeOverlay() const { return welcomeOverlay_; }
@@ -75,6 +91,10 @@ private:
     // File ▸ Export ▸ Export BeeRef File (.bee): the legacy upstream
     // format, for interchange with BeeRef only.
     void exportBee();
+    // File ▸ Export ▸ Export Scene: the canvas as PNG/JPEG/SVG.
+    void exportScene();
+    // File ▸ Export ▸ Export Images: every image into a directory.
+    void exportImages();
     void updateTitle();
     // Applies an undo/redo step and brings the scene in line.
     void applyHistoryStep(bool undo);

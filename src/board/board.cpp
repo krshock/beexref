@@ -256,6 +256,23 @@ Result<QByteArray> Board::blob(qint64 itemId)
     return statement.value().columnBlob(0);
 }
 
+Result<QString> Board::blobFormat(qint64 itemId)
+{
+    auto statement = db_.prepare(QStringLiteral("SELECT name FROM sqlar WHERE item_id=?"));
+    if (!statement)
+        return statement.error();
+    if (Status status = statement.value().bind(1, itemId); !status)
+        return status.error();
+
+    auto row = statement.value().step();
+    if (!row)
+        return row.error();
+    if (!row.value())
+        return QString();
+    const QString name = statement.value().columnText(0);
+    return QFileInfo(name).suffix().toLower();
+}
+
 Result<QHash<qint64, QSize>> Board::originalSizes()
 {
     QHash<qint64, QSize> sizes;

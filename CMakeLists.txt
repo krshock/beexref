@@ -44,6 +44,8 @@ qt_add_library(beexref_core STATIC
     src/constants.h
     src/doc/document.cpp
     src/doc/document.h
+    src/doc/image_export.cpp
+    src/doc/image_export.h
     src/doc/image_io.cpp
     src/doc/image_io.h
     src/doc/item.cpp
@@ -69,6 +71,8 @@ qt_add_library(beexref_core STATIC
     src/ui/color_tools.cpp
     src/ui/color_tools.h
     src/ui/crop_tools.cpp
+    src/ui/export_conflict_dialog.cpp
+    src/ui/export_conflict_dialog.h
     src/ui/crop_tools.h
     src/ui/downloader.cpp
     src/ui/downloader.h
@@ -109,6 +113,10 @@ qt_add_library(beexref_core STATIC
     src/ui/main_window.h
     src/ui/scene.cpp
     src/ui/scene.h
+    src/ui/scene_export.cpp
+    src/ui/scene_export.h
+    src/ui/scene_export_dialog.cpp
+    src/ui/scene_export_dialog.h
     src/ui/scene_item.cpp
     src/ui/scene_item.h
     src/ui/rendering.cpp

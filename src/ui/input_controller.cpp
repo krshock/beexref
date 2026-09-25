@@ -7,6 +7,7 @@
 #include "drop.h"
 #include "logging.h"
 #include "scene.h"
+#include "util/format.h"
 
 #include <QApplication>
 #include <QBuffer>
@@ -140,7 +141,12 @@ void InputController::insertLoaded(const doc::LoadedImage &loaded, const QPointF
     if (!loaded.source.isEmpty()) {
         const QUrl url(loaded.source);
         if (url.isValid() && isRemote(url)) {
-            item->filename = url.fileName();
+            // The same rule as the images exporter, so a browser drop
+            // keeps its name through save and export: decoded last path
+            // segment, query gone, sanitized, capped. An empty result
+            // leaves the filename unset; the export falls back to the
+            // item's id.
+            item->filename = util::filenameFromUrl(url);
             item->meta.insert(QStringLiteral("origin_url"), loaded.source);
         } else {
             item->filename = QFileInfo(loaded.source).fileName();

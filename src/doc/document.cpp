@@ -121,6 +121,10 @@ board::Result<Document> Document::open(const QString &path, const QString &tempD
         if (item->isPixmap()) {
             item->filename = item->data.value(QStringLiteral("filename")).toString();
             item->source = std::make_shared<BoardSource>(board, item->id);
+            // The true encoded format comes from the sqlar name, not the
+            // thumbnail: a JPEG original may have a PNG floor.
+            if (auto format = board->blobFormat(item->id); format.isOk() && !format.value().isEmpty())
+                item->format = format.value();
             if (sizes.isOk() && sizes.value().contains(item->id)) {
                 item->setOriginalSize(sizes.value().value(item->id));
             } else if (auto blob = board->blob(item->id); blob.isOk()) {

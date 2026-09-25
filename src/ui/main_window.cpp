@@ -16,6 +16,11 @@
 #include "logging.h"
 #include "opacity_dialog.h"
 #include "rendering.h"
+#include "export_conflict_dialog.h"
+#include "scene_export.h"
+#include "scene_export_dialog.h"
+#include "theme.h"
+#include "doc/image_export.h"
 #include "selection_ops.h"
 #include "welcome_overlay.h"
 #include "controls.h"
@@ -38,6 +43,7 @@
 #include <QCursor>
 #include <QFileDialog>
 #include <QFileInfo>
+#include <QFile>
 #include <QImageReader>
 #include <QMenuBar>
 #include <QMessageBox>
@@ -69,6 +75,24 @@ LodSettings loadLodSettings()
         settings::valueOrDefault(file, QStringLiteral("Items/lod_cache_settle_percent")).toInt();
     lod.quality = settings::valueOrDefault(file, QStringLiteral("Items/lod_quality")).toString();
     return normalized(lod);
+}
+
+// The reference's get_file_extension_from_format(): the first extension
+// of the selected filter, e.g. 'JPEG (*.jpg *.jpeg)' yields 'jpg'.
+QString extensionFromFilter(const QString &filter)
+{
+    const int open = filter.indexOf(QLatin1Char('('));
+    const int close = filter.lastIndexOf(QLatin1Char(')'));
+    if (open < 0 || close <= open)
+        return QStringLiteral("png");
+    const QStringList parts =
+        filter.mid(open + 1, close - open - 1).split(QLatin1Char(' '), Qt::SkipEmptyParts);
+    if (parts.isEmpty())
+        return QStringLiteral("png");
+    QString extension = parts.first();
+    if (extension.startsWith(QStringLiteral("*.")))
+        extension.remove(0, 2);
+    return extension.toLower();
 }
 
 } // namespace
@@ -352,7 +376,7 @@ bool MainWindow::exportBeeTo(const QString &path)
         logging::error(QStringLiteral("Cannot export file"),
                        {{QStringLiteral("file"), filename},
                         {QStringLiteral("error"), status.error().toString()}});
-        QMessageBox::warning(this, QStringLiteral("Problem exporting file"),
+        QMessageBox::warning(this, QStringLiteral("Problem writing file"),
                              status.error().toString());
         return false;
     }
@@ -360,6 +384,137 @@ bool MainWindow::exportBeeTo(const QString &path)
                   {{QStringLiteral("file"), filename},
                    {QStringLiteral("items"), document_->items().size()}});
     return true;
+}
+
+void MainWindow::exportScene()
+{
+    view_->cancelCrop();
+    view_->cancelSampleColor();
+    const QString path = document_ ? document_->path() : QString();
+    const QString startDir =
+        path.isEmpty() ? settings::configDir() : QFileInfo(path).absolutePath();
+    QFileDialog dialog(this, QStringLiteral("Export Scene to Image"), startDir,
+                       QStringLiteral("Image Files (*.png *.jpg *.jpeg *.svg);;PNG (*.png);;"
+                                      "JPEG (*.jpg *.jpeg);;SVG (*.svg)"));
+    dialog.setAcceptMode(QFileDialog::AcceptSave);
+    if (dialog.exec() != QDialog::Accepted || dialog.selectedFiles().isEmpty())
+        return;
+    QString filename = dialog.selectedFiles().first();
+    // Without a suffix the selected filter decides (the reference's
+    // get_file_extension_from_format); only then does the pixmap default
+    // (PNG, in exportSceneTo) apply.
+    if (QFileInfo(filename).suffix().isEmpty())
+        filename += QLatin1Char('.') + extensionFromFilter(dialog.selectedNameFilter());
+    exportSceneTo(filename);
+}
+
+bool MainWindow::exportSceneTo(const QString &path)
+{
+    if (!scene_)
+        return false;
+
+    QString filename = path;
+    QString ext = QFileInfo(filename).suffix().toLower();
+    if (ext.isEmpty()) {
+        // The reference's default is the pixmap exporter.
+        ext = QStringLiteral("png");
+        filename += QStringLiteral(".png");
+    }
+
+    // Selection outlines and handles would be rendered into the output,
+    // so the scene is deselected first (as the reference does).
+    scene_->clearSelection();
+
+    SceneExportFrame frame = sceneExportFrame(*scene_);
+
+    if (ext == QLatin1String("svg")) {
+        const QByteArray svg = renderSceneToSvg(*scene_, frame);
+        QFile file(filename);
+        if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+            QMessageBox::warning(this, QStringLiteral("Problem writing file"), file.errorString());
+            return false;
+        }
+        file.write(svg);
+        file.close();
+    } else {
+        SceneExportDialog dialog(frame.defaultSize, this);
+        if (dialog.exec() != QDialog::Accepted)
+            return false;
+        const QImage image =
+            renderSceneToImage(*scene_, frame, dialog.value(), theme::canvas);
+        if (!image.save(filename, nullptr, kSceneExportQuality)) {
+            QMessageBox::warning(this, QStringLiteral("Problem writing file"),
+                                 QStringLiteral("Error writing file"));
+            return false;
+        }
+    }
+
+    logging::info(QStringLiteral("Scene exported"),
+                  {{QStringLiteral("file"), filename},
+                   {QStringLiteral("format"), ext}});
+    return true;
+}
+
+void MainWindow::exportImages()
+{
+    view_->cancelCrop();
+    view_->cancelSampleColor();
+    const QString path = document_ ? document_->path() : QString();
+    const QString startDir =
+        path.isEmpty() ? settings::configDir() : QFileInfo(path).absolutePath();
+    const QString dir = QFileDialog::getExistingDirectory(
+        this, QStringLiteral("Export Images"), startDir);
+    if (dir.isEmpty())
+        return;
+
+    exportImagesTo(dir, [this](const QString &target) -> std::optional<doc::ExportConflict> {
+        ExportConflictDialog dialog(target, this);
+        if (dialog.exec() != QDialog::Accepted)
+            return std::nullopt; // Cancel aborts the whole export.
+        return dialog.answer();
+    });
+}
+
+bool MainWindow::exportImagesTo(
+    const QString &dir,
+    const std::function<std::optional<doc::ExportConflict>(const QString &)> &resolve)
+{
+    if (!document_)
+        return false;
+
+    QProgressDialog progress(QStringLiteral("Exporting to %1").arg(dir),
+                             QStringLiteral("Cancel"), 0, 100, this);
+    progress.setWindowModality(Qt::WindowModal);
+    progress.setMinimumDuration(300);
+
+    const doc::ImageExportSummary summary = doc::exportImages(
+        document_->items(), dir, resolve,
+        [&progress](int done, int total) {
+            if (total <= 0)
+                return;
+            progress.setMaximum(total);
+            progress.setValue(done);
+            QCoreApplication::processEvents();
+        },
+        [&progress]() { return progress.wasCanceled(); });
+    progress.close();
+
+    if (!summary.errors.isEmpty()) {
+        logging::error(QStringLiteral("Cannot export images"),
+                       {{QStringLiteral("dir"), dir},
+                        {QStringLiteral("errors"), summary.errors.join(QStringLiteral("; "))}});
+        QMessageBox::warning(this, QStringLiteral("Problem writing file"),
+                             QStringLiteral("<p>Problem writing files in %1</p><p>%2</p>")
+                                 .arg(dir, summary.errors.join(QStringLiteral("</p><p>"))));
+        return false;
+    }
+
+    logging::info(QStringLiteral("Images exported"),
+                  {{QStringLiteral("dir"), dir},
+                   {QStringLiteral("written"), summary.written},
+                   {QStringLiteral("skipped"), summary.skipped},
+                   {QStringLiteral("cancelled"), summary.cancelled}});
+    return !summary.cancelled;
 }
 
 bool MainWindow::saveDocumentTo(const QString &path, bool createNew)
@@ -888,6 +1043,13 @@ void MainWindow::buildActions()
     actions_->add(QStringLiteral("export_bee"),
                   QStringLiteral("Export BeeRef File (.bee)"), {}, G::ItemsInScene,
                   [this](bool) { exportBee(); });
+    actions_->add(QStringLiteral("export_scene"),
+                  QStringLiteral("E&xport Scene..."),
+                  QKeySequence(QStringLiteral("Ctrl+Shift+E")), G::ItemsInScene,
+                  [this](bool) { exportScene(); });
+    actions_->add(QStringLiteral("export_images"),
+                  QStringLiteral("Export &Images..."), {}, G::ItemsInScene,
+                  [this](bool) { exportImages(); });
     actions_->add(QStringLiteral("quit"), QStringLiteral("&Quit"), QKeySequence::Quit, G::Always,
                   [this](bool) { close(); });
 
@@ -1124,6 +1286,8 @@ void MainWindow::buildMenus()
     actions_->append(fileMenu, QStringLiteral("save_as"));
     auto *exportMenu = fileMenu->addMenu(QStringLiteral("&Export"));
     actions_->append(exportMenu, QStringLiteral("export_bee"));
+    actions_->append(exportMenu, QStringLiteral("export_scene"));
+    actions_->append(exportMenu, QStringLiteral("export_images"));
     actions_->appendSeparator(fileMenu);
     actions_->append(fileMenu, QStringLiteral("quit"));
 

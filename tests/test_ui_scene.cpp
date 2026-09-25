@@ -5,6 +5,7 @@
 #include <QImage>
 #include <QMimeData>
 #include <QDialog>
+#include <QDir>
 #include <QDialogButtonBox>
 #include <QLabel>
 #include <QMenuBar>
@@ -57,6 +58,8 @@
 #include "ui/rendering.h"
 #include "ui/selection_ops.h"
 #include "ui/scene.h"
+#include "ui/scene_export.h"
+#include "ui/scene_export_dialog.h"
 #include "ui/scene_item.h"
 #include "ui/theme.h"
 #include "ui/view.h"
@@ -203,6 +206,10 @@ private slots:
     void newSceneClearsTheBoard();
     void windowSavesToFile();
     void windowExportsLegacyBee();
+    void exportsSceneFrameAndPng();
+    void exportsSceneSvgTree();
+    void windowExportsSceneSvg();
+    void windowExportsImagesToDirectory();
     void closeHonoursTheUnsavedSetting();
     void selectingAnImageSchedulesLod();
     void hudToastsAppearAndExpire();
@@ -1752,6 +1759,126 @@ void TestUiScene::windowExportsLegacyBee()
     auto reopened = doc::Document::open(path, dir.filePath(QStringLiteral("cache")));
     QVERIFY(reopened.isOk());
     QCOMPARE(reopened.value().items().size(), 1);
+
+    settings::setSettingsDir(QString());
+}
+
+void TestUiScene::exportsSceneFrameAndPng()
+{
+    auto document = std::make_shared<doc::Document>(doc::Document::create());
+    const doc::ItemPtr item = pixmapItem(300, 200, Qt::red);
+    item->floorData = makePng(300, 200, Qt::red);
+    item->floorFraction = 1.0;
+    item->floorFormat = QStringLiteral("png");
+    item->x = 10;
+    item->y = 20;
+    document->addItem(item);
+
+    ui::Scene scene;
+    scene.setDocument(document);
+
+    const ui::SceneExportFrame frame = ui::sceneExportFrame(scene);
+    QCOMPARE(frame.rect, QRectF(10, 20, 300, 200));
+    // 3 % of the longer side (300) is 9 px.
+    QCOMPARE(frame.margin, 9.0);
+    QCOMPARE(frame.defaultSize, QSize(318, 218));
+
+    const QImage image = ui::renderSceneToImage(scene, frame, QSize(159, 109), ui::theme::canvas);
+    QCOMPARE(image.size(), QSize(159, 109));
+    QCOMPARE(image.pixelColor(0, 0), ui::theme::canvas);
+    // The item is red, and the margin is proportional to the size.
+    QCOMPARE(image.pixelColor(79, 54).red(), 255);
+}
+
+void TestUiScene::exportsSceneSvgTree()
+{
+    auto document = std::make_shared<doc::Document>(doc::Document::create());
+    const doc::ItemPtr image = pixmapItem(300, 200, Qt::red);
+    image->x = 10;
+    image->y = 20;
+    image->z = 0;
+    document->addItem(image);
+
+    const doc::ItemPtr note = textItem(QStringLiteral("hello"));
+    note->x = 0;
+    note->y = 0;
+    note->z = 1;
+    document->addItem(note);
+
+    ui::Scene scene;
+    scene.setDocument(document);
+
+    const QByteArray svg = ui::renderSceneToSvg(scene, ui::sceneExportFrame(scene));
+    QVERIFY(!svg.isEmpty());
+
+    const QString text = QString::fromUtf8(svg);
+    QVERIFY(text.contains(QStringLiteral("<svg")));
+    QVERIFY(text.contains(QStringLiteral("xmlns:xlink")));
+    QVERIFY(text.contains(QStringLiteral("data:image/png;base64,")));
+    QVERIFY(text.contains(QStringLiteral("<text")));
+    QVERIFY(text.contains(QStringLiteral(">hello</text>")));
+    // The text element carries the reference's hanging baseline and the
+    // pixmap is sized to the full image.
+    QVERIFY(text.contains(QStringLiteral("dominant-baseline=\"hanging\"")));
+    QVERIFY(text.contains(QStringLiteral("width=\"300\"")));
+    QVERIFY(text.contains(QStringLiteral("height=\"200\"")));
+    // Elements are ordered by z: the pixmap before the text.
+    QVERIFY(text.indexOf(QStringLiteral("<image")) < text.indexOf(QStringLiteral("<text")));
+}
+
+void TestUiScene::windowExportsSceneSvg()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    settings::setSettingsDir(dir.path());
+
+    ui::MainWindow window;
+    QImage image(40, 30, QImage::Format_ARGB32);
+    image.fill(Qt::green);
+    QMimeData mime;
+    mime.setImageData(image);
+    window.input()->insertMimeData(mime, QPointF(0, 0));
+
+    QAction *action = actionByText(window, QStringLiteral("E&xport Scene..."));
+    QVERIFY(action);
+    QVERIFY(action->isEnabled());
+
+    // The SVG branch writes directly, without the size dialog.
+    const QString svgPath = dir.filePath(QStringLiteral("scene.svg"));
+    QVERIFY(window.exportSceneTo(svgPath));
+    QVERIFY(QFile::exists(svgPath));
+    QFile svg(svgPath);
+    QVERIFY(svg.open(QIODevice::ReadOnly));
+    QVERIFY(svg.readAll().contains("<svg"));
+
+    settings::setSettingsDir(QString());
+}
+
+void TestUiScene::windowExportsImagesToDirectory()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    settings::setSettingsDir(dir.path());
+
+    ui::MainWindow window;
+    QImage image(32, 24, QImage::Format_ARGB32);
+    image.fill(Qt::magenta);
+    QMimeData mime;
+    mime.setImageData(image);
+    window.input()->insertMimeData(mime, QPointF(0, 0));
+    QCOMPARE(window.scene()->pixmapItemViews().size(), 1);
+
+    QAction *action = actionByText(window, QStringLiteral("Export &Images..."));
+    QVERIFY(action);
+    QVERIFY(action->isEnabled());
+
+    const QString outDir = dir.filePath(QStringLiteral("images"));
+    QVERIFY(QDir().mkpath(outDir));
+    QVERIFY(window.exportImagesTo(outDir));
+
+    const QStringList files = QDir(outDir).entryList(QDir::Files);
+    QCOMPARE(files.size(), 1);
+    QVERIFY(files.first().endsWith(QStringLiteral(".png")));
 
     settings::setSettingsDir(QString());
 }

@@ -77,6 +77,9 @@ public:
 
     Result<QVector<ItemRow>> items();
     Result<QByteArray> blob(qint64 itemId);
+    // The encoded blob's format, from the sqlar name's extension. Empty
+    // when the item has no blob.
+    Result<QString> blobFormat(qint64 itemId);
     Result<QHash<qint64, QSize>> originalSizes();
     Result<QHash<qint64, FloorLevel>> floorLevels();
     Result<QHash<QString, qint64>> counts();

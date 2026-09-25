@@ -46,6 +46,7 @@ class TestDocument : public QObject
 
 private slots:
     void savesAndReopensEveryField();
+    void reopenReadsTheBlobFormat();
     void reusesSavedFloors();
     void reportsProgress();
     void textItemRoundTrip();
@@ -106,6 +107,37 @@ void TestDocument::savesAndReopensEveryField()
     QVERIFY(again.isOk());
     QCOMPARE(again.value().items().first()->data.value(QStringLiteral("filename")).toString(),
              QStringLiteral("x.png"));
+}
+
+void TestDocument::reopenReadsTheBlobFormat()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString path = dir.filePath(QStringLiteral("doc.beex"));
+
+    QImage image(8, 6, QImage::Format_ARGB32);
+    image.fill(Qt::red);
+    QByteArray jpeg;
+    QBuffer buffer(&jpeg);
+    buffer.open(QIODevice::WriteOnly);
+    QVERIFY(image.save(&buffer, "JPEG"));
+
+    auto document = doc::Document::create();
+    auto item = std::make_shared<doc::Item>(doc::kTypePixmap);
+    item->filename = QStringLiteral("photo.jpg");
+    item->data.insert(QStringLiteral("filename"), QStringLiteral("photo.jpg"));
+    item->format = QStringLiteral("jpg");
+    item->source = std::make_shared<doc::BytesSource>(jpeg);
+    item->setOriginalSize(QSize(8, 6));
+    document.addItem(item);
+    QVERIFY(document.save(path).isOk());
+
+    auto reopened = doc::Document::open(path, dir.filePath(QStringLiteral("cache")));
+    QVERIFY(reopened.isOk());
+    QCOMPARE(reopened.value().items().size(), 1);
+    // The format comes from the sqlar name, so a JPEG original is not
+    // mistaken for its saved (PNG) floor.
+    QCOMPARE(reopened.value().items().first()->format, QStringLiteral("jpg"));
 }
 
 void TestDocument::reusesSavedFloors()
