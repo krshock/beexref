@@ -286,14 +286,40 @@ public:
             snapshot(QStringLiteral("15-crop-undone"));
 
             // E4: normalize and arrange the three topmost items through
-            // the menu actions, then undo both.
-            QVector<ui::SceneItem *> picked;
+            // the menu actions, then undo both. A run without a board
+            // starts with only the pasted item, and both actions ignore
+            // a selection of fewer than two items (so their undos would
+            // pop earlier commands); top the board up first.
+            {
+                const int needed = 3 - window_.scene()->pixmapItemViews().size();
+                for (int i = 0; i < needed; ++i) {
+                    const QSize size = i % 2 == 0 ? QSize(360, 240) : QSize(240, 420);
+                    QImage filler(size, QImage::Format_ARGB32);
+                    filler.fill(i % 2 == 0 ? QColor(Qt::cyan) : QColor(Qt::yellow));
+                    QApplication::clipboard()->setImage(filler);
+                    QTest::keyClick(&window_, Qt::Key_V, Qt::ControlModifier);
+                    QTest::qWait(900);
+                }
+            }
+
             const QVector<ui::SceneItem *> all = window_.scene()->pixmapItemViews();
+            // Document items outlive their views (the undo stack keeps
+            // them), so they stay safe to hold across the undos below;
+            // the views are looked up fresh each time.
+            QVector<doc::ItemPtr> picked;
             for (int i = 0; i < 3 && i < all.size(); ++i)
-                picked.append(all.at(i));
+                picked.append(all.at(i)->item());
+            auto pickedViews = [&]() {
+                QVector<ui::SceneItem *> views;
+                for (const doc::ItemPtr &item : picked)
+                    views.append(window_.scene()->itemViewFor(item));
+                return views;
+            };
             window_.scene()->clearSelection();
-            for (ui::SceneItem *view : picked)
-                view->setSelected(true);
+            for (ui::SceneItem *view : pickedViews()) {
+                if (view)
+                    view->setSelected(true);
+            }
 
             QAction *normalizeHeight = nullptr;
             QAction *arrangeHorizontal = nullptr;
@@ -306,7 +332,11 @@ public:
             }
             auto layoutBoxes = [&]() {
                 QStringList out;
-                for (ui::SceneItem *view : picked) {
+                for (ui::SceneItem *view : pickedViews()) {
+                    if (!view) {
+                        out << QStringLiteral("<gone>");
+                        continue;
+                    }
                     const QRectF box = view->sceneBoundingRect();
                     out << QStringLiteral("%1,%2 %3x%4")
                                .arg(box.x(), 0, 'f', 1)
@@ -334,12 +364,15 @@ public:
             out() << "layout undone: " << layoutBoxes() << "\n";
             out() << "layout restored: " << (layoutBoxes() == layoutBefore) << "\n";
 
-            // Reset All on three items must be a single undo step: set
-            // up transforms without history, reset through the menu,
+            // Reset All on the picked items must be a single undo step:
+            // set up transforms without history, reset through the menu,
             // then one Ctrl+Z must bring all of them back.
-            for (int i = 0; i < picked.size(); ++i) {
-                picked.at(i)->item()->rotation = 20.0 * (i + 1);
-                picked.at(i)->item()->scale = 1.5;
+            const QVector<ui::SceneItem *> resetViews = pickedViews();
+            for (int i = 0; i < resetViews.size(); ++i) {
+                if (!resetViews.at(i))
+                    continue;
+                resetViews.at(i)->item()->rotation = 20.0 * (i + 1);
+                resetViews.at(i)->item()->scale = 1.5;
             }
             window_.scene()->syncDocument();
             QTest::qWait(200);
@@ -398,40 +431,44 @@ public:
                   << ", mode ended: " << !window_.view()->samplingColor() << "\n";
             snapshot(QStringLiteral("26-sampled"));
 
-            // E5: the colour gamut wheel for a real photo item (the
-            // pasted one is a flat colour); the histogram is counted off
-            // the GUI thread and the action needs a single image
-            // selection.
+            // E5: the colour gamut wheel for a second item (on a board
+            // this is a real photo; the pasted ones are flat colours);
+            // the histogram is counted off the GUI thread and the action
+            // needs a single image selection.
             window_.scene()->clearSelection();
-            ui::SceneItem *photo = all.at(1);
-            photo->setSelected(true);
-            QTest::qWait(200);
-            out() << "gamut action enabled: " << showGamut->isEnabled() << "\n";
-            showGamut->trigger();
-            QTest::qWait(1500);
-            for (QWidget *widget : QApplication::topLevelWidgets()) {
-                if (widget->windowTitle() != QStringLiteral("Color Gamut"))
-                    continue;
-                const QString path = outputDir_ + QStringLiteral("/27-color-gamut.png");
-                widget->grab().save(path);
-                out() << "gamut dialog " << widget->width() << "x" << widget->height() << " -> "
-                      << path << "\n";
+            ui::SceneItem *photo = all.value(1);
+            if (!photo) {
+                out() << "gamut skipped: fewer than two items\n";
+            } else {
+                photo->setSelected(true);
+                QTest::qWait(200);
+                out() << "gamut action enabled: " << showGamut->isEnabled() << "\n";
+                showGamut->trigger();
+                QTest::qWait(1500);
+                for (QWidget *widget : QApplication::topLevelWidgets()) {
+                    if (widget->windowTitle() != QStringLiteral("Color Gamut"))
+                        continue;
+                    const QString path = outputDir_ + QStringLiteral("/27-color-gamut.png");
+                    widget->grab().save(path);
+                    out() << "gamut dialog " << widget->width() << "x" << widget->height() << " -> "
+                          << path << "\n";
 
-                // The wheel must follow the slider continuously: each
-                // step changes how many buckets pass the threshold.
-                QSlider *slider = widget->findChild<QSlider *>();
-                ui::GamutPlot *plot = widget->findChild<ui::GamutPlot *>();
-                QStringList steps;
-                if (slider && plot) {
-                    for (int value : {20, 100, 300, 500}) {
-                        slider->setValue(value);
-                        QTest::qWait(150);
-                        steps << QStringLiteral("%1:%2").arg(value).arg(plot->visibleDots());
+                    // The wheel must follow the slider continuously: each
+                    // step changes how many buckets pass the threshold.
+                    QSlider *slider = widget->findChild<QSlider *>();
+                    ui::GamutPlot *plot = widget->findChild<ui::GamutPlot *>();
+                    QStringList steps;
+                    if (slider && plot) {
+                        for (int value : {20, 100, 300, 500}) {
+                            slider->setValue(value);
+                            QTest::qWait(150);
+                            steps << QStringLiteral("%1:%2").arg(value).arg(plot->visibleDots());
+                        }
                     }
+                    out() << "gamut dots per threshold (value:dots): "
+                          << steps.join(QStringLiteral(" ")) << "\n";
+                    widget->close();
                 }
-                out() << "gamut dots per threshold (value:dots): " << steps.join(QStringLiteral(" "))
-                      << "\n";
-                widget->close();
             }
 
             // Chrome: the registry's selection actions on the whole
@@ -578,12 +615,23 @@ public:
                 candidate->close();
             }
 
-            // Image Info needs one selected image.
+            // Image Info needs one selected image. The copied settings
+            // may carry View/panel_keep=true, which leaves the panel
+            // open on its own; close it first so the shortcut's effect
+            // is observable either way.
             window_.scene()->clearSelection();
             ui::SceneItem *infoItem = window_.scene()->pixmapItemViews().value(0);
             if (infoItem) {
                 infoItem->setSelected(true);
                 QTest::qWait(200);
+                ui::MetadataPanel *panel = window_.metadataPanel();
+                const bool wasOpen = panel && !panel->isHidden();
+                if (wasOpen) {
+                    actionByText(QStringLiteral("Edit Image &Metadata"))->trigger();
+                    QTest::qWait(300);
+                }
+                out() << "metadata panel kept open by settings: " << wasOpen << "\n";
+
                 // Through the real shortcut, not trigger(), so a dead
                 // key binding would show up here.
                 window_.activateWindow();
@@ -591,13 +639,10 @@ public:
                 QTest::keyClick(&window_, Qt::Key_I);
                 QTest::qWait(500);
                 out() << "metadata panel via I: "
-                      << (window_.metadataPanel()
-                          && window_.metadataPanel()->item() != nullptr)
-                      << "\n";
+                      << (panel && !panel->isHidden() && panel->item() == infoItem) << "\n";
                 snapshot(QStringLiteral("36-metadata-panel"));
                 QTest::keyClick(&window_, Qt::Key_I);
                 QTest::qWait(300);
-
             }
         }
 
@@ -641,6 +686,24 @@ public:
             const bool exported = window_.exportBeeTo(beePath);
             out() << "exported=" << exported << " path=" << beePath
                   << " bytes=" << QFileInfo(beePath).size() << "\n";
+        }
+
+        // Export the scene as SVG, which skips the size dialog.
+        {
+            const QString svgPath = outputDir_ + QStringLiteral("/scene.svg");
+            const bool exported = window_.exportSceneTo(svgPath);
+            out() << "scene_svg=" << exported << " path=" << svgPath
+                  << " bytes=" << QFileInfo(svgPath).size() << "\n";
+        }
+
+        // Export every image into a directory.
+        {
+            const QString imagesDir = outputDir_ + QStringLiteral("/images");
+            QDir().mkpath(imagesDir);
+            const bool exported = window_.exportImagesTo(imagesDir);
+            const QStringList files = QDir(imagesDir).entryList(QDir::Files);
+            out() << "export_images=" << exported << " dir=" << imagesDir
+                  << " files=" << files.size() << "\n";
         }
 
         const ui::LodManager::Stats stats = view->lodManager()->stats();
