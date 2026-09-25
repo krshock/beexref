@@ -3,6 +3,7 @@
 #include <QLineF>
 
 #include <cmath>
+#include <numbers>
 
 namespace ui::selection {
 namespace {
@@ -150,7 +151,9 @@ double scaleFactor(const QRectF &bounds, const QPointF &pressScene, const QPoint
 double rotationAngle(const QPointF &anchorScene, const QPointF &scenePos)
 {
     const QPointF diff = scenePos - anchorScene;
-    return -std::atan2(diff.x(), diff.y()) * 180.0 / M_PI;
+    // std::numbers::pi, not M_PI: the latter is a POSIX extension that
+    // MinGW and MSVC do not define without _USE_MATH_DEFINES.
+    return -std::atan2(diff.x(), diff.y()) * 180.0 / std::numbers::pi;
 }
 
 double snapAngle(double angle, double step)

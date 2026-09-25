@@ -1,7 +1,7 @@
 #!/bin/sh
 # Fetches the pinned SQLite amalgamation into third_party/sqlite3.
-# A version bump is deliberate: update VERSION, this script's variables
-# and the hashes, then re-run the board round-trip tests.
+# A version bump is deliberate: update VERSION.txt, this script's
+# variables and the hashes, then re-run the board round-trip tests.
 set -eu
 
 VERSION="3.53.4"

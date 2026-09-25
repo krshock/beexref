@@ -19,6 +19,11 @@
 #include <utility>
 
 #if defined(Q_OS_WIN)
+// This file uses std::max below; without NOMINMAX the windows.h macros
+// would rewrite it.
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
 #include <windows.h>
 #endif
 

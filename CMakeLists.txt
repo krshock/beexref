@@ -30,6 +30,9 @@ qt_standard_project_setup()
 # Vendored SQLite amalgamation. The flags match the behavior of the
 # sqlite3 builds the Python and Go ports use.
 add_library(beexref_sqlite3 STATIC third_party/sqlite3/sqlite3.c)
+# The directory is on the include path, so it must never contain a file
+# named "version": Windows' case-insensitive filesystem would let it
+# shadow C++'s <version> header. The provenance lives in VERSION.txt.
 target_include_directories(beexref_sqlite3 SYSTEM PUBLIC third_party/sqlite3)
 target_compile_definitions(beexref_sqlite3 PRIVATE
     SQLITE_THREADSAFE=1
