@@ -600,6 +600,38 @@ public:
                 out() << "context menu: " << topLevel.join(QStringLiteral(" | ")) << "\n";
             }
 
+            // Peek on Top: a view-only raise that Esc clears. The
+            // bottom-most item, so the screenshot shows the raise.
+            {
+                window_.scene()->clearSelection();
+                ui::SceneItem *peeked = window_.scene()->pixmapItemViews().value(
+                    window_.scene()->pixmapItemViews().size() - 1);
+                if (peeked) {
+                    peeked->setSelected(true);
+                    actionByText(QStringLiteral("Peek on &Top"))->trigger();
+                    QTest::qWait(300);
+                    out() << "peek on top: " << window_.view()->hasPeek() << "\n";
+                    snapshot(QStringLiteral("38-peek"));
+                    // A click follows the drawn order: the peeked item
+                    // takes it although it is configured below.
+                    const QPoint peekCentre =
+                        view->mapFromScene(peeked->sceneBoundingRect().center());
+                    sendMouse(viewport, QEvent::MouseButtonPress, peekCentre, Qt::LeftButton,
+                              Qt::LeftButton);
+                    sendMouse(viewport, QEvent::MouseButtonRelease, peekCentre, Qt::LeftButton,
+                              Qt::NoButton);
+                    const QVector<ui::SceneItem *> chosen = window_.scene()->selectedItemViews();
+                    const QSize chosenSize =
+                        chosen.size() == 1 ? chosen.first()->item()->originalSize() : QSize();
+                    out() << "peek click selects " << chosenSize.width() << "x"
+                          << chosenSize.height() << "\n";
+                    QTest::keyClick(view, Qt::Key_Escape);
+                    QTest::qWait(300);
+                    out() << "peek cleared: " << !window_.view()->hasPeek() << "\n";
+                    snapshot(QStringLiteral("39-peek-cleared"));
+                }
+            }
+
             // Part 3: window toggles and the info dialogs.
             actionByText(QStringLiteral("Show &Scrollbars"))->trigger();
             QTest::qWait(300);

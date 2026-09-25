@@ -82,6 +82,15 @@ public:
     void fitScene();
     void fitSelection();
 
+    // Peek: a view-only raise. The selected items are painted above
+    // everything in the foreground pass, without touching their
+    // configured z or the document. togglePeek() peeks the selection,
+    // or clears when the selection is already the peek; clearPeek()
+    // ends it (Esc). Deleted items drop out and a new board clears it.
+    void togglePeek();
+    void clearPeek();
+    bool hasPeek() const { return !peeked_.isEmpty(); }
+
     // delta is a wheel angleDelta step; anchor is in viewport pixels.
     void zoomAt(int delta, const QPoint &anchor);
 
@@ -154,6 +163,13 @@ private:
     void finishTransformGesture();
     void updateHoverCursor(const QPoint &viewportPos);
 
+    // Peek state: the view-only raised items.
+    void setPeek(const QVector<SceneItem *> &items);
+    void drawPeeks(QPainter *painter) const;
+    // The item under a viewport point in the order it is drawn: peeked
+    // items first (topmost of them), then Qt's configured order.
+    SceneItem *itemAtPoint(const QPoint &viewportPos) const;
+
     // Crop session (the reference's CropEditor, driven by the view).
     void confirmCrop();
     void finishCropSession(bool changed);
@@ -192,6 +208,11 @@ private:
 
     // Last region the selection overlay was known to occupy.
     QRectF overlayRegion_;
+
+    // The view-only raised items (peek), in ascending stacking order:
+    // exactly the order the foreground pass draws them in. Never part
+    // of the document.
+    QVector<SceneItem *> peeked_;
 
     // Sample colour mode.
     bool sampling_ = false;

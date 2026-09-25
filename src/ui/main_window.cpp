@@ -1122,6 +1122,11 @@ void MainWindow::buildActions()
     actions_->add(QStringLiteral("lower_to_bottom"), QStringLiteral("Lower to Bottom"),
                   QKeySequence(Qt::Key_PageDown), G::Selection,
                   [this](bool) { lowerSelectionToBottom(); });
+    // A view-only raise: the selected items paint above everything
+    // without their configured z changing (Esc clears it).
+    actions_->add(QStringLiteral("peek_on_top"), QStringLiteral("Peek on &Top"),
+                  QKeySequence(QStringLiteral("T")), G::Selection,
+                  [this](bool) { view_->togglePeek(); });
 
     // View.
     actions_->add(QStringLiteral("fit_scene"), QStringLiteral("&Fit Scene"),
@@ -1353,6 +1358,7 @@ void MainWindow::buildMenus()
     actions_->appendSeparator(editMenu);
     actions_->append(editMenu, QStringLiteral("raise_to_top"));
     actions_->append(editMenu, QStringLiteral("lower_to_bottom"));
+    actions_->append(editMenu, QStringLiteral("peek_on_top"));
 
     // View: the window and scrollbar toggles arrive with the window
     // slice.

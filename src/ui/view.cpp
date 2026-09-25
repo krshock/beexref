@@ -70,18 +70,21 @@ void View::setBoardScene(Scene *scene)
     if (boardScene_) {
         disconnect(boardScene_, nullptr, this, nullptr);
     }
+    // The peek belongs to the old board's views.
+    peeked_.clear();
     boardScene_ = scene;
     if (boardScene_) {
         // Drop scheduler state for a view before the scene deletes it,
         // so an in-flight decode can never touch freed memory.
         connect(boardScene_, &Scene::itemViewAboutToBeRemoved, this,
                 [this](SceneItem *view) {
-                    // Never keep a crop session pointing at a view the
-                    // scene is about to delete.
+                    // Never keep a crop session or a peek pointing at a
+                    // view the scene is about to delete.
                     if (view == cropItem_) {
                         cropItem_ = nullptr;
                         cropDrag_ = crop::Part::None;
                     }
+                    peeked_.removeAll(view);
                     lod_->forgetItem(view);
                 });
         // New or removed items change the scrollable area.
@@ -100,6 +103,7 @@ void View::setBoardScene(Scene *scene)
         connect(boardScene_, &Scene::aboutToBeDestroyed, this, [this]() {
             disconnect(boardScene_, nullptr, this, nullptr);
             boardScene_ = nullptr;
+            peeked_.clear();
             lod_->setScene(nullptr);
         });
     }
@@ -275,6 +279,67 @@ void View::fitSelection()
     fitRect(boardScene_ ? boardScene_->selectionBounds() : QRectF());
 }
 
+void View::togglePeek()
+{
+    if (!boardScene_)
+        return;
+    const QVector<SceneItem *> selected = boardScene_->selectedItemViews();
+    if (selected.isEmpty())
+        return;
+
+    // The action toggles: a selection that is already the peek clears
+    // it, anything else replaces the peek.
+    bool allPeeked = true;
+    for (SceneItem *item : selected) {
+        if (!peeked_.contains(item)) {
+            allPeeked = false;
+            break;
+        }
+    }
+    if (allPeeked)
+        clearPeek();
+    else
+        setPeek(selected);
+}
+
+void View::clearPeek()
+{
+    if (peeked_.isEmpty())
+        return;
+    peeked_.clear();
+    viewport()->update();
+}
+
+SceneItem *View::itemAtPoint(const QPoint &viewportPos) const
+{
+    // Picking follows the drawn order: a peeked item looks on top, so it
+    // takes the click first (topmost peeked first; peeked_ is ascending).
+    const QPointF scenePos = mapToScene(viewportPos);
+    for (auto it = peeked_.crbegin(); it != peeked_.crend(); ++it) {
+        SceneItem *item = *it;
+        if (item->contains(item->mapFromScene(scenePos)))
+            return item;
+    }
+    return dynamic_cast<SceneItem *>(itemAt(viewportPos));
+}
+
+void View::setPeek(const QVector<SceneItem *> &items)
+{
+    // Store the peek in the configured stacking order, so the draw
+    // order is stable and the foreground pass never scans the scene.
+    QVector<SceneItem *> next;
+    next.reserve(items.size());
+    for (QGraphicsItem *graphicsItem : boardScene_->items(Qt::AscendingOrder)) {
+        auto *item = dynamic_cast<SceneItem *>(graphicsItem);
+        if (item && items.contains(item))
+            next.append(item);
+    }
+    if (next == peeked_)
+        return;
+    peeked_ = next;
+    viewport()->update();
+}
+
 void View::mouseDoubleClickEvent(QMouseEvent *event)
 {
     // Only the left button: a right double-click would reach the scene
@@ -284,16 +349,11 @@ void View::mouseDoubleClickEvent(QMouseEvent *event)
         return;
     }
 
-    if (event->button() != Qt::LeftButton) {
-        QGraphicsView::mouseDoubleClickEvent(event);
-        return;
-    }
-
     // The reference cancels active modes first, then fits the item
     // unless it is editable: text items enter edit mode there, which is
     // not ported yet, so they keep the default behaviour.
     cancelCrop();
-    if (auto *item = dynamic_cast<SceneItem *>(itemAt(event->position().toPoint()))) {
+    if (SceneItem *item = itemAtPoint(event->position().toPoint())) {
         if (!item->isText()) {
             if (!item->isSelected())
                 item->setSelected(true);
@@ -389,7 +449,7 @@ void View::mousePressEvent(QMouseEvent *event)
     if (sampling_) {
         if (event->button() == Qt::LeftButton) {
             const QPoint viewportPos = event->position().toPoint();
-            if (auto *item = dynamic_cast<SceneItem *>(itemAt(viewportPos))) {
+            if (SceneItem *item = itemAtPoint(viewportPos)) {
                 const QColor color = item->sampleColorAt(mapToScene(viewportPos));
                 if (color.isValid())
                     emit colorSampled(color);
@@ -468,7 +528,7 @@ void View::mousePressEvent(QMouseEvent *event)
             }
         }
 
-        if (auto *item = dynamic_cast<SceneItem *>(itemAt(viewportPos))) {
+        if (SceneItem *item = itemAtPoint(viewportPos)) {
             if (event->modifiers().testFlag(Qt::ControlModifier)) {
                 item->setSelected(!item->isSelected());
             } else if (!item->isSelected()) {
@@ -1017,7 +1077,7 @@ void View::updateSampleSwatch(const QPoint &viewportPos)
     if (!swatch_)
         return;
     QColor color;
-    if (auto *item = dynamic_cast<SceneItem *>(itemAt(viewportPos)))
+    if (SceneItem *item = itemAtPoint(viewportPos))
         color = item->sampleColorAt(mapToScene(viewportPos));
     // Without a colour the swatch stays visible but transparent, like
     // the reference's NONE_COLOR.
@@ -1075,6 +1135,12 @@ void View::keyPressEvent(QKeyEvent *event)
             return;
         }
     }
+    // Esc dismisses a peek when no mode above claimed it.
+    if (event->key() == Qt::Key_Escape && !peeked_.isEmpty()) {
+        clearPeek();
+        event->accept();
+        return;
+    }
     QGraphicsView::keyPressEvent(event);
 }
 
@@ -1085,13 +1151,42 @@ void View::leaveEvent(QEvent *event)
     QGraphicsView::leaveEvent(event);
 }
 
+void View::drawPeeks(QPainter *painter) const
+{
+    // peeked_ is kept in ascending stacking order, so the lowest peeked
+    // item is drawn first and the topmost of them stays on top, exactly
+    // as if the whole group were really raised.
+    for (SceneItem *item : peeked_) {
+        painter->save();
+        painter->setTransform(item->sceneTransform(), true);
+        painter->setOpacity(item->opacity());
+        item->paintContent(painter);
+        // A dashed marker at full opacity, so a view-only peek cannot be
+        // mistaken for a real Raise to Top.
+        painter->setOpacity(1.0);
+        QPen pen(theme::selection, 0);
+        pen.setCosmetic(true);
+        pen.setStyle(Qt::DashLine);
+        painter->setPen(pen);
+        painter->setBrush(Qt::NoBrush);
+        painter->drawRect(item->boundingRect());
+        painter->restore();
+    }
+}
+
 void View::drawForeground(QPainter *painter, const QRectF &rect)
 {
     Q_UNUSED(rect);
-    // The crop editor brings its own frame; the selection handles would
-    // only get in the way.
-    if (!boardScene_ || cropItem_)
+    if (!boardScene_)
         return;
+    // The crop editor brings its own frame; peeks and handles would
+    // only get in the way. A peek is suspended, not cleared, while
+    // cropping, so it comes back when the crop session ends.
+    if (cropItem_)
+        return;
+    if (!peeked_.isEmpty())
+        drawPeeks(painter);
+
     const QRectF bounds = boardScene_->selectionBounds();
     if (bounds.isEmpty())
         return;

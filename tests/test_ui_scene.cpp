@@ -173,6 +173,8 @@ private slots:
     void dragMovesItemAndModel();
     void dragThresholdProtectsFromTinyGestures();
     void rightClickKeepsTheSelection();
+    void peekRaisesAboveWithoutChangingZ();
+    void peekedItemTakesTheClick();
     void fitSceneFramesTheItems();
     void zoomLimitsHold();
     void middleDragPansWithTheCursor();
@@ -460,6 +462,191 @@ void TestUiScene::rightClickKeepsTheSelection()
     sendMouse(view.viewport(), QEvent::MouseButtonDblClick, empty, Qt::RightButton,
               Qt::RightButton);
     QCOMPARE(scene->selectedItemViews().size(), 1);
+}
+
+void TestUiScene::peekRaisesAboveWithoutChangingZ()
+{
+    auto document = std::make_shared<doc::Document>(doc::Document::create());
+    const doc::ItemPtr below = pixmapItem(50, 50, Qt::red);
+    const doc::ItemPtr above = pixmapItem(100, 100, Qt::blue);
+    document->addItem(below);
+    document->addItem(above); // added later: on top by configuration
+
+    ui::View view;
+    auto *scene = new ui::Scene(&view);
+    scene->setDocument(document);
+    view.setBoardScene(scene);
+    doc::UndoStack stack(document.get());
+    view.setUndoStack(&stack);
+    view.resize(300, 300);
+    view.show();
+    QTest::qWait(100);
+    view.setTransform(QTransform::fromScale(1.0, 1.0));
+    view.centerOn(QPointF(25, 25));
+    QTest::qWait(100);
+
+    SceneItem *belowView = nullptr;
+    SceneItem *aboveView = nullptr;
+    for (SceneItem *candidate : scene->pixmapItemViews()) {
+        if (candidate->item() == below)
+            belowView = candidate;
+        else if (candidate->item() == above)
+            aboveView = candidate;
+    }
+    QVERIFY(belowView && aboveView);
+    QImage big(100, 100, QImage::Format_ARGB32);
+    big.fill(Qt::blue);
+    aboveView->setLevel(big, 1.0);
+    QImage small(50, 50, QImage::Format_ARGB32);
+    small.fill(Qt::red);
+    belowView->setLevel(small, 1.0);
+    QTest::qWait(50);
+
+    const QPoint overlap = view.mapFromScene(QPointF(25, 25));
+    const auto pixel = [&]() { return view.viewport()->grab().toImage().pixelColor(overlap); };
+    // The overlap shows the item that is on top by configuration.
+    QCOMPARE(pixel(), QColor(Qt::blue));
+
+    // Peeking the hidden item paints it above, without touching the
+    // model: no z change, no undo step, no modified flag.
+    belowView->setSelected(true);
+    view.togglePeek();
+    QVERIFY(view.hasPeek());
+    QTest::qWait(50);
+    QCOMPARE(pixel(), QColor(Qt::red));
+    QCOMPARE(below->z, 0.0);
+    QCOMPARE(above->z, 0.0);
+    QVERIFY(!stack.canUndo());
+    QVERIFY(!document->isModified());
+
+    // Toggling again clears it.
+    view.togglePeek();
+    QVERIFY(!view.hasPeek());
+    QTest::qWait(50);
+    QCOMPARE(pixel(), QColor(Qt::blue));
+
+    // Esc clears it too.
+    view.togglePeek();
+    QVERIFY(view.hasPeek());
+    QTest::keyClick(&view, Qt::Key_Escape);
+    QVERIFY(!view.hasPeek());
+
+    // Peeking the whole selection preserves the configured order: the
+    // blue item stays above the red one.
+    scene->clearSelection();
+    belowView->setSelected(true);
+    aboveView->setSelected(true);
+    view.togglePeek();
+    QVERIFY(view.hasPeek());
+    QTest::qWait(50);
+    QCOMPARE(pixel(), QColor(Qt::blue));
+    view.clearPeek();
+    QVERIFY(!view.hasPeek());
+
+    // Deleting a peeked item drops it from the peek.
+    scene->clearSelection();
+    belowView->setSelected(true);
+    view.togglePeek();
+    QVERIFY(view.hasPeek());
+    stack.push(std::make_unique<doc::RemoveItemsCommand>(QVector<doc::ItemPtr>{below}));
+    scene->syncDocument();
+    QVERIFY(!view.hasPeek());
+
+    // Replacing the board clears it as well (the views go away).
+    scene->clearSelection();
+    aboveView->setSelected(true);
+    view.togglePeek();
+    QVERIFY(view.hasPeek());
+    scene->setDocument(std::make_shared<doc::Document>(doc::Document::create()));
+    QVERIFY(!view.hasPeek());
+}
+
+void TestUiScene::peekedItemTakesTheClick()
+{
+    auto document = std::make_shared<doc::Document>(doc::Document::create());
+    const doc::ItemPtr below = pixmapItem(50, 50, Qt::red);
+    const doc::ItemPtr above = pixmapItem(100, 100, Qt::blue);
+    document->addItem(below);
+    document->addItem(above); // added later: on top by configuration
+
+    ui::View view;
+    auto *scene = new ui::Scene(&view);
+    scene->setDocument(document);
+    view.setBoardScene(scene);
+    doc::UndoStack stack(document.get());
+    view.setUndoStack(&stack);
+    view.resize(300, 300);
+    view.show();
+    QTest::qWait(100);
+    view.setTransform(QTransform::fromScale(1.0, 1.0));
+    view.centerOn(QPointF(25, 25));
+    QTest::qWait(100);
+
+    SceneItem *belowView = nullptr;
+    SceneItem *aboveView = nullptr;
+    for (SceneItem *candidate : scene->pixmapItemViews()) {
+        if (candidate->item() == below)
+            belowView = candidate;
+        else if (candidate->item() == above)
+            aboveView = candidate;
+    }
+    QVERIFY(belowView && aboveView);
+    QImage big(100, 100, QImage::Format_ARGB32);
+    big.fill(Qt::blue);
+    aboveView->setLevel(big, 1.0);
+    QImage small(50, 50, QImage::Format_ARGB32);
+    small.fill(Qt::red);
+    belowView->setLevel(small, 1.0);
+    QTest::qWait(50);
+
+    const QPoint overlap = view.mapFromScene(QPointF(25, 25));
+
+    // Without a peek, the configured top item takes the click.
+    sendMouse(view.viewport(), QEvent::MouseButtonPress, overlap, Qt::LeftButton, Qt::LeftButton);
+    QCOMPARE(scene->selectedItemViews().size(), 1);
+    QCOMPARE(scene->selectedItemViews().first()->item(), above);
+    sendMouse(view.viewport(), QEvent::MouseButtonRelease, overlap, Qt::LeftButton, Qt::NoButton);
+
+    // With the hidden item peeked, picking follows what is drawn: the
+    // peeked item takes the click.
+    scene->clearSelection();
+    belowView->setSelected(true);
+    view.togglePeek();
+    scene->clearSelection();
+    sendMouse(view.viewport(), QEvent::MouseButtonPress, overlap, Qt::LeftButton, Qt::LeftButton);
+    QCOMPARE(scene->selectedItemViews().size(), 1);
+    QCOMPARE(scene->selectedItemViews().first()->item(), below);
+    sendMouse(view.viewport(), QEvent::MouseButtonRelease, overlap, Qt::LeftButton, Qt::NoButton);
+
+    // Ctrl+click toggles the peeked item.
+    sendMouse(view.viewport(), QEvent::MouseButtonPress, overlap, Qt::LeftButton, Qt::LeftButton,
+              Qt::ControlModifier);
+    sendMouse(view.viewport(), QEvent::MouseButtonRelease, overlap, Qt::LeftButton, Qt::NoButton,
+              Qt::ControlModifier);
+    QCOMPARE(scene->selectedItemViews().size(), 0);
+
+    // Sampling reads the pixel that is drawn on top.
+    QSignalSpy sampled(&view, &ui::View::colorSampled);
+    view.startSampleColor();
+    sendMouse(view.viewport(), QEvent::MouseButtonPress, overlap, Qt::LeftButton, Qt::LeftButton);
+    QCOMPARE(sampled.count(), 1);
+    QCOMPARE(sampled.first().first().value<QColor>(), QColor(Qt::red));
+
+    // Double-click fits the peeked item.
+    scene->clearSelection();
+    sendMouse(view.viewport(), QEvent::MouseButtonDblClick, overlap, Qt::LeftButton,
+              Qt::LeftButton);
+    QCOMPARE(scene->selectedItemViews().size(), 1);
+    QCOMPARE(scene->selectedItemViews().first()->item(), below);
+
+    // Clearing the peek restores the configured order.
+    view.clearPeek();
+    scene->clearSelection();
+    const QPoint afterFit = view.mapFromScene(QPointF(25, 25));
+    sendMouse(view.viewport(), QEvent::MouseButtonPress, afterFit, Qt::LeftButton, Qt::LeftButton);
+    QCOMPARE(scene->selectedItemViews().size(), 1);
+    QCOMPARE(scene->selectedItemViews().first()->item(), above);
+    sendMouse(view.viewport(), QEvent::MouseButtonRelease, afterFit, Qt::LeftButton, Qt::NoButton);
 }
 
 void TestUiScene::fitSceneFramesTheItems()
@@ -1649,9 +1836,11 @@ void TestUiScene::actionsFollowTheSelectionState()
     QAction *fitSelectionAction = actionByText(window, QStringLiteral("Fit &Selection"));
     QAction *optimalAction = actionByText(window, QStringLiteral("&Optimal"));
     QAction *fitSceneAction = actionByText(window, QStringLiteral("&Fit Scene"));
+    QAction *peekAction = actionByText(window, QStringLiteral("Peek on &Top"));
     QVERIFY(selectAllAction && deleteAction && cropAction && gamutAction && sampleAction
             && normalizeAction && undoAction && fitSelectionAction && optimalAction
-            && fitSceneAction);
+            && fitSceneAction && peekAction);
+    QCOMPARE(peekAction->shortcut(), QKeySequence(QStringLiteral("T")));
 
     // Nothing on the board: only always-active actions (and Fit Scene)
     // are enabled.
@@ -1665,6 +1854,7 @@ void TestUiScene::actionsFollowTheSelectionState()
     QVERIFY(!normalizeAction->isEnabled());
     QVERIFY(!fitSelectionAction->isEnabled());
     QVERIFY(!optimalAction->isEnabled());
+    QVERIFY(!peekAction->isEnabled());
 
     QImage image(6, 4, QImage::Format_ARGB32);
     image.fill(Qt::red);
@@ -1682,6 +1872,7 @@ void TestUiScene::actionsFollowTheSelectionState()
     QVERIFY(normalizeAction->isEnabled());
     QVERIFY(fitSelectionAction->isEnabled());
     QVERIFY(optimalAction->isEnabled());
+    QVERIFY(peekAction->isEnabled());
 
     // The grayscale check mark follows the first selected image.
     QAction *grayscaleAction = actionByText(window, QStringLiteral("&Grayscale"));

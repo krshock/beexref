@@ -116,6 +116,10 @@ public:
     QRectF boundingRect() const override;
     void paint(QPainter *painter, const QStyleOptionGraphicsItem *option,
                QWidget *widget) override;
+    // The item's content without any selection decoration, in local
+    // coordinates; the view's peek overlay paints the item again with
+    // it, above everything.
+    void paintContent(QPainter *painter);
 
 private:
     QSize imageSize() const;

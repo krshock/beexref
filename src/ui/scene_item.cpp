@@ -333,7 +333,7 @@ void SceneItem::syncPositionToModel()
     item_->y = pos().y();
 }
 
-void SceneItem::paint(QPainter *painter, const QStyleOptionGraphicsItem *option, QWidget *)
+void SceneItem::paintContent(QPainter *painter)
 {
     // Stated unconditionally: painter state leaks between items in a
     // paint pass. Smoothing is off during interactions (repaints skip
@@ -373,6 +373,16 @@ void SceneItem::paint(QPainter *painter, const QStyleOptionGraphicsItem *option,
         painter->setPen(theme::text);
         painter->drawText(bounds.adjusted(6, 4, -6, -4), Qt::TextWordWrap, errorText());
     }
+}
+
+void SceneItem::paint(QPainter *painter, const QStyleOptionGraphicsItem *option, QWidget *)
+{
+    paintContent(painter);
+
+    // The crop editor's frame already marks the item; an outline would
+    // only get in the way (and the overlay never peeks it).
+    if (cropMode_)
+        return;
 
     if (option && (option->state & QStyle::State_Selected)) {
         QPen pen(theme::selection, kSelectionLineWidth);
