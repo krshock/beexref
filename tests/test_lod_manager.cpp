@@ -315,8 +315,10 @@ void TestLodManager::cacheServesLevelsWithoutDecoding()
 void TestLodManager::coalescesBurstsPerItem()
 {
     // A zoom burst posts one request per step; the worker must decode
-    // only the latest one, as the reference worker does.
+    // only the latest one, as the reference worker does. Completion
+    // order is only deterministic with a single decode thread.
     ui::LevelLoader loader;
+    loader.setThreads(1);
     QSignalSpy ready(&loader, &ui::LevelLoader::levelReady);
     QSignalSpy failed(&loader, &ui::LevelLoader::levelFailed);
     QSignalSpy cancelled(&loader, &ui::LevelLoader::levelCancelled);
