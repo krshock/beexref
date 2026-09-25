@@ -13,10 +13,14 @@
 #include <QBuffer>
 #include <QClipboard>
 #include <QColor>
+#include <QContextMenuEvent>
 #include <QDir>
 #include <QFileInfo>
 #include <QImage>
+#include <QMenu>
 #include <QMimeData>
+#include <QStatusBar>
+#include <QTimer>
 #include <QAction>
 #include <QDialog>
 #include <QPushButton>
@@ -576,6 +580,25 @@ public:
             out() << "hud preview: " << (window_.findChild<ui::HudPreview *>() != nullptr)
                   << "\n";
             snapshot(QStringLiteral("37-hud"));
+
+            // The status bar readout and the canvas context menu (the
+            // whole main menu as one popup).
+            out() << "status bar: " << window_.statusBar()->currentMessage() << "\n";
+            {
+                QStringList topLevel;
+                QTimer::singleShot(0, [&]() {
+                    if (auto *popup = qobject_cast<QMenu *>(QApplication::activePopupWidget())) {
+                        for (QAction *action : popup->actions())
+                            topLevel << action->text();
+                        popup->close();
+                    }
+                });
+                const QPoint menuPos(60, 60);
+                QContextMenuEvent event(QContextMenuEvent::Mouse, menuPos,
+                                        viewport->mapToGlobal(menuPos));
+                QApplication::sendEvent(viewport, &event);
+                out() << "context menu: " << topLevel.join(QStringLiteral(" | ")) << "\n";
+            }
 
             // Part 3: window toggles and the info dialogs.
             actionByText(QStringLiteral("Show &Scrollbars"))->trigger();

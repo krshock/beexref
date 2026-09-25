@@ -50,6 +50,7 @@
 #include <QMessageBox>
 #include <QMimeData>
 #include <QProgressDialog>
+#include <QStatusBar>
 #include <QTimer>
 #include <QToolTip>
 
@@ -76,6 +77,27 @@ LodSettings loadLodSettings()
         settings::valueOrDefault(file, QStringLiteral("Items/lod_cache_settle_percent")).toInt();
     lod.quality = settings::valueOrDefault(file, QStringLiteral("Items/lod_quality")).toString();
     return normalized(lod);
+}
+
+// Copies a menu's actions into another menu, sharing the QActions and
+// recursing into submenus. The canvas context menu is built from the
+// menu bar this way, so it can never drift out of sync.
+void copyMenuActions(const QMenu *from, QMenu *to)
+{
+    for (QAction *action : from->actions()) {
+        if (action->isSeparator()) {
+            to->addSeparator();
+            continue;
+        }
+        if (QMenu *submenu = action->menu()) {
+            QMenu *copy = to->addMenu(action->text());
+            copy->setIcon(action->icon());
+            copy->setEnabled(submenu->isEnabled());
+            copyMenuActions(submenu, copy);
+            continue;
+        }
+        to->addAction(action);
+    }
 }
 
 // The reference's get_file_extension_from_format(): the first extension
@@ -223,6 +245,20 @@ MainWindow::MainWindow(bool cacheDisabled, QWidget *parent)
     for (const QString &id : actions_->ids())
         addAction(actions_->action(id));
     applyShortcuts();
+
+    // The reference's right-click menu on the canvas and on the welcome
+    // view: the whole main menu, so the actions stay reachable when the
+    // menu bar is hidden.
+    connect(view_, &View::contextMenuRequested, this, &MainWindow::showContextMenu);
+    welcomeOverlay_->setContextMenuPolicy(Qt::CustomContextMenu);
+    connect(welcomeOverlay_, &QWidget::customContextMenuRequested, this,
+            [this](const QPoint &pos) { showContextMenu(welcomeOverlay_->mapToGlobal(pos)); });
+
+    // The Go port's status bar: a periodic RAM/levels/items readout.
+    statusTimer_ = new QTimer(this);
+    connect(statusTimer_, &QTimer::timeout, this, &MainWindow::updateStatusBar);
+    statusTimer_->start(2000);
+    updateStatusBar();
 
     connect(view_, &View::colorSampled, this, &MainWindow::copySampledColor);
     connect(scene_, &QGraphicsScene::selectionChanged, this, [this]() {
@@ -1220,6 +1256,11 @@ void MainWindow::buildActions()
     // Deliberate deviation: the reference defaults this off, which would
     // leave its own toggle unreachable once hidden.
     menubarAction->setChecked(true);
+    QAction *statusAction = actions_->add(
+        QStringLiteral("show_status"), QStringLiteral("Show &Status Bar"), {}, G::Always,
+        [this](bool checked) { statusBar()->setVisible(checked); }, true);
+    // The Go port's default: the readout is on.
+    statusAction->setChecked(true);
     QAction *titlebarAction = actions_->add(
         QStringLiteral("show_titlebar"), QStringLiteral("Show &Title Bar"), {}, G::Always,
         [this](bool checked) {
@@ -1323,6 +1364,7 @@ void MainWindow::buildMenus()
     actions_->append(viewMenu, QStringLiteral("always_on_top"));
     actions_->append(viewMenu, QStringLiteral("show_scrollbars"));
     actions_->append(viewMenu, QStringLiteral("show_menubar"));
+    actions_->append(viewMenu, QStringLiteral("show_status"));
     actions_->append(viewMenu, QStringLiteral("show_titlebar"));
     actions_->append(viewMenu, QStringLiteral("smooth_images"));
     actions_->appendSeparator(viewMenu);
@@ -1413,6 +1455,35 @@ void MainWindow::updateTitle()
         title += QStringLiteral(" (%1)").arg(extras.join(QStringLiteral(" | ")));
 
     setWindowTitle(title);
+}
+
+void MainWindow::showContextMenu(const QPoint &globalPos)
+{
+    // The Go port's canvas menu: every top-level menu of the menu bar
+    // becomes a submenu, so the whole action set stays reachable with
+    // the menu bar hidden.
+    rebuildRecentMenu();
+    QMenu menu(this);
+    for (QAction *barAction : menuBar()->actions()) {
+        QMenu *source = barAction->menu();
+        if (!source)
+            continue;
+        QMenu *submenu = menu.addMenu(barAction->text());
+        submenu->setEnabled(source->isEnabled());
+        copyMenuActions(source, submenu);
+    }
+    menu.exec(globalPos);
+}
+
+void MainWindow::updateStatusBar()
+{
+    // The Go port's line: "RAM 123 MB · levels 45 MB · 12 items".
+    const LodManager::Stats stats = view_->lodManager()->stats();
+    const double ramMB = util::processRssBytes() / 1024.0 / 1024.0;
+    statusBar()->showMessage(QStringLiteral("RAM %1 MB · levels %2 MB · %3 items")
+                                 .arg(QString::number(ramMB, 'f', 0),
+                                      QString::number(stats.levelMB, 'f', 0),
+                                      QString::number(stats.items)));
 }
 
 } // namespace ui

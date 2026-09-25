@@ -2,13 +2,17 @@
 #include <QFile>
 #include <QBuffer>
 #include <QColor>
+#include <QContextMenuEvent>
 #include <QImage>
+#include <QMenu>
+#include <QMenuBar>
 #include <QMimeData>
+#include <QStatusBar>
+#include <QTimer>
 #include <QDialog>
 #include <QDir>
 #include <QDialogButtonBox>
 #include <QLabel>
-#include <QMenuBar>
 #include <QPlainTextEdit>
 #include <QFrame>
 #include <QRegion>
@@ -220,6 +224,7 @@ private slots:
     void controlsDialogEditsShortcutsAndBindings();
     void viewAppliesBindingOverrides();
     void windowTogglesFollowTheActions();
+    void canvasContextMenuMirrorsTheMenuBar();
     void moveWindowModeFollowsThePointer();
     void infoDialogsShowTheExpectedContent();
     void metadataPanelEditsAndCommits();
@@ -2275,6 +2280,19 @@ void TestUiScene::windowTogglesFollowTheActions()
     menubar->trigger();
     QVERIFY(!window.menuBar()->isHidden());
 
+    // The status bar starts visible (the Go port's default) and shows
+    // the RAM/levels/items readout.
+    QAction *status = actionByText(window, QStringLiteral("Show &Status Bar"));
+    QVERIFY(status);
+    QVERIFY(status->isChecked());
+    QVERIFY(window.statusBar()->isVisibleTo(&window));
+    QVERIFY(window.statusBar()->currentMessage().contains(QStringLiteral("RAM")));
+    QVERIFY(window.statusBar()->currentMessage().contains(QStringLiteral("items")));
+    status->trigger();
+    QVERIFY(!window.statusBar()->isVisibleTo(&window));
+    status->trigger();
+    QVERIFY(window.statusBar()->isVisibleTo(&window));
+
     // Window flags follow their actions.
     QAction *onTop = actionByText(window, QStringLiteral("&Always On Top"));
     QVERIFY(onTop);
@@ -2297,6 +2315,71 @@ void TestUiScene::windowTogglesFollowTheActions()
     QVERIFY(window.isFullScreen());
     fullscreen->trigger();
     QVERIFY(!window.isFullScreen());
+}
+
+void TestUiScene::canvasContextMenuMirrorsTheMenuBar()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    settings::setSettingsDir(dir.path());
+
+    ui::MainWindow window;
+    QImage image(8, 8, QImage::Format_ARGB32);
+    image.fill(Qt::red);
+    QMimeData mime;
+    mime.setImageData(image);
+    window.input()->insertMimeData(mime, QPointF(0, 0));
+
+    // The popup blocks in exec(); a zero timer closes it from inside and
+    // records the structure.
+    QStringList topLevel;
+    QStringList settingsItems;
+    bool opened = false;
+    QTimer::singleShot(0, [&]() {
+        auto *popup = qobject_cast<QMenu *>(QApplication::activePopupWidget());
+        if (!popup)
+            return;
+        opened = true;
+        for (QAction *action : popup->actions()) {
+            topLevel << action->text();
+            if (action->text() == QStringLiteral("&Settings") && action->menu()) {
+                for (QAction *item : action->menu()->actions())
+                    settingsItems << item->text();
+            }
+        }
+        popup->close();
+    });
+
+    const QPoint pos(20, 20);
+    QContextMenuEvent event(QContextMenuEvent::Mouse, pos,
+                            window.view()->viewport()->mapToGlobal(pos));
+    QApplication::sendEvent(window.view()->viewport(), &event);
+
+    QVERIFY(opened);
+    QCOMPARE(topLevel,
+             QStringList({QStringLiteral("&File"), QStringLiteral("&Edit"),
+                          QStringLiteral("&View"), QStringLiteral("&Insert"),
+                          QStringLiteral("&Transform"), QStringLiteral("&Normalize"),
+                          QStringLiteral("&Arrange"), QStringLiteral("&Images"),
+                          QStringLiteral("&Settings"), QStringLiteral("&Help")}));
+    // The shared actions stay reachable through the submenus.
+    QVERIFY(settingsItems.contains(QStringLiteral("&Settings")));
+    QVERIFY(settingsItems.contains(QStringLiteral("&Keyboard && Mouse")));
+
+    // The welcome view opens the same menu (the Go port's tapper).
+    opened = false;
+    QTimer::singleShot(0, [&]() {
+        if (auto *popup = qobject_cast<QMenu *>(QApplication::activePopupWidget())) {
+            opened = true;
+            popup->close();
+        }
+    });
+    QContextMenuEvent welcomeEvent(QContextMenuEvent::Mouse, pos,
+                                   window.welcomeOverlay()->mapToGlobal(pos));
+    QApplication::sendEvent(window.welcomeOverlay(), &welcomeEvent);
+    QVERIFY(opened);
+
+    settings::setSettingsDir(QString());
 }
 
 void TestUiScene::moveWindowModeFollowsThePointer()

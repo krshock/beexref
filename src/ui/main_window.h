@@ -8,6 +8,7 @@
 
 #include <QColor>
 #include <QMainWindow>
+#include <QPoint>
 
 #include <functional>
 #include <memory>
@@ -16,6 +17,7 @@ class QAction;
 class QCloseEvent;
 class QMenu;
 class QSplitter;
+class QTimer;
 
 namespace cache {
 class SessionCache;
@@ -100,6 +102,12 @@ private:
     void applyHistoryStep(bool undo);
     // Refreshes the document state after a selection transformation.
     void afterSelectionAction();
+    // The canvas context menu: the whole main menu as one popup (the Go
+    // port's canvas menu), so every action stays reachable when the bars
+    // are hidden.
+    void showContextMenu(const QPoint &globalPos);
+    // Refreshes the status bar's RAM/levels/items readout.
+    void updateStatusBar();
     // The reference's Change Opacity...: live preview in the dialog,
     // one undo step on OK, nothing on Cancel.
     void changeOpacity();
@@ -164,6 +172,7 @@ private:
     MetadataPanel *metadataPanel_ = nullptr;
     HudPreview *hudPreview_ = nullptr;
     WelcomeOverlay *welcomeOverlay_ = nullptr;
+    QTimer *statusTimer_ = nullptr;
     doc::UndoStack undoStack_;
     std::shared_ptr<cache::SessionCache> sessionCache_;
     std::shared_ptr<doc::Document> document_;

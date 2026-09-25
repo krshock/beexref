@@ -10,6 +10,7 @@
 #include "doc/undo.h"
 
 #include <QApplication>
+#include <QContextMenuEvent>
 #include <QDragEnterEvent>
 #include <QDragMoveEvent>
 #include <QDropEvent>
@@ -295,6 +296,14 @@ void View::mouseDoubleClickEvent(QMouseEvent *event)
         }
     }
     QGraphicsView::mouseDoubleClickEvent(event);
+}
+
+void View::contextMenuEvent(QContextMenuEvent *event)
+{
+    // The window opens the main menu as one popup (the Go port's canvas
+    // menu); the scene itself has no context menu.
+    emit contextMenuRequested(event->globalPos());
+    event->accept();
 }
 
 void View::wheelEvent(QWheelEvent *event)

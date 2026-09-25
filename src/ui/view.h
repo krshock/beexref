@@ -93,8 +93,12 @@ signals:
     void mimeDropped(const QMimeData *data, const QPointF &scenePos);
     // A gesture changed the document (a move); the window refreshes.
     void documentModified();
+    // A right click on the canvas, with the global position for the
+    // window's context menu.
+    void contextMenuRequested(const QPoint &globalPos);
 
 protected:
+    void contextMenuEvent(QContextMenuEvent *event) override;
     void wheelEvent(QWheelEvent *event) override;
     void mousePressEvent(QMouseEvent *event) override;
     void mouseMoveEvent(QMouseEvent *event) override;
