@@ -44,6 +44,7 @@
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QFile>
+#include <QIcon>
 #include <QImageReader>
 #include <QMenuBar>
 #include <QMessageBox>
@@ -100,6 +101,10 @@ QString extensionFromFilter(const QString &filter)
 MainWindow::MainWindow(bool cacheDisabled, QWidget *parent)
     : QMainWindow(parent)
 {
+    // The reference sets BeeAssets().logo on the main window; child
+    // dialogs inherit it, so every window carries the app icon.
+    setWindowIcon(QIcon(QStringLiteral(":/assets/logo.png")));
+
     scene_ = new Scene(this);
     view_ = new View(this);
     loader_ = new LevelLoader(this);
@@ -678,6 +683,7 @@ void MainWindow::openControlsDialog()
     auto *dialog =
         new ControlsDialog(this, actions_, [this](const QString &id) { return actionLabel(id); });
     dialog->setAttribute(Qt::WA_DeleteOnClose);
+    dialog->setModal(true);
     connect(dialog, &ControlsDialog::controlsChanged, this, [this]() {
         // Both take effect at once: the bindings for new events, the
         // shortcuts on the actions.
@@ -945,6 +951,7 @@ void MainWindow::showColorGamut()
     SceneItem *view = images.first();
     auto *dialog = new GamutDialog(this, view->item(), view->level());
     dialog->setAttribute(Qt::WA_DeleteOnClose);
+    dialog->setModal(true);
     dialog->show();
 }
 

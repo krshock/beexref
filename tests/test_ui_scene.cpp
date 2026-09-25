@@ -199,6 +199,7 @@ private slots:
     void gamutDialogCanCloseWhileCounting();
     void gamutPlotFiltersDotsByThreshold();
     void gamutDialogSliderUpdatesContinuously();
+    void gamutDialogOpenedFromTheWindowIsModal();
     void actionsFollowTheSelectionState();
     void selectAllAndDeselectAll();
     void deleteSelectionUndoes();
@@ -210,6 +211,7 @@ private slots:
     void exportsSceneSvgTree();
     void windowExportsSceneSvg();
     void windowExportsImagesToDirectory();
+    void windowCarriesTheAppIcon();
     void closeHonoursTheUnsavedSetting();
     void selectingAnImageSchedulesLod();
     void hudToastsAppearAndExpire();
@@ -1495,6 +1497,33 @@ void TestUiScene::gamutDialogSliderUpdatesContinuously()
     QCOMPARE(slider->maximum(), 500);
 }
 
+void TestUiScene::gamutDialogOpenedFromTheWindowIsModal()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    settings::setSettingsDir(dir.path());
+
+    ui::MainWindow window;
+    QImage image(8, 8, QImage::Format_ARGB32);
+    image.fill(Qt::red);
+    QMimeData mime;
+    mime.setImageData(image);
+    window.input()->insertMimeData(mime, QPointF(0, 0));
+
+    QAction *gamut = actionByText(window, QStringLiteral("Show &Color Gamut"));
+    QVERIFY(gamut);
+    gamut->trigger();
+
+    ui::GamutDialog *dialog = nullptr;
+    for (ui::GamutDialog *candidate : window.findChildren<ui::GamutDialog *>())
+        dialog = candidate;
+    QVERIFY(dialog);
+    QVERIFY(dialog->isModal());
+    dialog->close();
+
+    settings::setSettingsDir(QString());
+}
+
 void TestUiScene::actionsFollowTheSelectionState()
 {
     ui::MainWindow window;
@@ -1883,6 +1912,20 @@ void TestUiScene::windowExportsImagesToDirectory()
     settings::setSettingsDir(QString());
 }
 
+void TestUiScene::windowCarriesTheAppIcon()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    settings::setSettingsDir(dir.path());
+
+    ui::MainWindow window;
+    // The embedded logo, like the reference's BeeAssets().logo.
+    QVERIFY(!window.windowIcon().isNull());
+    QVERIFY(!window.windowIcon().pixmap(64, 64).isNull());
+
+    settings::setSettingsDir(QString());
+}
+
 void TestUiScene::closeHonoursTheUnsavedSetting()
 {
     QTemporaryDir dir;
@@ -2056,6 +2099,7 @@ void TestUiScene::controlsDialogEditsShortcutsAndBindings()
     for (ui::ControlsDialog *candidate : window.findChildren<ui::ControlsDialog *>())
         dialog = candidate;
     QVERIFY(dialog);
+    QVERIFY(dialog->isModal());
 
     // Editing a shortcut writes the override and applies it.
     auto *undoEditor = dialog->findChild<QKeySequenceEdit *>(QStringLiteral("undo_0"));
