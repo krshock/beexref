@@ -397,7 +397,7 @@ SettingsDialog::SettingsDialog(QWidget *parent)
     buttons->addButton(resetButton, QDialogButtonBox::ActionRole);
     layout->addWidget(buttons);
 
-    resize(760, 420);
+    resize(760, 520);
 }
 
 void SettingsDialog::load()

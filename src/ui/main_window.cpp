@@ -419,6 +419,7 @@ void MainWindow::openSettingsDialog()
 {
     auto *dialog = new SettingsDialog(this);
     dialog->setAttribute(Qt::WA_DeleteOnClose);
+    dialog->setModal(true);
     connect(dialog, &SettingsDialog::settingChanged, this, &MainWindow::applySettingChanged);
     connect(dialog, &SettingsDialog::settingsRestored, this, [this]() {
         applyAllocationLimit();
