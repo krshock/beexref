@@ -107,6 +107,7 @@ private slots:
     void threadPoolClampsAndResizes();
     void threadPoolDecodesInParallel();
     void settingsThreadCountReachesTheLoader();
+    void settleReleasesOffScreenCacheOnly();
 };
 
 void TestLodManager::defersUpgradesUntilInteraction()
@@ -879,6 +880,51 @@ void TestLodManager::settingsThreadCountReachesTheLoader()
     settings.decodeThreads = 0;
     manager.setSettings(settings);
     QCOMPARE(loader.threads(), 1);
+}
+
+void TestLodManager::settleReleasesOffScreenCacheOnly()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    auto cache = cache::SessionCache::createAt(dir.filePath(QStringLiteral("cache.db")));
+    QVERIFY(cache->isAvailable());
+
+    auto document = std::make_shared<doc::Document>(doc::Document::create());
+    document->addItem(bigItem(2000, 1000, Qt::darkRed));
+    const doc::ItemPtr offScreen = bigItem(2000, 1000, Qt::darkBlue);
+    offScreen->x = 50000;
+    document->addItem(offScreen);
+
+    ui::Scene scene;
+    ui::LevelLoader loader;
+    ui::LodManager manager;
+    ui::LodSettings settings;
+    settings.method = QStringLiteral("fixed");
+    settings.primaryBudgetMB = 0;
+    settings.ramCacheMB = 150;
+    settings.cacheSettlePercent = 50;
+    manager.setScene(&scene);
+    manager.setLoader(&loader);
+    manager.setLevelCache(cache);
+    manager.setSettings(settings);
+    scene.setDocument(document);
+    // Both on screen so both decode and land in the RAM cache.
+    manager.setViewState(QRectF(0, 0, 52000, 1200), 0.5);
+    manager.evaluateNow();
+    QTRY_COMPARE_WITH_TIMEOUT(manager.stats().decodes, 2, 15000);
+    QTRY_VERIFY_WITH_TIMEOUT(manager.stats().lodRamCacheMB > 0, 5000);
+
+    const double cachedBefore = manager.stats().lodRamCacheMB;
+    // One item leaves the viewport; only it may be settled away.
+    manager.setViewState(QRectF(0, 0, 2200, 1200), 0.5);
+    manager.evaluateNow();
+    manager.evaluateNow();
+    loader.setSettlePolicy(1, 50, 0);
+    QTest::qWait(1500);
+    QVERIFY2(manager.stats().lodRamCacheMB < cachedBefore,
+             qPrintable(QStringLiteral("cache %1 not below %2")
+                            .arg(manager.stats().lodRamCacheMB)
+                            .arg(cachedBefore)));
 }
 
 QTEST_MAIN(TestLodManager)

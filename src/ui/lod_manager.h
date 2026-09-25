@@ -172,6 +172,9 @@ private:
     bool visible(const SceneItem *item, double margin) const;
     bool transforming(const SceneItem *item) const;
     QString cacheKey(const SceneItem *item, double fraction) const;
+    // Bytes of the decoded levels the visible items hold; the settle
+    // never releases these.
+    qint64 pinnedLodBytes() const;
     void scheduleRelease();
     void releaseMemory();
     void onLevelReady(quint64 requestId, const QImage &image);

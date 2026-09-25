@@ -42,6 +42,10 @@ LodSettings normalized(const LodSettings &settings)
         result.ramCacheMB = 0;
     if (result.decodeThreads < 1)
         result.decodeThreads = 1;
+    if (result.cacheSettlePercent < 0)
+        result.cacheSettlePercent = 0;
+    if (result.cacheSettlePercent > 50)
+        result.cacheSettlePercent = 50;
     return result;
 }
 

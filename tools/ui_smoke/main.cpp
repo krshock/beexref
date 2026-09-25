@@ -487,6 +487,18 @@ public:
                 candidate->grab().save(path);
                 out() << "settings dialog " << candidate->width() << "x" << candidate->height()
                       << " -> " << path << "\n";
+                if (auto *tabs = candidate->findChild<QTabWidget *>()) {
+                    for (int i = 0; i < tabs->count(); ++i) {
+                        tabs->setCurrentIndex(i);
+                        QTest::qWait(200);
+                        const QString tabPath =
+                            outputDir_ + QStringLiteral("/28-settings-tab%1.png").arg(i);
+                        candidate->grab().save(tabPath);
+                        out() << "settings tab " << i << " " << tabs->tabText(i) << " -> "
+                              << tabPath << "\n";
+                    }
+                    tabs->setCurrentIndex(0);
+                }
                 candidate->close();
             }
 

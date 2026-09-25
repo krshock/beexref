@@ -21,6 +21,9 @@ struct LodSettings
     int ramCacheMB = 150;
     // Decode worker threads. Always at least one.
     int decodeThreads = 3;
+    // Percent of the off-screen decoded-level cache released every 10 s
+    // of inactivity; 0 disables settling.
+    int cacheSettlePercent = 30;
 };
 
 // Fills unset fields with the reference defaults.

@@ -304,9 +304,12 @@ const QVector<FieldSpec> &fields()
         {QStringLiteral("Items/lod_ram_cache_mb"), 150, intCast(), atLeast(0)},
         // Decode worker threads; always at least one.
         {QStringLiteral("Items/lod_decode_threads"), 3, intCast(), atLeast(1)},
+        // Percent of the off-screen level cache released every 10 s of
+        // inactivity; 0 disables settling.
+        {QStringLiteral("Items/lod_cache_settle_percent"), 30, intCast(),
+         [](const QVariant &value) { return value.toInt() >= 0 && value.toInt() <= 50; }},
         {QStringLiteral("Items/lod_quality"), QStringLiteral("smooth"), nullptr,
          oneOf({QStringLiteral("fast"), QStringLiteral("smooth")})},
-        {QStringLiteral("Items/lod_store_thumbnails"), true, boolCast(), nullptr},
         {QStringLiteral("Items/undo_cache"), true, boolCast(), nullptr},
     };
     return specs;

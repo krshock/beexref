@@ -65,6 +65,8 @@ LodSettings loadLodSettings()
         settings::valueOrDefault(file, QStringLiteral("Items/lod_ram_cache_mb")).toInt();
     lod.decodeThreads =
         settings::valueOrDefault(file, QStringLiteral("Items/lod_decode_threads")).toInt();
+    lod.cacheSettlePercent =
+        settings::valueOrDefault(file, QStringLiteral("Items/lod_cache_settle_percent")).toInt();
     lod.quality = settings::valueOrDefault(file, QStringLiteral("Items/lod_quality")).toString();
     return normalized(lod);
 }
@@ -319,11 +321,6 @@ bool MainWindow::saveDocumentTo(const QString &path, bool createNew)
     if (!filename.endsWith(QStringLiteral(".beex"), Qt::CaseInsensitive))
         filename += QStringLiteral(".beex");
 
-    settings::File file(settings::iniPath());
-    file.load();
-    const bool storeThumbnails =
-        file.boolValue(QStringLiteral("Items"), QStringLiteral("lod_store_thumbnails"), true);
-
     // Appears only if writing takes longer than the minimum duration.
     QProgressDialog progress(QStringLiteral("Saving %1").arg(filename), QString(), 0, 100, this);
     progress.setWindowModality(Qt::WindowModal);
@@ -336,7 +333,7 @@ bool MainWindow::saveDocumentTo(const QString &path, bool createNew)
         QCoreApplication::processEvents();
     };
 
-    const board::Status status = document_->save(filename, storeThumbnails, report, createNew);
+    const board::Status status = document_->save(filename, true, report, createNew);
     progress.close();
     if (!status) {
         logging::error(QStringLiteral("Cannot save file"),
@@ -354,6 +351,8 @@ bool MainWindow::saveDocumentTo(const QString &path, bool createNew)
     document_->adoptFileSources();
     view_->lodManager()->evaluateNow();
 
+    settings::File file(settings::iniPath());
+    file.load();
     file.updateRecentFiles(filename);
     rebuildRecentMenu();
     updateActions();

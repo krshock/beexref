@@ -65,6 +65,14 @@ public:
     // (or overridden by an equal level).
     void reconsiderRamCache();
 
+    // After seconds without activity, release percent of the off-screen
+    // decoded-level cache every step (oldest first); pinnedBytes is
+    // never released. 0 disables settling.
+    void setSettlePolicy(int seconds, int percent, qint64 pinnedBytes);
+    // Marks activity: cancels a pending settle step and restores the
+    // full budget.
+    void noteActivity();
+
     // requestId is the caller's token; it is echoed back with the
     // result. targetSize is the wanted pixel size (aspect preserved);
     // quality is "fast" (single step) or "smooth" (progressive halving).
@@ -143,6 +151,12 @@ private:
     void publishRamCache(const Job &job, const QImage &image);
     // Recomputes the LRU cost and evicts to the budget.
     void updateRamCacheCost();
+    // Evicts LRU entries (oldest first) until the cache is at most
+    // target bytes, never going below floor.
+    void evictToBytes(qint64 target, qint64 floor);
+    // One settle step: releases the configured share of the off-screen
+    // cache, oldest first, never below the pinned bytes.
+    void settleStep();
 
     mutable QMutex queueMutex_;
     QVector<Job> queue_;
@@ -151,6 +165,12 @@ private:
     // Delayed RAM-cache cost pass on the UI thread: the cached buffer
     // only becomes resident once the caller released its copy.
     QTimer *cacheCostTimer_ = nullptr;
+    // Idle settle: releases part of the off-screen cache after a period
+    // without activity, then repeats until only the pinned levels stay.
+    QTimer *settleTimer_ = nullptr;
+    int settleSeconds_ = 0;
+    int settlePercent_ = 0;
+    qint64 pinnedBytes_ = 0;
 
     QVector<QThread *> threads_;
     QVector<Worker *> workers_;

@@ -59,8 +59,6 @@ void TestSettings::roundTrip()
              QStringLiteral("8"));
     QVERIFY(!reloaded.boolValue(QStringLiteral("Save"), QStringLiteral("confirm_close_unsaved"),
                                 true));
-    QVERIFY(reloaded.boolValue(QStringLiteral("Items"), QStringLiteral("lod_store_thumbnails"),
-                               true));
 }
 
 void TestSettings::syncFormatIsSorted()
@@ -171,8 +169,8 @@ void TestSettings::fieldsDefaultsAndCasts()
              QStringLiteral("fixed"));
     QCOMPARE(settings::valueOrDefault(file, QStringLiteral("Items/lod_ram_budget_mb")).toInt(),
              1024);
-    QCOMPARE(settings::valueOrDefault(file, QStringLiteral("Items/lod_store_thumbnails")).toBool(),
-             true);
+    QCOMPARE(settings::valueOrDefault(file, QStringLiteral("Items/lod_cache_settle_percent")).toInt(),
+             30);
     QCOMPARE(settings::valueOrDefault(file, QStringLiteral("Items/arrange_gap")).toInt(), 0);
 
     file.setValue(QStringLiteral("Items"), QStringLiteral("lod_method"),
@@ -194,15 +192,10 @@ void TestSettings::fieldsDefaultsAndCasts()
                   QStringLiteral("0"));
     QCOMPARE(settings::valueOrDefault(file, QStringLiteral("Items/lod_ram_budget_mb")).toInt(),
              1024);
-
-    file.setValue(QStringLiteral("Items"), QStringLiteral("lod_store_thumbnails"),
-                  QStringLiteral("false"));
-    QCOMPARE(settings::valueOrDefault(file, QStringLiteral("Items/lod_store_thumbnails")).toBool(),
-             false);
-    file.setValue(QStringLiteral("Items"), QStringLiteral("lod_store_thumbnails"),
-                  QStringLiteral("yes"));
-    QCOMPARE(settings::valueOrDefault(file, QStringLiteral("Items/lod_store_thumbnails")).toBool(),
-             true);
+    file.setValue(QStringLiteral("Items"), QStringLiteral("lod_cache_settle_percent"),
+                  QStringLiteral("80"));
+    QCOMPARE(settings::valueOrDefault(file, QStringLiteral("Items/lod_cache_settle_percent")).toInt(),
+             30);
 }
 
 void TestSettings::fieldsChangedAndRestore()

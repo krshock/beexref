@@ -136,6 +136,11 @@ LevelLoader::LevelLoader(QObject *parent)
     cacheCostTimer_->setSingleShot(true);
     cacheCostTimer_->setInterval(kCacheCostDelayMs);
     connect(cacheCostTimer_, &QTimer::timeout, this, [this]() { updateRamCacheCost(); });
+    // Idle settle: after the configured quiet period, release part of the
+    // off-screen cache and keep doing so while the app stays idle.
+    settleTimer_ = new QTimer(this);
+    settleTimer_->setSingleShot(true);
+    connect(settleTimer_, &QTimer::timeout, this, [this]() { settleStep(); });
     // The default pool size; LodManager applies the user's setting.
     setThreads(3);
 }
@@ -210,6 +215,53 @@ void LevelLoader::reconsiderRamCache()
     // once the caller released its copy. Re-armed, so a burst costs one
     // pass.
     cacheCostTimer_->start();
+    noteActivity();
+}
+
+void LevelLoader::setSettlePolicy(int seconds, int percent, qint64 pinnedBytes)
+{
+    settleSeconds_ = qMax(0, seconds);
+    settlePercent_ = qBound(0, percent, 50);
+    pinnedBytes_ = qMax(qint64(0), pinnedBytes);
+    if (settleSeconds_ <= 0 || settlePercent_ <= 0) {
+        settleTimer_->stop();
+        return;
+    }
+    settleTimer_->setInterval(settleSeconds_ * 1000);
+    settleTimer_->start();
+}
+
+void LevelLoader::noteActivity()
+{
+    // New activity: stop any pending step and start the quiet period
+    // again.
+    if (settleTimer_ && settleSeconds_ > 0 && settlePercent_ > 0)
+        settleTimer_->start();
+}
+
+void LevelLoader::settleStep()
+{
+    if (shutdown_ || settlePercent_ <= 0)
+        return;
+    qint64 bytes = 0;
+    qint64 budget = 0;
+    {
+        QMutexLocker locker(&shared_->mutex);
+        bytes = shared_->ramCacheBytes;
+        budget = shared_->ramCacheBudget;
+    }
+    (void)budget;
+    // The evictable part is everything above the pinned levels.
+    const qint64 evictable = qMax(qint64(0), bytes - pinnedBytes_);
+    if (evictable <= 0)
+        return;
+    const qint64 release = evictable * settlePercent_ / 100;
+    if (release <= 0)
+        return;
+    evictToBytes(bytes - release, pinnedBytes_);
+    // Return the freed pages to the OS, then schedule the next step.
+    util::releaseFreeMemory();
+    settleTimer_->start();
 }
 
 void LevelLoader::request(quint64 requestId, doc::SourcePtr source, const QSize &targetSize,
@@ -247,6 +299,7 @@ void LevelLoader::request(quint64 requestId, doc::SourcePtr source, const QSize 
         queue_.insert(at - queue_.cbegin(), std::move(job));
     }
     work_.release();
+    noteActivity();
 }
 
 bool LevelLoader::takeJob(Job &job, const std::atomic<bool> &stop)
@@ -358,7 +411,6 @@ void LevelLoader::publishRamCache(const Job &job, const QImage &image)
 
 void LevelLoader::updateRamCacheCost()
 {
-    QImage evicted;
     qint64 budget = 0;
     {
         QMutexLocker locker(&shared_->mutex);
@@ -372,17 +424,25 @@ void LevelLoader::updateRamCacheCost()
         for (auto it = shared_->ramCache.cbegin(); it != shared_->ramCache.cend(); ++it)
             total += it->image.sizeInBytes();
         shared_->ramCacheBytes = total;
-        while (shared_->ramCacheBytes > budget) {
-            auto oldest = shared_->ramCache.cend();
-            for (auto it = shared_->ramCache.cbegin(); it != shared_->ramCache.cend(); ++it) {
-                if (oldest == shared_->ramCache.cend() || it->lastUsed < oldest->lastUsed)
-                    oldest = it;
-            }
-            if (oldest == shared_->ramCache.cend())
-                break;
-            shared_->ramCacheBytes -= oldest->bytes;
-            shared_->ramCache.erase(oldest);
+    }
+    // Nothing pinned here: eviction to the full budget.
+    evictToBytes(budget, 0);
+}
+
+void LevelLoader::evictToBytes(qint64 target, qint64 floor)
+{
+    target = qMax(target, floor);
+    QMutexLocker locker(&shared_->mutex);
+    while (shared_->ramCacheBytes > target) {
+        auto oldest = shared_->ramCache.cend();
+        for (auto it = shared_->ramCache.cbegin(); it != shared_->ramCache.cend(); ++it) {
+            if (oldest == shared_->ramCache.cend() || it->lastUsed < oldest->lastUsed)
+                oldest = it;
         }
+        if (oldest == shared_->ramCache.cend())
+            break;
+        shared_->ramCacheBytes -= oldest->bytes;
+        shared_->ramCache.erase(oldest);
     }
 }
 

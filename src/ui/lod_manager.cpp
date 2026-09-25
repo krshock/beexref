@@ -15,6 +15,8 @@ namespace ui {
 namespace {
 
 constexpr int kReleaseDelayMs = 1500;
+// One settle step every this many seconds of inactivity.
+constexpr int kSettleStepSeconds = 10;
 constexpr double kBytesPerMB = 1024.0 * 1024.0;
 
 } // namespace
@@ -76,6 +78,8 @@ void LodManager::setSettings(const LodSettings &settings)
     if (loader_) {
         loader_->setRamCacheBudget(qint64(settings_.ramCacheMB) * kBytesPerMB);
         loader_->setThreads(settings_.decodeThreads);
+        loader_->setSettlePolicy(kSettleStepSeconds, settings_.cacheSettlePercent,
+                                 pinnedLodBytes());
     }
     reset();
 }
@@ -122,6 +126,22 @@ void LodManager::setViewState(const QRectF &visibleSceneRect, double viewScale)
 {
     visibleRect_ = visibleSceneRect;
     viewScale_ = viewScale > 0 ? viewScale : 1.0;
+    if (loader_) {
+        loader_->setSettlePolicy(kSettleStepSeconds, settings_.cacheSettlePercent,
+                                 pinnedLodBytes());
+    }
+}
+
+qint64 LodManager::pinnedLodBytes() const
+{
+    if (!scene_)
+        return 0;
+    qint64 bytes = 0;
+    for (SceneItem *item : scene_->pixmapItemViews()) {
+        if (visible(item, kLevelVisibilityMargin))
+            bytes += item->residentLodBytes();
+    }
+    return bytes;
 }
 
 void LodManager::reset()

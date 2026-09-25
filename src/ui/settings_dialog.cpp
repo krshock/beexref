@@ -75,29 +75,6 @@ const QVector<FieldUi> &fieldTable()
                     {QStringLiteral("ram_budget"), QStringLiteral("RAM budget"),
                      QStringLiteral("Like fixed fractions, but levels are downgraded to keep "
                                     "the total memory usage below the RAM budget")}}),
-        integerField(QStringLiteral("Items/lod_ram_budget_mb"),
-                     QStringLiteral("LOD RAM Budget (MB):"),
-                     QStringLiteral("Target maximum memory usage for image levels with the RAM "
-                                    "budget LOD method."),
-                     1, 65536),
-        integerField(QStringLiteral("Items/lod_primary_budget_mb"),
-                     QStringLiteral("LOD Memory Budget (MB, 0 = off):"),
-                     QStringLiteral("Always-on cap on the decoded LOD bytes kept in memory, "
-                                    "whatever the LOD method. Requests that would exceed it are "
-                                    "not decoded. 0 leaves it unlimited."),
-                     0, 65536),
-        integerField(QStringLiteral("Items/lod_ram_cache_mb"),
-                     QStringLiteral("LOD Decoded Cache (MB, 0 = off):"),
-                     QStringLiteral("Decoded levels kept in memory so revisiting an image (for "
-                                    "example panning back) does not read or decode it again. "
-                                    "Costs no extra memory for levels already on screen."),
-                     0, 65536),
-        integerField(QStringLiteral("Items/lod_decode_threads"),
-                     QStringLiteral("LOD Decode Threads:"),
-                     QStringLiteral("How many worker threads decode image levels in the "
-                                    "background. More threads fill the screen faster on multi-core "
-                                    "machines; one is always enough to work."),
-                     1, 64),
         makeField(QStringLiteral("Items/lod_fractions"), QStringLiteral("LOD Fractions:"),
                   QStringLiteral("Comma-separated list of fractions (0-1) used by the fixed "
                                  "fractions and RAM budget LOD methods. E.g. "
@@ -111,18 +88,37 @@ const QVector<FieldUi> &fieldTable()
                      QStringLiteral("Progressive halving filter; reduces moiré and aliasing")},
                     {QStringLiteral("fast"), QStringLiteral("Fast"),
                      QStringLiteral("Single-step scaling; faster level decoding")}}),
-        checkboxField(QStringLiteral("Items/lod_store_thumbnails"),
-                      QStringLiteral("Fast loading thumbnails:"),
-                      QStringLiteral("Store a small, settings-independent thumbnail for each "
-                                     "image when saving, so opening a file does not have to read "
-                                     "the full-size images. Takes effect on the next save."),
-                      QStringLiteral("Store thumbnails in bee files")),
         checkboxField(QStringLiteral("Items/undo_cache"),
                       QStringLiteral("Undo history disk cache:"),
                       QStringLiteral("Store the encoded bytes of images held in the undo history "
                                      "in a small session cache on disk instead of keeping them in "
                                      "memory. The cache is deleted when BeeXRef exits."),
                       QStringLiteral("Cache undo history to disk")),
+        integerField(QStringLiteral("Items/lod_decode_threads"),
+                     QStringLiteral("Decode Threads:"),
+                     QStringLiteral("How many worker threads decode image levels in the "
+                                    "background. More threads fill the screen faster on multi-core "
+                                    "machines; one is always enough to work."),
+                     1, 64),
+        integerField(QStringLiteral("Items/lod_ram_cache_mb"),
+                     QStringLiteral("Decoded Level Cache (MB, 0 = off):"),
+                     QStringLiteral("Decoded levels kept in memory so revisiting an image (for "
+                                    "example panning back) does not read or decode it again. "
+                                    "Costs no extra memory for levels already on screen."),
+                     0, 65536),
+        integerField(QStringLiteral("Items/lod_cache_settle_percent"),
+                     QStringLiteral("Release Off-screen Cache (% per 10s, 0 = off):"),
+                     QStringLiteral("After 10 seconds without interaction, this share of the "
+                                    "off-screen decoded-level cache is released, oldest first, "
+                                    "repeated every 10 seconds. The viewport is never touched. "
+                                    "0 keeps the cache."),
+                     0, 50),
+        integerField(QStringLiteral("Items/lod_primary_budget_mb"),
+                     QStringLiteral("Memory Budget (MB, 0 = off):"),
+                     QStringLiteral("Always-on cap on the decoded image bytes kept in memory. "
+                                    "Requests that would exceed it are not decoded. 0 leaves it "
+                                    "unlimited."),
+                     0, 65536),
         radioField(QStringLiteral("Items/image_storage_format"),
                    QStringLiteral("Image Storage Format:"),
                    QStringLiteral("How images are stored inside bee files. Changes will only "
@@ -342,30 +338,46 @@ SettingsDialog::SettingsDialog(QWidget *parent)
 
     auto *tabs = new QTabWidget(this);
 
+    // Groups are placed by key, so the table order can change freely.
+    const auto group = [this](const QString &key) -> SettingsGroup * {
+        for (SettingsGroup *candidate : std::as_const(groups_)) {
+            if (candidate->key() == key)
+                return candidate;
+        }
+        return nullptr;
+    };
+
     auto *misc = new QWidget(tabs);
     auto *miscLayout = new QGridLayout(misc);
     misc->setLayout(miscLayout);
-    miscLayout->addWidget(groups_.at(0), 0, 0);
+    miscLayout->addWidget(group(QStringLiteral("Save/confirm_close_unsaved")), 0, 0);
     tabs->addTab(misc, QStringLiteral("&Miscellaneous"));
 
-    auto *ram = new QWidget(tabs);
-    auto *ramLayout = new QGridLayout(ram);
-    ram->setLayout(ramLayout);
-    ramLayout->addWidget(groups_.at(1), 0, 0);
-    ramLayout->addWidget(groups_.at(2), 0, 1);
-    ramLayout->addWidget(groups_.at(3), 1, 0);
-    ramLayout->addWidget(groups_.at(4), 1, 1);
-    ramLayout->addWidget(groups_.at(5), 2, 0);
-    ramLayout->addWidget(groups_.at(6), 2, 1);
-    tabs->addTab(ram, QStringLiteral("&RAM"));
+    auto *perf = new QWidget(tabs);
+    auto *perfLayout = new QGridLayout(perf);
+    perf->setLayout(perfLayout);
+    perfLayout->addWidget(group(QStringLiteral("Items/lod_decode_threads")), 0, 0);
+    perfLayout->addWidget(group(QStringLiteral("Items/lod_ram_cache_mb")), 0, 1);
+    perfLayout->addWidget(group(QStringLiteral("Items/lod_cache_settle_percent")), 1, 0);
+    perfLayout->addWidget(group(QStringLiteral("Items/lod_primary_budget_mb")), 1, 1);
+    perfLayout->addWidget(group(QStringLiteral("Items/image_allocation_limit")), 2, 0);
+    perfLayout->addWidget(group(QStringLiteral("Items/undo_cache")), 2, 1);
+    tabs->addTab(perf, QStringLiteral("&Performance"));
+
+    auto *lod = new QWidget(tabs);
+    auto *lodLayout = new QGridLayout(lod);
+    lod->setLayout(lodLayout);
+    lodLayout->addWidget(group(QStringLiteral("Items/lod_method")), 0, 0);
+    lodLayout->addWidget(group(QStringLiteral("Items/lod_quality")), 0, 1);
+    lodLayout->addWidget(group(QStringLiteral("Items/lod_fractions")), 1, 0, 1, 2);
+    tabs->addTab(lod, QStringLiteral("&LOD"));
 
     auto *items = new QWidget(tabs);
     auto *itemsLayout = new QGridLayout(items);
     items->setLayout(itemsLayout);
-    itemsLayout->addWidget(groups_.at(7), 0, 0);
-    itemsLayout->addWidget(groups_.at(8), 0, 1);
-    itemsLayout->addWidget(groups_.at(9), 1, 0);
-    itemsLayout->addWidget(groups_.at(10), 1, 1);
+    itemsLayout->addWidget(group(QStringLiteral("Items/image_storage_format")), 0, 0);
+    itemsLayout->addWidget(group(QStringLiteral("Items/arrange_gap")), 0, 1);
+    itemsLayout->addWidget(group(QStringLiteral("Items/arrange_default")), 1, 0, 1, 2);
     tabs->addTab(items, QStringLiteral("&Images && Items"));
 
     auto *layout = new QVBoxLayout(this);
