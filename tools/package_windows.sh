@@ -66,29 +66,47 @@ dll_paths()
     '
 }
 
-# Qt's own DLLs and the runtime-loaded plugins (platform, styles,
-# imageformats, tls, ...). windeployqt ships with the MSYS2 Qt; without
-# it, copy the plugin directories whole.
+# Qt's own DLLs. windeployqt ships with the MSYS2 Qt and is worth
+# running for the Qt DLL set, but its plugin handling is incomplete for
+# MSYS2's layout, so the plugin directories are always copied below.
 windeployqt=$(command -v windeployqt.exe 2>/dev/null || command -v windeployqt 2>/dev/null || true)
 if [ -n "$windeployqt" ]; then
     for exe in $exes; do
         "$windeployqt" --release --no-translations "$out/$(basename "$exe")" >/dev/null
     done
-else
-    echo "windeployqt not found; copying the Qt plugin directories." >&2
-    plugins="$MINGW_PREFIX/share/qt6/plugins"
-    for dir in platforms styles imageformats iconengines tls networkinformation; do
-        [ -d "$plugins/$dir" ] && cp -r "$plugins/$dir" "$out/"
-    done
 fi
 
-# The MSYS2 DLL closure. ldd is recursive for an executable, but the
-# plugins windeployqt copies can pull extra DLLs, so repeat until the
-# set stops growing.
-while :; do
-    before=$(ls "$out"/*.dll 2>/dev/null | wc -l)
-    for file in "$out"/*.exe "$out"/*.dll; do
+# The plugins are dlopen'd at runtime: ldd on the executable never lists
+# them, and a plugin's own dependencies (qjpeg -> libjpeg, qwebp ->
+# libwebp, ...) are invisible to the executable's closure too. Copy
+# every plugin category whole; the closure below then resolves what they
+# need.
+plugins="$MINGW_PREFIX/share/qt6/plugins"
+plugin_count=0
+for dir in platforms styles imageformats iconengines tls networkinformation; do
+    [ -d "$plugins/$dir" ] || continue
+    mkdir -p "$out/$dir"
+    for file in "$plugins/$dir"/*.dll; do
         [ -e "$file" ] || continue
+        if [ ! -e "$out/$dir/${file##*/}" ]; then
+            cp "$file" "$out/$dir/"
+            plugin_count=$((plugin_count + 1))
+        fi
+    done
+done
+
+# Every executable and DLL in the package, plugins included.
+package_files()
+{
+    find "$out" -type f \( -iname '*.exe' -o -iname '*.dll' \) | LC_ALL=C sort
+}
+
+# The MSYS2 DLL closure over the whole package. ldd is recursive for an
+# executable, but plugins are loaded later, so repeat until the set
+# stops growing.
+while :; do
+    before=$(package_files | wc -l)
+    package_files | while IFS= read -r file; do
         dll_paths "$file" | while read -r dep; do
             case "$dep" in
                 "$MINGW_PREFIX"/*)
@@ -108,21 +126,23 @@ while :; do
             esac
         done
     done
-    after=$(ls "$out"/*.dll 2>/dev/null | wc -l)
+    after=$(package_files | wc -l)
     [ "$before" = "$after" ] && break
 done
 
-# Every non-system dependency must now sit next to the executable.
+# Every non-system dependency, of the executables and of the plugins,
+# must now sit next to the executable.
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 missing="$tmp/missing"
 : > "$missing"
-for exe in $exes; do
-    dll_paths "$out/$(basename "$exe")" | while read -r dep; do
+package_files | while IFS= read -r file; do
+    dll_paths "$file" | while read -r dep; do
         case "$dep" in
             "$MINGW_PREFIX"/*)
                 base=${dep##*/}
-                [ -e "$out/$base" ] || echo "$base" >> "$missing"
+                [ -e "$out/$base" ] \
+                    || echo "$base (needed by ${file#"$out"/})" >> "$missing"
                 ;;
         esac
     done
@@ -138,5 +158,7 @@ if [ ! -e "$out/platforms/qwindows.dll" ]; then
     echo "Warning: platforms/qwindows.dll is missing; the app will not start." >&2
 fi
 
+image_plugins=$(ls "$out/imageformats"/*.dll 2>/dev/null | wc -l)
 echo "Packaged $(du -sh "$out" | cut -f1) into $out"
+echo "  plugins: $plugin_count copied, $image_plugins image formats"
 echo "Zip it (or copy the directory) to a machine without MSYS2."

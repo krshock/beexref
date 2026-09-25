@@ -105,12 +105,14 @@ tools/package_windows.sh [build-dir] [out-dir] [exe...]
 # defaults: build  dist/beexref-windows-x64  <build-dir>/beexref.exe
 ```
 
-It copies the executables, runs `windeployqt` for the Qt DLLs and the
-runtime-loaded plugins (`platforms/qwindows.dll`, `imageformats/`,
-`styles/`, `tls/`), then copies the whole `ldd` closure of the MSYS2
-DLLs — Qt depends on zlib, ICU, freetype and friends, which are not part
-of Qt — and fails if a non-system dependency is missing. Zip the output
-folder to distribute it.
+It copies the executables, runs `windeployqt` for the Qt DLLs, copies
+the plugin directories whole (`platforms/`, `imageformats/`, `styles/`,
+`tls/`, ...), then copies the `ldd` closure of everything in the
+package — the executables *and* the plugins. Plugin dependencies never
+show up in the executable's listing: `qjpeg` needs libjpeg, `qwebp`
+needs libwebp, and without them the images silently stay empty in the
+dist build. The script fails if a non-system dependency is missing.
+Zip the output folder to distribute it.
 
 With the Qt installer's MinGW kit, deploy manually instead:
 
