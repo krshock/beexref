@@ -172,6 +172,7 @@ private slots:
     void selectionBoundsCoversSelectedItems();
     void dragMovesItemAndModel();
     void dragThresholdProtectsFromTinyGestures();
+    void rightClickKeepsTheSelection();
     void fitSceneFramesTheItems();
     void zoomLimitsHold();
     void middleDragPansWithTheCursor();
@@ -224,6 +225,7 @@ private slots:
     void settingsActionOpensTheDialog();
     void controlsDialogEditsShortcutsAndBindings();
     void viewAppliesBindingOverrides();
+    void mouseBindingsKeepTheSelection();
     void windowTogglesFollowTheActions();
     void canvasContextMenuMirrorsTheMenuBar();
     void moveWindowModeFollowsThePointer();
@@ -419,6 +421,45 @@ void TestUiScene::dragThresholdProtectsFromTinyGestures()
               Qt::NoButton);
     QVERIFY(item->x > 0);
     QVERIFY(stack.canUndo());
+}
+
+void TestUiScene::rightClickKeepsTheSelection()
+{
+    auto document = std::make_shared<doc::Document>(doc::Document::create());
+    const doc::ItemPtr item = pixmapItem(200, 100, Qt::red);
+    document->addItem(item);
+
+    ui::View view;
+    auto *scene = new ui::Scene(&view);
+    scene->setDocument(document);
+    view.setBoardScene(scene);
+    doc::UndoStack stack(document.get());
+    view.setUndoStack(&stack);
+    view.resize(600, 400);
+    view.fitScene();
+
+    SceneItem *viewItem = scene->pixmapItemViews().first();
+    viewItem->setSelected(true);
+    QCOMPARE(scene->selectedItemViews().size(), 1);
+
+    // Right-clicking the item keeps it selected.
+    const QPoint onItem = view.mapFromScene(viewItem->sceneBoundingRect().center());
+    sendMouse(view.viewport(), QEvent::MouseButtonPress, onItem, Qt::RightButton, Qt::RightButton);
+    sendMouse(view.viewport(), QEvent::MouseButtonRelease, onItem, Qt::RightButton, Qt::NoButton);
+    QCOMPARE(scene->selectedItemViews().size(), 1);
+
+    // Right-clicking empty canvas opens the menu and keeps the selection:
+    // the menu's actions act on it.
+    const QPoint empty(5, 5);
+    sendMouse(view.viewport(), QEvent::MouseButtonPress, empty, Qt::RightButton, Qt::RightButton);
+    QCOMPARE(scene->selectedItemViews().size(), 1);
+    sendMouse(view.viewport(), QEvent::MouseButtonRelease, empty, Qt::RightButton, Qt::NoButton);
+    QCOMPARE(scene->selectedItemViews().size(), 1);
+
+    // A right double-click does not clear it either.
+    sendMouse(view.viewport(), QEvent::MouseButtonDblClick, empty, Qt::RightButton,
+              Qt::RightButton);
+    QCOMPARE(scene->selectedItemViews().size(), 1);
 }
 
 void TestUiScene::fitSceneFramesTheItems()
@@ -2306,6 +2347,78 @@ void TestUiScene::viewAppliesBindingOverrides()
     QVERIFY2(view.transform().m11() > scaleBefore,
              qPrintable(QStringLiteral("scale %1 -> %2").arg(scaleBefore).arg(
                  view.transform().m11())));
+
+    settings::setSettingsDir(QString());
+}
+
+void TestUiScene::mouseBindingsKeepTheSelection()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    settings::setSettingsDir(dir.path());
+
+    // The user's override: pan on the plain left button.
+    {
+        ui::controls::Store store;
+        ui::controls::MouseBinding pan = store.mouse(QStringLiteral("pan1"));
+        pan.button = QStringLiteral("Left");
+        pan.modifiers = {QStringLiteral("No Modifier")};
+        store.setMouse(pan);
+    }
+
+    auto document = std::make_shared<doc::Document>(doc::Document::create());
+    document->addItem(pixmapItem(200, 200, Qt::red));
+
+    ui::View view;
+    auto *scene = new ui::Scene(&view);
+    scene->setDocument(document);
+    view.setBoardScene(scene);
+    view.resize(400, 300);
+    view.fitScene();
+    view.setBindings(ui::controls::Bindings::load());
+
+    SceneItem *viewItem = scene->pixmapItemViews().first();
+    viewItem->setSelected(true);
+
+    // The binding wins before selection handling: a left drag pans and
+    // keeps the selection.
+    const QPoint empty(5, 5);
+    const int hBefore = view.horizontalScrollBar()->value();
+    sendMouse(view.viewport(), QEvent::MouseButtonPress, empty, Qt::LeftButton, Qt::LeftButton);
+    sendMouse(view.viewport(), QEvent::MouseMove, empty + QPoint(60, 0), Qt::NoButton,
+              Qt::LeftButton);
+    sendMouse(view.viewport(), QEvent::MouseButtonRelease, empty + QPoint(60, 0), Qt::LeftButton,
+              Qt::NoButton);
+    QVERIFY(view.horizontalScrollBar()->value() != hBefore);
+    QCOMPARE(scene->selectedItemViews().size(), 1);
+
+    // The unbound right button opens the menu without clearing it.
+    sendMouse(view.viewport(), QEvent::MouseButtonPress, empty, Qt::RightButton, Qt::RightButton);
+    QCOMPARE(scene->selectedItemViews().size(), 1);
+    sendMouse(view.viewport(), QEvent::MouseButtonRelease, empty, Qt::RightButton, Qt::NoButton);
+    QCOMPARE(scene->selectedItemViews().size(), 1);
+
+    // Back to the defaults: Alt+left pans, plain left selects again.
+    {
+        ui::controls::Store store;
+        store.restoreDefaults();
+    }
+    view.setBindings(ui::controls::Bindings::load());
+    scene->clearSelection();
+    const int hBeforeAlt = view.horizontalScrollBar()->value();
+    sendMouse(view.viewport(), QEvent::MouseButtonPress, empty, Qt::LeftButton, Qt::LeftButton,
+              Qt::AltModifier);
+    sendMouse(view.viewport(), QEvent::MouseMove, empty + QPoint(60, 0), Qt::NoButton,
+              Qt::LeftButton, Qt::AltModifier);
+    sendMouse(view.viewport(), QEvent::MouseButtonRelease, empty + QPoint(60, 0), Qt::LeftButton,
+              Qt::NoButton, Qt::AltModifier);
+    QVERIFY(view.horizontalScrollBar()->value() != hBeforeAlt);
+    QCOMPARE(scene->selectedItemViews().size(), 0);
+
+    const QPoint onItem = view.mapFromScene(viewItem->sceneBoundingRect().center());
+    sendMouse(view.viewport(), QEvent::MouseButtonPress, onItem, Qt::LeftButton, Qt::LeftButton);
+    sendMouse(view.viewport(), QEvent::MouseButtonRelease, onItem, Qt::LeftButton, Qt::NoButton);
+    QCOMPARE(scene->selectedItemViews().size(), 1);
 
     settings::setSettingsDir(QString());
 }

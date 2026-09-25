@@ -277,6 +277,13 @@ void View::fitSelection()
 
 void View::mouseDoubleClickEvent(QMouseEvent *event)
 {
+    // Only the left button: a right double-click would reach the scene
+    // and clear the selection, like the right press does.
+    if (event->button() != Qt::LeftButton) {
+        event->accept();
+        return;
+    }
+
     if (event->button() != Qt::LeftButton) {
         QGraphicsView::mouseDoubleClickEvent(event);
         return;
@@ -487,7 +494,13 @@ void View::mousePressEvent(QMouseEvent *event)
             return;
         }
     }
-    QGraphicsView::mousePressEvent(event);
+    // Only the left button reaches the scene: a right press makes it
+    // clear the selection, and the context menu's actions act on that
+    // selection (the Go port keeps it too).
+    if (event->button() == Qt::LeftButton)
+        QGraphicsView::mousePressEvent(event);
+    else
+        event->accept();
 }
 
 void View::mouseMoveEvent(QMouseEvent *event)
