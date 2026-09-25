@@ -70,6 +70,15 @@ ctest --preset linux-debug
 - Order-sensitive LOD tests pin `decodeThreads = 1`; completion order with
   N > 1 is not deterministic.
 
+## Versioning
+
+The version is `MAJOR.MINOR.PATCH`, defined once in `CMakeLists.txt`
+(`project(BeeXRef VERSION x.y.z)`); CMake passes it to the code as
+`constants::Version`, which `--version`, the About dialog and the
+startup log use. To release: bump the version there, commit, and tag the
+release commit `vX.Y.Z` (annotated), matching the Python reference's
+tags (`v0.3.3`). Do not tag from a dirty tree.
+
 ## Format & tools
 
 - Native format is `.beex`; `write.cpp` streams it atomically (temp file +

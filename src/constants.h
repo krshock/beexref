@@ -4,7 +4,11 @@ namespace constants {
 
 inline constexpr char AppName[] = "BeeXRef";
 inline constexpr char AppNameFull[] = "BeeXRef Reference Image Viewer";
-inline constexpr char Version[] = "0.1.0";
+// The application version, from the CMake project version (the single
+// source of truth in CMakeLists.txt): bump it there and tag the release
+// commit vX.Y.Z. Shown by --version, the About dialog and the startup
+// log.
+inline constexpr char Version[] = BEEXREF_VERSION;
 // The reference's about box text.
 inline constexpr char Copyright[] = "Copyright \u00A9 2021-2024 Rebecca Breu";
 

@@ -5,6 +5,15 @@ project(BeeXRef
     DESCRIPTION "BeeXRef reference image viewer"
     LANGUAGES C CXX)
 
+# The version is the single source of truth: it reaches the app as
+# constants::Version (--version, the About dialog, the startup log).
+# Bump MAJOR.MINOR.PATCH here and tag the release commit vX.Y.Z
+# (annotated), like the Python reference's tags.
+if(NOT PROJECT_VERSION MATCHES "^[0-9]+\\.[0-9]+\\.[0-9]+$")
+    message(FATAL_ERROR
+        "project VERSION must be MAJOR.MINOR.PATCH, got '${PROJECT_VERSION}'")
+endif()
+
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 include(CompilerWarnings)
 
@@ -134,6 +143,7 @@ qt_add_library(beexref_core STATIC
     src/util/process.h)
 target_include_directories(beexref_core PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>)
+target_compile_definitions(beexref_core PUBLIC BEEXREF_VERSION="${PROJECT_VERSION}")
 qt_add_resources(beexref_core "beexref_assets"
     PREFIX "/"
     FILES

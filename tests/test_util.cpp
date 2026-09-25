@@ -1,5 +1,7 @@
+#include <QRegularExpression>
 #include <QtTest>
 
+#include "constants.h"
 #include "util/format.h"
 #include "util/memory.h"
 
@@ -10,8 +12,20 @@ class TestUtil : public QObject
 private slots:
     void formatsSizes();
     void urlFilenamesAreSafe();
+    void appVersionIsSemver();
     void reportsProcessMemory();
 };
+
+void TestUtil::appVersionIsSemver()
+{
+    // The version comes from CMake's project VERSION; keep it explicit
+    // MAJOR.MINOR.PATCH so tags and --version stay predictable.
+    const QString version = QString::fromLatin1(constants::Version);
+    QVERIFY2(QRegularExpression(QStringLiteral("^[0-9]+\\.[0-9]+\\.[0-9]+$"))
+                 .match(version)
+                 .hasMatch(),
+             qPrintable(version));
+}
 
 void TestUtil::formatsSizes()
 {
