@@ -224,6 +224,28 @@ board::Status Document::save(const QString &path, bool storeThumbnails,
             item->id = 0;
     }
 
+    const QVector<board::Record> records = buildRecords();
+    QVector<qint64> ids;
+    const board::Status status = board::save(path, records, storeThumbnails, progress, &ids);
+    if (!status)
+        return status;
+    // The writer assigned a row id to every record, in order.
+    if (ids.size() == items_.size()) {
+        for (qsizetype i = 0; i < items_.size(); ++i)
+            items_.at(i)->id = ids.at(i);
+    }
+    return status;
+}
+
+board::Status Document::exportBee(const QString &path, const board::Progress &progress) const
+{
+    // The legacy format is import/export only: the scene's own ids and
+    // sources are untouched and the document keeps its .beex path.
+    return board::save(path, buildRecords(), false, progress, nullptr, board::Format::Bee);
+}
+
+QVector<board::Record> Document::buildRecords() const
+{
     QVector<board::Record> records;
     records.reserve(items_.size());
     for (const ItemPtr &item : items_) {
@@ -259,16 +281,7 @@ board::Status Document::save(const QString &path, bool storeThumbnails,
         }
         records.append(record);
     }
-    QVector<qint64> ids;
-    const board::Status status = board::save(path, records, storeThumbnails, progress, &ids);
-    if (!status)
-        return status;
-    // The writer assigned a row id to every record, in order.
-    if (ids.size() == items_.size()) {
-        for (qsizetype i = 0; i < items_.size(); ++i)
-            items_.at(i)->id = ids.at(i);
-    }
-    return status;
+    return records;
 }
 
 void Document::adoptFileSources()

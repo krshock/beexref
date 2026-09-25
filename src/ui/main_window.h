@@ -49,6 +49,11 @@ public:
     // updated. Reports failures with a dialog and returns false.
     bool saveDocumentTo(const QString &path, bool createNew);
 
+    // Writes the legacy .bee to path (the engine behind Export BeeRef
+    // File; also used by tests). Reports failures with a dialog and
+    // returns false. The document's path and clean state are untouched.
+    bool exportBeeTo(const QString &path);
+
     View *view() const { return view_; }
     MetadataPanel *metadataPanel() const { return metadataPanel_; }
     WelcomeOverlay *welcomeOverlay() const { return welcomeOverlay_; }
@@ -67,6 +72,9 @@ private:
     // reference's on_action_save / on_action_save_as.
     void saveDocument();
     void saveDocumentAs();
+    // File ▸ Export ▸ Export BeeRef File (.bee): the legacy upstream
+    // format, for interchange with BeeRef only.
+    void exportBee();
     void updateTitle();
     // Applies an undo/redo step and brings the scene in line.
     void applyHistoryStep(bool undo);

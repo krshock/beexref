@@ -43,14 +43,24 @@ struct Record
 // Reports work done out of total while saving.
 using Progress = std::function<void(int done, int total)>;
 
+// The on-disk shape: the native .beex, or the legacy upstream .bee
+// (items without meta/uuid, sqlar only, upstream header), which is an
+// interchange format: it never stores thumbnails and is never saved in
+// place.
+enum class Format {
+    Beex,
+    Bee,
+};
+
 // Writes records to path atomically: a temp file in the same directory
 // is written and renamed over the target, so a failure leaves any
 // existing file untouched. With storeThumbnails, a floor level is
-// generated for every pixmap record that carries none.
+// generated for every pixmap record that carries none (native format
+// only).
 // assignedIds, when given, receives the row id of every record in the
 // same order, so the caller can write them back to its items.
 Status save(const QString &path, const QVector<Record> &records,
             bool storeThumbnails = true, const Progress &progress = {},
-            QVector<qint64> *assignedIds = nullptr);
+            QVector<qint64> *assignedIds = nullptr, Format format = Format::Beex);
 
 } // namespace board

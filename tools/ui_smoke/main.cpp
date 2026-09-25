@@ -635,6 +635,14 @@ public:
                   << "\n";
         }
 
+        // Export the legacy .bee shape end to end.
+        {
+            const QString beePath = outputDir_ + QStringLiteral("/exported.bee");
+            const bool exported = window_.exportBeeTo(beePath);
+            out() << "exported=" << exported << " path=" << beePath
+                  << " bytes=" << QFileInfo(beePath).size() << "\n";
+        }
+
         const ui::LodManager::Stats stats = view->lodManager()->stats();
         out() << "items=" << window_.scene()->itemViews().size()
               << " pixmaps=" << window_.scene()->pixmapItemViews().size()

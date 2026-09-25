@@ -38,6 +38,22 @@ constexpr const char *kSqlarTable = R"(
     )
 )";
 
+// Upstream BeeRef's legacy items table: no fork-specific meta or uuid
+// columns, as fileio/legacy.py in the Python reference.
+constexpr const char *kBeeItemsTable = R"(
+    CREATE TABLE IF NOT EXISTS items (
+        id INTEGER PRIMARY KEY,
+        type TEXT NOT NULL,
+        x REAL DEFAULT 0,
+        y REAL DEFAULT 0,
+        z REAL DEFAULT 0,
+        scale REAL DEFAULT 1,
+        rotation REAL DEFAULT 0,
+        flip INTEGER DEFAULT 1,
+        data JSON
+    )
+)";
+
 constexpr const char *kLodTable = R"(
     CREATE TABLE IF NOT EXISTS lod (
         item_id INTEGER NOT NULL,
@@ -124,6 +140,14 @@ Status createTables(Connection &db)
     if (Status status = execScript(db, kSqlarTable); !status)
         return status;
     return execScript(db, kLodTable);
+}
+
+Status createBeeTables(Connection &db)
+{
+    // The legacy format has no meta, uuid or lod columns.
+    if (Status status = execScript(db, kBeeItemsTable); !status)
+        return status;
+    return execScript(db, kSqlarTable);
 }
 
 Status writeHeader(Connection &db, int userVersion, int applicationId)

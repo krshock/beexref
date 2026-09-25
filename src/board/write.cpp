@@ -144,11 +144,15 @@ bool reusableFloor(const Record &record)
     return reader.canRead();
 }
 
-Status insertItem(Connection &db, const Record &record, qint64 id)
+Status insertItem(Connection &db, const Record &record, qint64 id, bool legacy)
 {
-    auto statement = db.prepare(QStringLiteral(
-        "INSERT INTO items (id, type, x, y, z, scale, rotation, flip, data, meta, uuid) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"));
+    const QString sql = legacy
+        ? QStringLiteral("INSERT INTO items (id, type, x, y, z, scale, rotation, flip, data) "
+                         "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
+        : QStringLiteral(
+              "INSERT INTO items (id, type, x, y, z, scale, rotation, flip, data, meta, uuid) "
+              "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+    auto statement = db.prepare(sql);
     if (!statement)
         return statement.error();
 
@@ -171,6 +175,8 @@ Status insertItem(Connection &db, const Record &record, qint64 id)
         return status;
     if (Status status = stmt.bind(9, record.dataJson); !status)
         return status;
+    if (legacy)
+        return stmt.exec();
     if (Status status = stmt.bind(10, record.metaJson); !status)
         return status;
     if (Status status = stmt.bind(11, record.uuid); !status)
@@ -258,14 +264,24 @@ Status writeThumbnail(Connection &db, qint64 id, const Record &record, const QBy
 }
 
 Status writeAll(Connection &db, const QVector<Record> &records, bool storeThumbnails,
-                const Progress &progress, QVector<qint64> *assignedIds)
+                const Progress &progress, QVector<qint64> *assignedIds, Format format)
 {
+    const bool legacy = format == Format::Bee;
     if (Status status = db.exec(QStringLiteral("PRAGMA foreign_keys=ON")); !status)
         return status;
-    if (Status status = schema::createTables(db); !status)
-        return status;
-    if (Status status = schema::writeHeader(db); !status)
-        return status;
+    if (legacy) {
+        if (Status status = schema::createBeeTables(db); !status)
+            return status;
+        if (Status status =
+                schema::writeHeader(db, schema::kBeeUserVersion, schema::kBeeApplicationId);
+            !status)
+            return status;
+    } else {
+        if (Status status = schema::createTables(db); !status)
+            return status;
+        if (Status status = schema::writeHeader(db); !status)
+            return status;
+    }
 
     auto transaction = Transaction::begin(db);
     if (!transaction)
@@ -288,7 +304,7 @@ Status writeAll(Connection &db, const QVector<Record> &records, bool storeThumbn
         if (assignedIds)
             assignedIds->append(id);
 
-        if (Status status = insertItem(db, record, id); !status)
+        if (Status status = insertItem(db, record, id, legacy); !status)
             return status;
         if (record.type != QLatin1String("pixmap"))
             continue;
@@ -301,7 +317,8 @@ Status writeAll(Connection &db, const QVector<Record> &records, bool storeThumbn
 
         if (Status status = insertBlob(db, record, id, pixmap); !status)
             return status;
-        if (!storeThumbnails)
+        // The legacy format stores no thumbnails.
+        if (legacy || !storeThumbnails)
             continue;
         if (Status status = writeThumbnail(db, id, record, pixmap); !status)
             return status;
@@ -326,7 +343,7 @@ bool renameOverwrite(const QString &from, const QString &to)
 } // namespace
 
 Status save(const QString &path, const QVector<Record> &records, bool storeThumbnails,
-            const Progress &progress, QVector<qint64> *assignedIds)
+            const Progress &progress, QVector<qint64> *assignedIds, Format format)
 {
     const QFileInfo target(path);
     const QDir dir(target.absolutePath());
@@ -353,7 +370,8 @@ Status save(const QString &path, const QVector<Record> &records, bool storeThumb
             QFile::remove(tempPath);
             return db.error();
         }
-        if (Status status = writeAll(db.value(), records, storeThumbnails, progress, assignedIds);
+        if (Status status =
+                writeAll(db.value(), records, storeThumbnails, progress, assignedIds, format);
             !status) {
             QFile::remove(tempPath);
             return status;

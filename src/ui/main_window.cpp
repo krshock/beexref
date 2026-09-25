@@ -311,9 +311,59 @@ void MainWindow::saveDocumentAs()
         saveDocumentTo(filename, true);
 }
 
-bool MainWindow::saveDocumentTo(const QString &path, bool createNew)
+void MainWindow::exportBee()
+{
+    view_->cancelCrop();
+    view_->cancelSampleColor();
+    const QString path = document_ ? document_->path() : QString();
+    const QString startDir =
+        path.isEmpty() ? settings::configDir() : QFileInfo(path).absolutePath();
+    const QString filename = QFileDialog::getSaveFileName(
+        this, QStringLiteral("Export BeeRef File"), startDir,
+        QStringLiteral("BeeRef File (*.bee)"));
+    if (filename.isEmpty())
+        return;
+    exportBeeTo(filename);
+}
+
+bool MainWindow::exportBeeTo(const QString &path)
 {
     if (!document_)
+        return false;
+
+    QString filename = path;
+    if (!filename.endsWith(QStringLiteral(".bee"), Qt::CaseInsensitive))
+        filename += QStringLiteral(".bee");
+
+    QProgressDialog progress(QStringLiteral("Exporting %1").arg(filename), QString(), 0, 100, this);
+    progress.setWindowModality(Qt::WindowModal);
+    progress.setMinimumDuration(300);
+    const board::Progress report = [&progress](int done, int total) {
+        if (total <= 0)
+            return;
+        progress.setMaximum(total);
+        progress.setValue(done);
+        QCoreApplication::processEvents();
+    };
+
+    const board::Status status = document_->exportBee(filename, report);
+    progress.close();
+    if (!status) {
+        logging::error(QStringLiteral("Cannot export file"),
+                       {{QStringLiteral("file"), filename},
+                        {QStringLiteral("error"), status.error().toString()}});
+        QMessageBox::warning(this, QStringLiteral("Problem exporting file"),
+                             status.error().toString());
+        return false;
+    }
+    logging::info(QStringLiteral("File exported"),
+                  {{QStringLiteral("file"), filename},
+                   {QStringLiteral("items"), document_->items().size()}});
+    return true;
+}
+
+bool MainWindow::saveDocumentTo(const QString &path, bool createNew)
+{    if (!document_)
         return false;
 
     // Native saves always use .beex; .bee is import only.
@@ -835,6 +885,9 @@ void MainWindow::buildActions()
     actions_->add(QStringLiteral("save_as"), QStringLiteral("Save &As..."),
                   QKeySequence(QStringLiteral("Ctrl+Shift+S")), G::ItemsInScene,
                   [this](bool) { saveDocumentAs(); });
+    actions_->add(QStringLiteral("export_bee"),
+                  QStringLiteral("Export BeeRef File (.bee)"), {}, G::ItemsInScene,
+                  [this](bool) { exportBee(); });
     actions_->add(QStringLiteral("quit"), QStringLiteral("&Quit"), QKeySequence::Quit, G::Always,
                   [this](bool) { close(); });
 
@@ -1069,6 +1122,8 @@ void MainWindow::buildMenus()
     actions_->appendSeparator(fileMenu);
     actions_->append(fileMenu, QStringLiteral("save"));
     actions_->append(fileMenu, QStringLiteral("save_as"));
+    auto *exportMenu = fileMenu->addMenu(QStringLiteral("&Export"));
+    actions_->append(exportMenu, QStringLiteral("export_bee"));
     actions_->appendSeparator(fileMenu);
     actions_->append(fileMenu, QStringLiteral("quit"));
 

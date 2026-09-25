@@ -59,6 +59,7 @@ private slots:
     void replacesExistingFile();
     void failsWhenDirectoryIsMissing();
     void storesUndecodablePixmapWithoutThumbnail();
+    void exportsLegacyBeeShape();
 };
 
 void TestBoardSave::savesAndReloads()
@@ -304,6 +305,62 @@ void TestBoardSave::storesUndecodablePixmapWithoutThumbnail()
     QVERIFY(board.isOk());
     QCOMPARE(board.value().blob(1).value(), notAnImage);
     QVERIFY(board.value().floorLevels().value().isEmpty());
+}
+
+void TestBoardSave::exportsLegacyBeeShape()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString path = dir.filePath(QStringLiteral("legacy.bee"));
+
+    const QByteArray png = makePng(300, 200, Qt::red);
+    QVector<board::Record> records;
+    records << pixmapRecord(1, png, QStringLiteral("a.png"));
+    records << pixmapRecord(2, makePng(120, 90, Qt::blue), QStringLiteral("b.png"));
+
+    QVERIFY(board::save(path, records, true, {}, nullptr, board::Format::Bee).isOk());
+    QVERIFY(QFile::exists(path));
+    QVERIFY(tempFiles(dir.path()).isEmpty());
+
+    auto db = board::Connection::open(path, board::Connection::OpenMode::ReadOnly);
+    QVERIFY(db);
+    board::Connection &connection = db.value();
+
+    QCOMPARE(board::schema::readUserVersion(connection).value(), board::schema::kBeeUserVersion);
+    QCOMPARE(board::schema::readApplicationId(connection).value(),
+             board::schema::kBeeApplicationId);
+
+    // The legacy items table has no meta or uuid columns.
+    auto columns = connection.prepare(QStringLiteral("PRAGMA table_info(items)"));
+    QVERIFY(columns);
+    QStringList names;
+    while (true) {
+        auto row = columns.value().step();
+        QVERIFY(row);
+        if (!row.value())
+            break;
+        names << columns.value().columnText(1);
+    }
+    QVERIFY(names.contains(QStringLiteral("data")));
+    QVERIFY(!names.contains(QStringLiteral("meta")));
+    QVERIFY(!names.contains(QStringLiteral("uuid")));
+
+    // No lod table in the legacy format.
+    auto lod = connection.prepare(QStringLiteral(
+        "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='lod'"));
+    QVERIFY(lod);
+    auto lodRow = lod.value().step();
+    QVERIFY(lodRow);
+    QVERIFY(lodRow.value());
+    QCOMPARE(lod.value().columnInt64(0), qint64(0));
+
+    // Both pixmaps made it into sqlar.
+    auto blobs = connection.prepare(QStringLiteral("SELECT count(*) FROM sqlar"));
+    QVERIFY(blobs);
+    auto blobRow = blobs.value().step();
+    QVERIFY(blobRow);
+    QVERIFY(blobRow.value());
+    QCOMPARE(blobs.value().columnInt64(0), qint64(2));
 }
 
 QTEST_GUILESS_MAIN(TestBoardSave)

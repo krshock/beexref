@@ -32,6 +32,8 @@
 #include <cmath>
 
 #include "doc/document.h"
+#include "board/schema.h"
+#include "board/sqlite.h"
 #include "doc/item.h"
 #include "doc/source.h"
 #include "doc/undo.h"
@@ -200,6 +202,7 @@ private slots:
     void raiseAndLowerChangeZOrder();
     void newSceneClearsTheBoard();
     void windowSavesToFile();
+    void windowExportsLegacyBee();
     void closeHonoursTheUnsavedSetting();
     void selectingAnImageSchedulesLod();
     void hudToastsAppearAndExpire();
@@ -1711,6 +1714,44 @@ void TestUiScene::windowSavesToFile()
     QVERIFY(reopened.isOk());
     QCOMPARE(reopened.value().items().size(), 1);
     QCOMPARE(reopened.value().items().first()->id, item->id);
+
+    settings::setSettingsDir(QString());
+}
+
+void TestUiScene::windowExportsLegacyBee()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    settings::setSettingsDir(dir.path());
+
+    ui::MainWindow window;
+    QImage image(8, 6, QImage::Format_ARGB32);
+    image.fill(Qt::red);
+    QMimeData mime;
+    mime.setImageData(image);
+    window.input()->insertMimeData(mime, QPointF(10, 10));
+    QCOMPARE(window.scene()->pixmapItemViews().size(), 1);
+
+    // Exporting is offered through the action only while items exist.
+    QAction *exportAction = actionByText(window, QStringLiteral("Export BeeRef File (.bee)"));
+    QVERIFY(exportAction);
+    QVERIFY(exportAction->isEnabled());
+
+    const QString path = dir.filePath(QStringLiteral("legacy.bee"));
+    QVERIFY(window.exportBeeTo(path));
+    QVERIFY(QFile::exists(path));
+
+    // The export leaves the document unchanged: no path, still modified.
+    QVERIFY(window.scene()->document()->path().isEmpty());
+    QVERIFY(window.scene()->document()->isModified());
+
+    // The legacy header is written, and the board reopens as an import.
+    auto db = board::Connection::open(path, board::Connection::OpenMode::ReadOnly);
+    QVERIFY(db);
+    QCOMPARE(board::schema::readUserVersion(db.value()).value(), board::schema::kBeeUserVersion);
+    auto reopened = doc::Document::open(path, dir.filePath(QStringLiteral("cache")));
+    QVERIFY(reopened.isOk());
+    QCOMPARE(reopened.value().items().size(), 1);
 
     settings::setSettingsDir(QString());
 }

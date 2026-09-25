@@ -77,10 +77,17 @@ public:
     board::Status save(const QString &path, bool storeThumbnails = true,
                        const board::Progress &progress = {}, bool createNew = false) const;
 
+    // Writes the legacy upstream .bee format (interchange only): no
+    // thumbnails, no meta/uuid, the scene's ids and path untouched.
+    board::Status exportBee(const QString &path, const board::Progress &progress = {}) const;
+
     std::shared_ptr<board::Board> board() const { return board_; }
     void close();
 
 private:
+    // One writer record per item, in item order.
+    QVector<board::Record> buildRecords() const;
+
     QString path_;
     QString tempDir_;
     QVector<ItemPtr> items_;
