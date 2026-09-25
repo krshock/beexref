@@ -87,8 +87,13 @@ void View::setBoardScene(Scene *scene)
         connect(boardScene_, &Scene::itemsChanged, this, [this]() { recalculateSceneRect(); });
         // A pure selection change moves the overlay without changing
         // any item, so itemsChanged() does not fire for it.
-        connect(boardScene_, &QGraphicsScene::selectionChanged, this,
-                [this]() { refreshSelectionOverlay(); });
+        connect(boardScene_, &QGraphicsScene::selectionChanged, this, [this]() {
+            refreshSelectionOverlay();
+            // Selection is an LOD hint: the selected image moves to the
+            // Selected band (highest decode priority). Coalesced, so a
+            // multi-selection is one evaluation.
+            lod_->schedule();
+        });
         // The scene may be destroyed before the view (a window owns
         // both). Drop every reference while both are still intact.
         connect(boardScene_, &Scene::aboutToBeDestroyed, this, [this]() {

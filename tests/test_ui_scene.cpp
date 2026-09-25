@@ -39,6 +39,7 @@
 #include "settings.h"
 #include "test_env.h"
 #include "ui/input_controller.h"
+#include "ui/lod_manager.h"
 #include "ui/main_window.h"
 #include "ui/color_gamut.h"
 #include "ui/color_swatch.h"
@@ -200,6 +201,7 @@ private slots:
     void newSceneClearsTheBoard();
     void windowSavesToFile();
     void closeHonoursTheUnsavedSetting();
+    void selectingAnImageSchedulesLod();
     void hudToastsAppearAndExpire();
     void settingsDialogWritesAndRestores();
     void settingsActionOpensTheDialog();
@@ -1736,6 +1738,42 @@ void TestUiScene::closeHonoursTheUnsavedSetting()
     QVERIFY(window.scene()->document()->isModified());
 
     QVERIFY(window.close());
+
+    settings::setSettingsDir(QString());
+}
+
+void TestUiScene::selectingAnImageSchedulesLod()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    settings::setSettingsDir(dir.path());
+
+    const QString path = dir.filePath(QStringLiteral("board.beex"));
+    {
+        auto document = doc::Document::create();
+        const doc::ItemPtr item = pixmapItem(2000, 1000, Qt::darkBlue);
+        document.addItem(item);
+        QVERIFY(document.save(path).isOk());
+    }
+
+    ui::MainWindow window;
+    window.resize(400, 300);
+    window.show();
+    QVERIFY(window.openBoard(path));
+
+    ui::LodManager *lod = window.view()->lodManager();
+    SceneItem *view = window.scene()->pixmapItemViews().first();
+    QVERIFY(view);
+
+    // Let any loading evaluation settle, then clear the selection.
+    window.scene()->clearSelection();
+    QTest::qWait(50);
+    const int before = lod->stats().evals;
+
+    // Selecting schedules an evaluation (coalesced): the selected image
+    // becomes a hint without waiting for another interaction.
+    view->setSelected(true);
+    QTRY_VERIFY_WITH_TIMEOUT(lod->stats().evals > before, 5000);
 
     settings::setSettingsDir(QString());
 }
