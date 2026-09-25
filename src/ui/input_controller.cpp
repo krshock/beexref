@@ -22,7 +22,6 @@
 namespace ui {
 namespace {
 
-constexpr double kInsertGap = 0.0;
 // Inserted items go above everything, as the reference does.
 constexpr double kZStep = constants::kZStep;
 
@@ -163,7 +162,6 @@ void InputController::insertItems(QVector<doc::ItemPtr> items, const QPointF &sc
 {
     if (items.isEmpty())
         return;
-    arrangeInserted(items, scenePos);
     logging::info(QStringLiteral("Inserted items"),
                   {{QStringLiteral("count"), items.size()},
                    {QStringLiteral("reason"), text}});
@@ -182,6 +180,9 @@ void InputController::insertItems(QVector<doc::ItemPtr> items, const QPointF &sc
     undoStack_->push(std::make_unique<doc::AddItemsCommand>(items, text));
     undoStack_->endMacro();
     scene_->syncDocument();
+    // The views exist now, so the group can be placed like the
+    // reference's InsertItems(position).
+    arrangeInserted(items, scenePos);
     if (const auto &document = scene_->document())
         document->setModified(true);
 
@@ -195,27 +196,27 @@ void InputController::insertItems(QVector<doc::ItemPtr> items, const QPointF &sc
 
 void InputController::arrangeInserted(const QVector<doc::ItemPtr> &items, const QPointF &scenePos)
 {
-    // Simple left-to-right row centred on the drop point; the reference
-    // arranges the default (optimal packing) style here, which belongs
-    // to the arrange work.
+    // The reference's InsertItems: the items keep their relative
+    // positions (a pasted group stays arranged as it was copied) and
+    // the whole group is shifted so its bounding-rect centre lands on
+    // the insertion point. Single items are simply centred on it.
     QRectF bounds;
-    double x = 0;
     for (const doc::ItemPtr &item : items) {
-        const QSize size = item->originalSize().isValid() ? item->originalSize() : QSize(100, 100);
-        const double width = size.width() * item->scale;
-        const double height = size.height() * item->scale;
-        item->x = x;
-        item->y = 0;
-        const QRectF rect(x, 0, width, height);
-        bounds = bounds.isNull() ? rect : bounds.united(rect);
-        x += width + kInsertGap;
+        if (const SceneItem *view = scene_->itemViewFor(item)) {
+            const QRectF rect = view->sceneBoundingRect();
+            bounds = bounds.isNull() ? rect : bounds.united(rect);
+        }
     }
     if (bounds.isNull())
         return;
     const QPointF offset = scenePos - bounds.center();
+    if (offset.isNull())
+        return;
     for (const doc::ItemPtr &item : items) {
         item->x += offset.x();
         item->y += offset.y();
+        if (SceneItem *view = scene_->itemViewFor(item))
+            view->applyModelState();
     }
 }
 

@@ -91,6 +91,7 @@ private slots:
     void dropsRemoteUrlKeepsTheExtractedName();
     void dropsExifFileBakesPng();
     void internalCopyPasteCreatesCopies();
+    void pastePreservesGroupArrangement();
     void pasteSystemClipboardText();
     void cutAndUndoRestores();
     void removingAnImageSpillsItsBytes();
@@ -288,6 +289,55 @@ void TestInput::internalCopyPasteCreatesCopies()
     QVERIFY(stack.redo());
     scene.syncDocument();
     QCOMPARE(document->items().size(), 2);
+}
+
+void TestInput::pastePreservesGroupArrangement()
+{
+    auto document = std::make_shared<doc::Document>(doc::Document::create());
+    ui::Scene scene;
+    scene.setDocument(document);
+    doc::UndoStack stack(document.get());
+    ui::InputController controller(&scene, &stack);
+
+    // Three images at distinct positions and sizes.
+    const QVector<QPointF> points{QPointF(0, 0), QPointF(120, 40), QPointF(40, 140)};
+    const QVector<QSize> sizes{QSize(6, 4), QSize(10, 8), QSize(4, 10)};
+    for (int i = 0; i < points.size(); ++i) {
+        QImage image(sizes.at(i), QImage::Format_ARGB32);
+        image.fill(Qt::green);
+        QMimeData mime;
+        mime.setImageData(image);
+        controller.insertMimeData(mime, points.at(i));
+    }
+    QCOMPARE(document->items().size(), 3);
+
+    scene.clearSelection();
+    for (ui::SceneItem *view : scene.pixmapItemViews())
+        view->setSelected(true);
+    const QVector<ui::SceneItem *> selected = scene.selectedItemViews();
+    QCOMPARE(selected.size(), 3);
+    controller.copy();
+
+    controller.paste(QPointF(300, 300), 1.0);
+    QCOMPARE(document->items().size(), 6);
+    const QVector<doc::ItemPtr> copies = document->items().mid(3, 3);
+    QCOMPARE(copies.size(), 3);
+
+    // The copies keep the group's relative arrangement: one shared
+    // translation moves each original onto its copy.
+    const QPointF delta(copies.first()->x - selected.first()->item()->x,
+                        copies.first()->y - selected.first()->item()->y);
+    QRectF bounds;
+    for (int i = 0; i < copies.size(); ++i) {
+        const doc::ItemPtr &original = selected.at(i)->item();
+        QCOMPARE(copies.at(i)->x - original->x, delta.x());
+        QCOMPARE(copies.at(i)->y - original->y, delta.y());
+        const QRectF rect(copies.at(i)->x, copies.at(i)->y, original->originalSize().width(),
+                          original->originalSize().height());
+        bounds = bounds.isNull() ? rect : bounds.united(rect);
+    }
+    // And the group as a whole is centred on the paste point.
+    QCOMPARE(bounds.center(), QPointF(300, 300));
 }
 
 void TestInput::pasteSystemClipboardText()
