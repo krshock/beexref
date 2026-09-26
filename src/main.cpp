@@ -1,8 +1,12 @@
 #include <QApplication>
 #include <QCommandLineOption>
 #include <QCommandLineParser>
+#include <QElapsedTimer>
+#include <QRunnable>
+#include <QThreadPool>
 
 #include "board/board.h"
+#include "cache/session_cache.h"
 #include "constants.h"
 #include "logging.h"
 #include "settings.h"
@@ -24,6 +28,24 @@ logging::Level levelFromName(const QString &name)
         return logging::Level::Error;
     return logging::Level::Info;
 }
+
+// Stale files left by crashed runs are swept in the background, after
+// the window is up: the sweep only touches other instances' files, and
+// a slow disk must never delay startup.
+class SweepTask : public QRunnable
+{
+public:
+    void run() override
+    {
+        QElapsedTimer timer;
+        timer.start();
+        board::sweepStaleTempFiles(settings::cacheDir());
+        cache::SessionCache::sweepStale(settings::cacheDir());
+        logging::debug(QStringLiteral("Startup"),
+                       {{QStringLiteral("phase"), QStringLiteral("sweep")},
+                        {QStringLiteral("ms"), timer.elapsed()}});
+    }
+};
 
 } // namespace
 
@@ -73,11 +95,23 @@ int main(int argc, char *argv[])
     logging::info(QStringLiteral("Starting"),
                   {{QStringLiteral("name"), QString::fromLatin1(constants::AppName)},
                    {QStringLiteral("version"), QString::fromLatin1(constants::Version)}});
-    board::sweepStaleTempFiles(settings::cacheDir());
 
+    QElapsedTimer startup;
+    startup.start();
     ui::MainWindow window(parser.isSet(noCacheOption));
+    logging::debug(QStringLiteral("Startup"),
+                   {{QStringLiteral("phase"), QStringLiteral("window")},
+                    {QStringLiteral("ms"), startup.restart()}});
     window.show();
+    logging::debug(QStringLiteral("Startup"),
+                   {{QStringLiteral("phase"), QStringLiteral("show")},
+                    {QStringLiteral("ms"), startup.restart()}});
     window.startMemoryAudit(parser.value(memAuditOption).toInt());
+    QThreadPool::globalInstance()->start(new SweepTask);
+    // Let the background sweep finish (and log) before the logging
+    // statics are torn down at exit.
+    QObject::connect(&app, &QCoreApplication::aboutToQuit,
+                     [] { QThreadPool::globalInstance()->waitForDone(); });
 
     const QStringList files = parser.positionalArguments();
     if (!files.isEmpty())

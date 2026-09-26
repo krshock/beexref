@@ -6,6 +6,7 @@
 #include <QString>
 
 #include <memory>
+#include <mutex>
 #include <optional>
 
 namespace cache {
@@ -16,8 +17,11 @@ namespace cache {
 //
 // Best-effort by design: if the file cannot be created or used, every
 // operation becomes a no-op and callers fall back to their in-memory
-// path. The file is deleted when the cache is destroyed (normally at
-// exit); files left behind by a crash are swept on the next start.
+// path. The connection opens lazily on first use, so a slow or locked
+// disk never delays startup; a failed open disables the cache for the
+// rest of the session. The file is deleted when the cache is destroyed
+// (normally at exit); files left behind by a crash are swept on the
+// next start.
 //
 // Thread-safe: the underlying connection serializes its operations, so
 // the decode worker may read and write while the UI thread does too.
@@ -37,7 +41,9 @@ public:
     SessionCache(const SessionCache &) = delete;
     SessionCache &operator=(const SessionCache &) = delete;
 
-    bool isAvailable() const { return available_; }
+    // True while the cache is enabled and its storage has not failed;
+    // the first get/put/remove opens the file.
+    bool isAvailable() const;
     const QString &path() const { return path_; }
 
     // Kinds namespace the shared table: "lod" and "undo".
@@ -54,15 +60,21 @@ public:
     static void sweepStale(const QString &dir);
 
 private:
-    explicit SessionCache(QString path);
+    SessionCache(QString path, bool enabled);
 
+    // Opens the storage on first use; false once the cache is disabled.
+    bool ensureOpen();
     bool openStorage();
     bool ensureSchema();
+    void fail(const QString &step, const board::Error &error);
     void closeStorage();
 
-    board::Connection connection_;
     QString path_;
-    bool available_ = false;
+    mutable std::mutex mutex_;
+    board::Connection connection_;
+    bool enabled_ = true;
+    bool open_ = false;
+    bool failed_ = false;
 };
 
 } // namespace cache

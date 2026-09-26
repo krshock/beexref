@@ -148,11 +148,13 @@ MainWindow::MainWindow(bool cacheDisabled, QWidget *parent)
         if (cacheDisabled)
             enabled = false;
         if (enabled) {
-            cache::SessionCache::sweepStale(settings::cacheDir());
+            // Both the stale-file sweep and the connection open are off
+            // the startup path: main() sweeps after the window is up,
+            // and the cache opens on first use.
             sessionCache_ = cache::SessionCache::create(settings::cacheDir());
             logging::info(QStringLiteral("Session cache"),
                           {{QStringLiteral("path"), sessionCache_->path()},
-                           {QStringLiteral("available"), sessionCache_->isAvailable()}});
+                           {QStringLiteral("enabled"), sessionCache_->isAvailable()}});
         } else {
             logging::info(QStringLiteral("Session cache: disabled"));
         }

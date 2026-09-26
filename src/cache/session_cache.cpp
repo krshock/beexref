@@ -15,6 +15,10 @@ namespace {
 
 constexpr int kCacheUserVersion = 1;
 constexpr int kStaleDays = 7;
+// The cache is disposable, so a lock is never worth waiting for: the
+// board connections keep SQLite's default five seconds, the cache does
+// not (a busy cache must not stall a decode worker).
+constexpr int kBusyTimeoutMs = 250;
 const char *const kSchema = R"(
     CREATE TABLE IF NOT EXISTS blobs (
         kind TEXT NOT NULL,
@@ -49,8 +53,9 @@ QString newCachePath(const QString &dir)
 
 } // namespace
 
-SessionCache::SessionCache(QString path)
+SessionCache::SessionCache(QString path, bool enabled)
     : path_(std::move(path))
+    , enabled_(enabled)
 {
 }
 
@@ -64,9 +69,11 @@ SessionCache::~SessionCache()
 std::shared_ptr<SessionCache> SessionCache::create(const QString &dir)
 {
     if (!QDir().mkpath(dir)) {
-        auto unavailable = std::shared_ptr<SessionCache>(new SessionCache(newCachePath(dir)));
+        auto unavailable =
+            std::shared_ptr<SessionCache>(new SessionCache(newCachePath(dir), false));
         logging::warn(QStringLiteral("Session cache unavailable; keeping data in memory"),
-                      {{QStringLiteral("path"), unavailable->path()}});
+                      {{QStringLiteral("path"), unavailable->path()},
+                       {QStringLiteral("step"), QStringLiteral("mkdir")}});
         return unavailable;
     }
     return createAt(newCachePath(dir));
@@ -74,67 +81,111 @@ std::shared_ptr<SessionCache> SessionCache::create(const QString &dir)
 
 std::shared_ptr<SessionCache> SessionCache::createAt(const QString &path)
 {
-    auto cache = std::shared_ptr<SessionCache>(new SessionCache(path));
-    if (!cache->openStorage()) {
-        logging::warn(QStringLiteral("Session cache unavailable; keeping data in memory"),
-                      {{QStringLiteral("path"), cache->path()}});
-        return cache;
+    // The connection opens on first use, so startup never waits on the
+    // disk (see ensureOpen).
+    return std::shared_ptr<SessionCache>(new SessionCache(path, true));
+}
+
+bool SessionCache::isAvailable() const
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+    return enabled_ && !failed_;
+}
+
+bool SessionCache::ensureOpen()
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (open_)
+        return true;
+    if (!enabled_ || failed_)
+        return false;
+    if (!openStorage()) {
+        failed_ = true;
+        return false;
     }
-    // Only the owner may read the payloads.
-    QFile::setPermissions(cache->path(), QFile::ReadOwner | QFile::WriteOwner);
-    return cache;
+    open_ = true;
+    return true;
 }
 
 bool SessionCache::openStorage()
 {
     auto connection = board::Connection::open(path_, board::Connection::OpenMode::Create);
     if (!connection) {
+        fail(QStringLiteral("open"), connection.error());
         return false;
     }
     connection_ = connection.take();
     for (const QString &pragma :
-         {QStringLiteral("PRAGMA busy_timeout=5000"), QStringLiteral("PRAGMA journal_mode=OFF"),
-          QStringLiteral("PRAGMA synchronous=OFF"), QStringLiteral("PRAGMA cache_size=-2000")}) {
-        if (board::Status status = connection_.exec(pragma); !status)
+         {QStringLiteral("PRAGMA busy_timeout=%1").arg(kBusyTimeoutMs),
+          QStringLiteral("PRAGMA journal_mode=OFF"), QStringLiteral("PRAGMA synchronous=OFF"),
+          QStringLiteral("PRAGMA cache_size=-2000")}) {
+        if (board::Status status = connection_.exec(pragma); !status) {
+            fail(QStringLiteral("pragma"), status.error());
             return false;
+        }
     }
     if (!ensureSchema())
         return false;
-    available_ = true;
     return true;
 }
 
 bool SessionCache::ensureSchema()
 {
     auto version = connection_.prepare(QStringLiteral("PRAGMA user_version"));
-    if (!version)
+    if (!version) {
+        fail(QStringLiteral("schema"), version.error());
         return false;
+    }
     auto row = version.value().step();
-    const int stored = (row.isOk() && row.value()) ? int(version.value().columnInt64(0)) : 0;
+    if (!row) {
+        fail(QStringLiteral("schema"), row.error());
+        return false;
+    }
+    const int stored = row.value() ? int(version.value().columnInt64(0)) : 0;
     if (stored != kCacheUserVersion) {
         // The cache is disposable: start over instead of migrating, so
         // there is never a half-migrated state to reason about.
         connection_.close();
         removeFileAndSidecars(path_);
         auto reopened = board::Connection::open(path_, board::Connection::OpenMode::Create);
-        if (!reopened)
+        if (!reopened) {
+            fail(QStringLiteral("recreate"), reopened.error());
             return false;
+        }
         connection_ = reopened.take();
     }
-    if (board::Status status = connection_.execScript(QString::fromLatin1(kSchema)); !status)
+    if (board::Status status = connection_.execScript(QString::fromLatin1(kSchema)); !status) {
+        fail(QStringLiteral("schema"), status.error());
         return false;
-    return connection_.exec(QStringLiteral("PRAGMA user_version=%1").arg(kCacheUserVersion)).isOk();
+    }
+    if (board::Status status =
+            connection_.exec(QStringLiteral("PRAGMA user_version=%1").arg(kCacheUserVersion));
+        !status) {
+        fail(QStringLiteral("schema"), status.error());
+        return false;
+    }
+    return true;
+}
+
+void SessionCache::fail(const QString &step, const board::Error &error)
+{
+    logging::warn(QStringLiteral("Session cache unavailable; keeping data in memory"),
+                  {{QStringLiteral("path"), path_},
+                   {QStringLiteral("step"), step},
+                   {QStringLiteral("code"), error.code},
+                   {QStringLiteral("error"), error.message}});
 }
 
 void SessionCache::closeStorage()
 {
-    available_ = false;
+    std::lock_guard<std::mutex> lock(mutex_);
+    open_ = false;
     connection_ = {};
 }
 
 std::optional<QByteArray> SessionCache::get(const QString &kind, const QString &key)
 {
-    if (!available_)
+    if (!ensureOpen())
         return std::nullopt;
     auto statement =
         connection_.prepare(QStringLiteral("SELECT data FROM blobs WHERE kind=? AND key=?"));
@@ -153,7 +204,7 @@ std::optional<QByteArray> SessionCache::get(const QString &kind, const QString &
 bool SessionCache::put(const QString &kind, const QString &key, const QString &format,
                        const QByteArray &data)
 {
-    if (!available_)
+    if (!ensureOpen())
         return false;
     auto statement = connection_.prepare(QStringLiteral(
         "INSERT OR REPLACE INTO blobs (kind, key, format, data) VALUES (?, ?, ?, ?)"));
@@ -172,7 +223,7 @@ bool SessionCache::put(const QString &kind, const QString &key, const QString &f
 
 bool SessionCache::remove(const QString &kind, const QString &key)
 {
-    if (!available_)
+    if (!ensureOpen())
         return false;
     auto statement =
         connection_.prepare(QStringLiteral("DELETE FROM blobs WHERE kind=? AND key=?"));

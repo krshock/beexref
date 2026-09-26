@@ -14,6 +14,7 @@ private slots:
     void putGetRemoveAndDeleteOnDestruction();
     void unavailableCacheIsANoop();
     void recreatesOnVersionMismatch();
+    void failedOpenDisablesTheCache();
     void sweepsStaleFiles();
 };
 
@@ -27,10 +28,12 @@ void TestSessionCache::putGetRemoveAndDeleteOnDestruction()
         auto cache = cache::SessionCache::create(dir.path());
         QVERIFY(cache->isAvailable());
         path = cache->path();
-        QVERIFY(QFile::exists(path));
+        // The connection is lazy: nothing is on disk until first use.
+        QVERIFY(!QFile::exists(path));
 
         QVERIFY(cache->put(QStringLiteral("lod"), QStringLiteral("k1"),
                            QStringLiteral("png"), QByteArrayLiteral("payload")));
+        QVERIFY(QFile::exists(path));
         const auto value = cache->get(QStringLiteral("lod"), QStringLiteral("k1"));
         QVERIFY(value.has_value());
         QCOMPARE(*value, QByteArrayLiteral("payload"));
@@ -55,6 +58,25 @@ void TestSessionCache::unavailableCacheIsANoop()
     }
 
     auto cache = cache::SessionCache::create(blocker + QStringLiteral("/sub"));
+    QVERIFY(!cache->isAvailable());
+    QVERIFY(!cache->put(QStringLiteral("lod"), QStringLiteral("k"), QStringLiteral("png"),
+                        QByteArrayLiteral("d")));
+    QVERIFY(!cache->get(QStringLiteral("lod"), QStringLiteral("k")).has_value());
+    QCOMPARE(cache->fileBytes(), qint64(0));
+}
+
+void TestSessionCache::failedOpenDisablesTheCache()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    // The parent directory is missing, so the lazy open fails.
+    const QString path = dir.filePath(QStringLiteral("missing/cache.db"));
+
+    auto cache = cache::SessionCache::createAt(path);
+    QVERIFY(cache->isAvailable());
+    QVERIFY(!cache->put(QStringLiteral("lod"), QStringLiteral("k"), QStringLiteral("png"),
+                        QByteArrayLiteral("d")));
+    // A failed open disables the cache for the rest of the session.
     QVERIFY(!cache->isAvailable());
     QVERIFY(!cache->put(QStringLiteral("lod"), QStringLiteral("k"), QStringLiteral("png"),
                         QByteArrayLiteral("d")));
