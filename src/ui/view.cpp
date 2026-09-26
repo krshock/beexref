@@ -1172,8 +1172,12 @@ void View::setMoveHandleVisible(bool visible)
 {
     if (!moveHandle_)
         return;
-    if (visible)
+    if (visible) {
         positionMoveHandle();
+        // The welcome overlay is a later sibling of the viewport; keep
+        // the handle above it so it is usable on the start screen too.
+        moveHandle_->raise();
+    }
     moveHandle_->setVisible(visible);
 }
 

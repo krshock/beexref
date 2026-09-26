@@ -237,6 +237,7 @@ private slots:
     void moveHandleShowsWhenTheTitleBarIsOff();
     void insertTextActionCreatesAnEditableItem();
     void doubleClickOnTextEditsIt();
+    void moveHandleShowsOverTheWelcomeOverlay();
     void infoDialogsShowTheExpectedContent();
     void metadataPanelEditsAndCommits();
     void hudPreviewShowsTheStyledPanel();
@@ -2983,6 +2984,31 @@ void TestUiScene::doubleClickOnTextEditsIt()
     QTest::qWait(20);
     QVERIFY(!editor->isVisible());
     QCOMPARE(item->item()->text(), QStringLiteral("note"));
+}
+
+void TestUiScene::moveHandleShowsOverTheWelcomeOverlay()
+{
+    ui::MainWindow window;
+    window.show();
+    QTest::qWait(50);
+    ui::View *view = window.view();
+    QWidget *handle = view->moveHandle();
+    QVERIFY(handle);
+
+    // The empty board shows the welcome overlay.
+    ui::WelcomeOverlay *overlay = window.welcomeOverlay();
+    QVERIFY(overlay);
+    QVERIFY(!overlay->isHidden());
+
+    // With the title bar on the handle stays away.
+    QVERIFY(!handle->isVisible());
+
+    // With it off the handle shows on top of the welcome overlay, not
+    // behind it: the topmost child at its spot is the handle itself.
+    actionByText(window, QStringLiteral("Show &Title Bar"))->trigger();
+    QTest::qWait(50);
+    QVERIFY(handle->isVisible());
+    QCOMPARE(view->childAt(handle->geometry().center()), handle);
 }
 
 void TestUiScene::infoDialogsShowTheExpectedContent()

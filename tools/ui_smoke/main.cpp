@@ -512,6 +512,16 @@ public:
                   << "\n";
             snapshot(QStringLiteral("23-deleted"));
 
+            // The move handle floats above the welcome overlay when the
+            // title bar is off.
+            actionByText(QStringLiteral("Show &Title Bar"))->trigger();
+            QTest::qWait(200);
+            out() << "move handle over welcome: " << window_.view()->moveHandle()->isVisible()
+                  << "\n";
+            snapshot(QStringLiteral("23b-move-handle-welcome"));
+            actionByText(QStringLiteral("Show &Title Bar"))->trigger();
+            QTest::qWait(200);
+
             // Through the action, since the closed gamut dialog may
             // still hold the active window in the offscreen platform.
             actionByText(QStringLiteral("&Undo"))->trigger();
