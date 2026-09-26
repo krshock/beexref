@@ -56,6 +56,7 @@
 #include "ui/hud_preview.h"
 #include "ui/info_dialogs.h"
 #include "ui/metadata_panel.h"
+#include "ui/move_handle.h"
 #include "ui/settings_dialog.h"
 #include "ui/grayscale.h"
 #include "ui/opacity_dialog.h"
@@ -232,6 +233,7 @@ private slots:
     void windowTogglesFollowTheActions();
     void canvasContextMenuMirrorsTheMenuBar();
     void moveWindowModeFollowsThePointer();
+    void moveHandleShowsWhenTheTitleBarIsOff();
     void infoDialogsShowTheExpectedContent();
     void metadataPanelEditsAndCommits();
     void hudPreviewShowsTheStyledPanel();
@@ -2829,6 +2831,85 @@ void TestUiScene::moveWindowModeFollowsThePointer()
     // A key exits.
     QTest::keyClick(&plain, Qt::Key_Escape);
     QVERIFY(!plain.movingWindow());
+}
+
+void TestUiScene::moveHandleShowsWhenTheTitleBarIsOff()
+{
+    ui::MainWindow window;
+    window.show();
+    QTest::qWait(50);
+    ui::View *view = window.view();
+    // Hover moves only reach the view's mouseMoveEvent when the
+    // viewport itself tracks the mouse; a plain QGraphicsView does not.
+    // The selection-handle cursors rely on that.
+    QVERIFY(view->viewport()->hasMouseTracking());
+
+    QWidget *handle = view->moveHandle();
+    QVERIFY(handle);
+    QCOMPARE(handle->size(), QSize(21, 21));
+
+    // With the title bar on, the window is dragged by it and the handle
+    // stays away.
+    QAction *titlebar = actionByText(window, QStringLiteral("Show &Title Bar"));
+    QVERIFY(titlebar);
+    QVERIFY(titlebar->isChecked());
+    QVERIFY(!window.windowFlags().testFlag(Qt::FramelessWindowHint));
+    QVERIFY(!handle->isVisible());
+
+    // Turning the title bar off reveals the handle in the corner; no
+    // canvas activity puts it away while the title bar is off.
+    titlebar->trigger();
+    QTest::qWait(50);
+    QVERIFY(!titlebar->isChecked());
+    QVERIFY(window.windowFlags().testFlag(Qt::FramelessWindowHint));
+    QVERIFY(handle->isVisible());
+    QCOMPARE(handle->pos(), QPoint(2, 2));
+
+    QImage image(40, 30, QImage::Format_ARGB32);
+    image.fill(Qt::red);
+    QMimeData mime;
+    mime.setImageData(image);
+    window.input()->insertMimeData(mime, QPointF(0, 0));
+    QVERIFY(handle->isVisible());
+
+    // Pointer moves across the canvas, over the handle and away again.
+    sendMouse(view->viewport(), QEvent::MouseMove, view->viewport()->rect().center(),
+              Qt::NoButton, Qt::NoButton);
+    QVERIFY(handle->isVisible());
+    sendMouse(view->viewport(), QEvent::MouseMove, handle->geometry().center(), Qt::NoButton,
+              Qt::NoButton);
+    QVERIFY(handle->isVisible());
+
+    // Colour sampling does not hide it either.
+    view->startSampleColor();
+    QVERIFY(handle->isVisible());
+    view->cancelSampleColor();
+    QVERIFY(handle->isVisible());
+
+    // A window resize leaves it in the corner.
+    window.resize(window.size() + QSize(40, 30));
+    QTest::qWait(20);
+    QCOMPARE(handle->pos(), QPoint(2, 2));
+    QVERIFY(handle->isVisible());
+
+    // Pressing it asks for a window move and leaves it in place. The
+    // offscreen platform claims to support the system move, so only the
+    // request is checked here; the armed-mode fallback is covered by
+    // moveWindowModeFollowsThePointer.
+    auto *moveHandle = qobject_cast<ui::MoveHandle *>(handle);
+    QVERIFY(moveHandle);
+    QSignalSpy requested(moveHandle, &ui::MoveHandle::moveRequested);
+    sendMouse(handle, QEvent::MouseButtonPress, handle->rect().center(), Qt::LeftButton,
+              Qt::LeftButton);
+    QCOMPARE(requested.count(), 1);
+    QVERIFY(handle->isVisible());
+
+    // Turning the title bar back on hides it again.
+    titlebar->trigger();
+    QTest::qWait(50);
+    QVERIFY(titlebar->isChecked());
+    QVERIFY(!window.windowFlags().testFlag(Qt::FramelessWindowHint));
+    QVERIFY(!handle->isVisible());
 }
 
 void TestUiScene::infoDialogsShowTheExpectedContent()

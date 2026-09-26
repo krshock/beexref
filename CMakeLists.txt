@@ -99,6 +99,8 @@ qt_add_library(beexref_core STATIC
     src/ui/layout_ops.cpp
     src/ui/metadata_panel.cpp
     src/ui/metadata_panel.h
+    src/ui/move_handle.cpp
+    src/ui/move_handle.h
     src/ui/layout_ops.h
     src/ui/opacity_dialog.cpp
     src/ui/opacity_dialog.h

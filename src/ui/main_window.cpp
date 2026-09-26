@@ -1279,12 +1279,14 @@ void MainWindow::buildActions()
         [this](bool checked) {
             const bool visible = isVisible();
             setWindowFlag(Qt::FramelessWindowHint, !checked);
+            view_->setMoveHandleVisible(!checked);
             if (visible)
                 show();
         },
         true);
     // The window starts with its title bar, like the reference's default.
     titlebarAction->setChecked(true);
+    view_->setMoveHandleVisible(!titlebarAction->isChecked());
     QAction *smoothAction = actions_->add(
         QStringLiteral("smooth_images"), QStringLiteral("&Smooth Images"), {}, G::Always,
         [this](bool checked) {

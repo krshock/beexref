@@ -26,6 +26,7 @@ namespace ui {
 class ColorSwatch;
 class LevelLoader;
 class LodManager;
+class MoveHandle;
 
 // Canvas view: pan, zoom, fit, rubber-band selection and
 // threshold-based moving of the selected items. Viewport changes drive
@@ -57,6 +58,13 @@ public:
     void enterMoveWindow();
     void exitMoveWindow();
     bool movingWindow() const { return movingWindow_; }
+    // The canvas corner's move handle (tests and the smoke harness);
+    // pressing it starts the platform window move.
+    // Defined in the .cpp, where MoveHandle is a complete type.
+    QWidget *moveHandle() const;
+    // Shows the corner move handle; the window shows it only while its
+    // title bar is disabled, since then nothing else can drag it.
+    void setMoveHandleVisible(bool visible);
     // Refreshes the scrollable area after the items changed shape, as
     // the reference does on every scene change.
     void refreshSceneRect() { recalculateSceneRect(); }
@@ -171,6 +179,8 @@ private:
     // One move-window step: follows the global cursor, so the window
     // keeps moving while the pointer is outside it.
     void moveWindowTick();
+    // Puts the move handle in the canvas' top-left corner.
+    void positionMoveHandle();
 
     // Spotlight state: the view-only raised items.
     void drawSpotlight(QPainter *painter) const;
@@ -212,6 +222,7 @@ private:
     bool moveWindowWasActive_ = false;
     QPointF moveWindowGlobal_;
     QTimer *moveWindowTimer_ = nullptr;
+    MoveHandle *moveHandle_ = nullptr;
     bool dragZoomInverted_ = false;
     QPoint dragZoomStart_;
     QPoint dragZoomAnchor_;
@@ -263,6 +274,8 @@ private:
     // disturb the selection, so moving, scaling and rotating only start
     // once the pointer has travelled this many viewport pixels.
     static constexpr double kDragThreshold = 20.0;
+    // The corner move handle sits this far in from the canvas corner.
+    static constexpr int kMoveHandleMargin = 2;
     // Zoom bursts hold LOD work for this long after the last zoom event,
     // so level decodes happen once the view has settled.
     static constexpr int kZoomInhibitMs = 300;

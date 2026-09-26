@@ -3,6 +3,7 @@
 #include "color_swatch.h"
 #include "cursors.h"
 #include "lod_manager.h"
+#include "move_handle.h"
 #include "rendering.h"
 #include "selection_ops.h"
 #include "theme.h"
@@ -22,6 +23,7 @@
 #include <QTimer>
 #include <QCursor>
 #include <QKeyEvent>
+#include <QWindow>
 #include <QWheelEvent>
 
 #include <cmath>
@@ -41,6 +43,21 @@ View::View(QWidget *parent)
     moveWindowTimer_->setInterval(10);
     connect(moveWindowTimer_, &QTimer::timeout, this, &View::moveWindowTick);
 
+    // The corner move handle: shown only while the window's title bar
+    // is disabled (see setMoveHandleVisible). Pressing it starts the
+    // platform's interactive window move (a title-bar drag), falling
+    // back to the timer-driven mode where the platform lacks it. It is
+    // a HUD element: a child of the view, like the toasts, so it floats
+    // above the viewport instead of living inside it.
+    moveHandle_ = new MoveHandle(this);
+    moveHandle_->hide();
+    connect(moveHandle_, &MoveHandle::moveRequested, this, [this]() {
+        QWindow *handle = window() ? window()->windowHandle() : nullptr;
+        if (!handle || !handle->startSystemMove())
+            enterMoveWindow();
+    });
+    positionMoveHandle();
+
     setRenderHints(QPainter::Antialiasing | QPainter::SmoothPixmapTransform);
     setViewportUpdateMode(QGraphicsView::MinimalViewportUpdate);
     setOptimizationFlags(QGraphicsView::DontSavePainterState
@@ -53,6 +70,10 @@ View::View(QWidget *parent)
     setBackgroundBrush(theme::canvas);
     setFrameShape(QFrame::NoFrame);
     setMouseTracking(true);
+    // The viewport is the widget under the pointer: without tracking
+    // here, hover moves never reach mouseMoveEvent (the selection-handle
+    // cursors rely on them).
+    viewport()->setMouseTracking(true);
     setAcceptDrops(true);
     bindings_ = controls::Bindings::load();
 }
@@ -1028,6 +1049,27 @@ void View::toggleMoveWindow()
         enterMoveWindow();
 }
 
+QWidget *View::moveHandle() const
+{
+    return moveHandle_;
+}
+
+void View::setMoveHandleVisible(bool visible)
+{
+    if (!moveHandle_)
+        return;
+    if (visible)
+        positionMoveHandle();
+    moveHandle_->setVisible(visible);
+}
+
+void View::positionMoveHandle()
+{
+    if (!moveHandle_)
+        return;
+    moveHandle_->move(kMoveHandleMargin, kMoveHandleMargin);
+}
+
 void View::enterMoveWindow()
 {
     if (movingWindow_)
@@ -1254,6 +1296,7 @@ void View::drawForeground(QPainter *painter, const QRectF &rect)
 void View::resizeEvent(QResizeEvent *event)
 {
     QGraphicsView::resizeEvent(event);
+    positionMoveHandle();
     updateViewState();
     recalculateSceneRect();
     lod_->schedule();

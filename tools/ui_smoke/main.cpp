@@ -648,6 +648,26 @@ public:
             actionByText(QStringLiteral("Show &Scrollbars"))->trigger();
             QTest::qWait(200);
 
+            // The move handle shows only while the title bar is off.
+            {
+                QWidget *handle = window_.view()->moveHandle();
+                QTest::qWait(100);
+                out() << "move handle hidden with titlebar: " << !handle->isVisible() << "\n";
+                actionByText(QStringLiteral("Show &Title Bar"))->trigger();
+                QTest::qWait(200);
+                out() << "move handle visible without titlebar: " << handle->isVisible() << "\n";
+                out() << "move handle at corner: " << (handle->pos() == QPoint(2, 2)) << "\n";
+                snapshot(QStringLiteral("40-move-handle"));
+                sendMouse(viewport, QEvent::MouseMove, viewport->rect().center(), Qt::NoButton,
+                          Qt::NoButton);
+                QTest::qWait(100);
+                out() << "move handle still visible: " << handle->isVisible() << "\n";
+                actionByText(QStringLiteral("Show &Title Bar"))->trigger();
+                QTest::qWait(200);
+                out() << "move handle hidden with titlebar again: " << !handle->isVisible()
+                      << "\n";
+            }
+
             // Move-window mode follows the global cursor on a timer, so
             // it keeps working when the pointer leaves the window.
             actionByText(QStringLiteral("Move &Window"))->trigger();
