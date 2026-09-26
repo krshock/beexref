@@ -131,17 +131,23 @@ bool SessionCache::openStorage()
 
 bool SessionCache::ensureSchema()
 {
-    auto version = connection_.prepare(QStringLiteral("PRAGMA user_version"));
-    if (!version) {
-        fail(QStringLiteral("schema"), version.error());
-        return false;
+    int stored = 0;
+    {
+        // Finalize the statement before the recreate below: a stepped
+        // statement keeps a read lock (and, on Windows, the file itself)
+        // alive, so closing the connection would not release it.
+        auto version = connection_.prepare(QStringLiteral("PRAGMA user_version"));
+        if (!version) {
+            fail(QStringLiteral("schema"), version.error());
+            return false;
+        }
+        auto row = version.value().step();
+        if (!row) {
+            fail(QStringLiteral("schema"), row.error());
+            return false;
+        }
+        stored = row.value() ? int(version.value().columnInt64(0)) : 0;
     }
-    auto row = version.value().step();
-    if (!row) {
-        fail(QStringLiteral("schema"), row.error());
-        return false;
-    }
-    const int stored = row.value() ? int(version.value().columnInt64(0)) : 0;
     if (stored != kCacheUserVersion) {
         // The cache is disposable: start over instead of migrating, so
         // there is never a half-migrated state to reason about.
