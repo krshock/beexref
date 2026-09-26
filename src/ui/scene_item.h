@@ -117,8 +117,8 @@ public:
     void paint(QPainter *painter, const QStyleOptionGraphicsItem *option,
                QWidget *widget) override;
     // The item's content without any selection decoration, in local
-    // coordinates; the view's peek overlay paints the item again with
-    // it, above everything.
+    // coordinates; the view's spotlight overlay paints the item again
+    // with it, above everything.
     void paintContent(QPainter *painter);
 
 private:

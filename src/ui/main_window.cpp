@@ -261,6 +261,14 @@ MainWindow::MainWindow(bool cacheDisabled, QWidget *parent)
     updateStatusBar();
 
     connect(view_, &View::colorSampled, this, &MainWindow::copySampledColor);
+    // A double-click fits the image; by default it is also spotlighted
+    // (view only), so the focused image is not hidden behind others.
+    connect(view_, &View::itemDoubleClicked, this, [this](SceneItem *item) {
+        settings::File file(settings::iniPath());
+        file.load();
+        if (settings::valueOrDefault(file, QStringLiteral("Items/double_click_spotlight")).toBool())
+            view_->setSpotlight({item});
+    });
     connect(scene_, &QGraphicsScene::selectionChanged, this, [this]() {
         updateActions();
         metadataPanel_->refresh();
@@ -1124,9 +1132,9 @@ void MainWindow::buildActions()
                   [this](bool) { lowerSelectionToBottom(); });
     // A view-only raise: the selected items paint above everything
     // without their configured z changing (Esc clears it).
-    actions_->add(QStringLiteral("peek_on_top"), QStringLiteral("Peek on &Top"),
+    actions_->add(QStringLiteral("spotlight_item"), QStringLiteral("&Spotlight"),
                   QKeySequence(QStringLiteral("T")), G::Selection,
-                  [this](bool) { view_->togglePeek(); });
+                  [this](bool) { view_->toggleSpotlight(); });
 
     // View.
     actions_->add(QStringLiteral("fit_scene"), QStringLiteral("&Fit Scene"),
@@ -1358,7 +1366,7 @@ void MainWindow::buildMenus()
     actions_->appendSeparator(editMenu);
     actions_->append(editMenu, QStringLiteral("raise_to_top"));
     actions_->append(editMenu, QStringLiteral("lower_to_bottom"));
-    actions_->append(editMenu, QStringLiteral("peek_on_top"));
+    actions_->append(editMenu, QStringLiteral("spotlight_item"));
 
     // View: the window and scrollbar toggles arrive with the window
     // slice.

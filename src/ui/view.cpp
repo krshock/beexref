@@ -70,21 +70,21 @@ void View::setBoardScene(Scene *scene)
     if (boardScene_) {
         disconnect(boardScene_, nullptr, this, nullptr);
     }
-    // The peek belongs to the old board's views.
-    peeked_.clear();
+    // The spotlight belongs to the old board's views.
+    spotlighted_.clear();
     boardScene_ = scene;
     if (boardScene_) {
         // Drop scheduler state for a view before the scene deletes it,
         // so an in-flight decode can never touch freed memory.
         connect(boardScene_, &Scene::itemViewAboutToBeRemoved, this,
                 [this](SceneItem *view) {
-                    // Never keep a crop session or a peek pointing at a
-                    // view the scene is about to delete.
+                    // Never keep a crop session or a spotlight pointing
+                    // at a view the scene is about to delete.
                     if (view == cropItem_) {
                         cropItem_ = nullptr;
                         cropDrag_ = crop::Part::None;
                     }
-                    peeked_.removeAll(view);
+                    spotlighted_.removeAll(view);
                     lod_->forgetItem(view);
                 });
         // New or removed items change the scrollable area.
@@ -103,7 +103,7 @@ void View::setBoardScene(Scene *scene)
         connect(boardScene_, &Scene::aboutToBeDestroyed, this, [this]() {
             disconnect(boardScene_, nullptr, this, nullptr);
             boardScene_ = nullptr;
-            peeked_.clear();
+            spotlighted_.clear();
             lod_->setScene(nullptr);
         });
     }
@@ -279,7 +279,7 @@ void View::fitSelection()
     fitRect(boardScene_ ? boardScene_->selectionBounds() : QRectF());
 }
 
-void View::togglePeek()
+void View::toggleSpotlight()
 {
     if (!boardScene_)
         return;
@@ -287,35 +287,36 @@ void View::togglePeek()
     if (selected.isEmpty())
         return;
 
-    // The action toggles: a selection that is already the peek clears
-    // it, anything else replaces the peek.
-    bool allPeeked = true;
+    // The action toggles: a selection that is already spotlighted
+    // clears it, anything else replaces the spotlight.
+    bool allSpotlighted = true;
     for (SceneItem *item : selected) {
-        if (!peeked_.contains(item)) {
-            allPeeked = false;
+        if (!spotlighted_.contains(item)) {
+            allSpotlighted = false;
             break;
         }
     }
-    if (allPeeked)
-        clearPeek();
+    if (allSpotlighted)
+        clearSpotlight();
     else
-        setPeek(selected);
+        setSpotlight(selected);
 }
 
-void View::clearPeek()
+void View::clearSpotlight()
 {
-    if (peeked_.isEmpty())
+    if (spotlighted_.isEmpty())
         return;
-    peeked_.clear();
+    spotlighted_.clear();
     viewport()->update();
 }
 
 SceneItem *View::itemAtPoint(const QPoint &viewportPos) const
 {
-    // Picking follows the drawn order: a peeked item looks on top, so it
-    // takes the click first (topmost peeked first; peeked_ is ascending).
+    // Picking follows the drawn order: a spotlighted item looks on top,
+    // so it takes the click first (topmost first; the list is
+    // ascending).
     const QPointF scenePos = mapToScene(viewportPos);
-    for (auto it = peeked_.crbegin(); it != peeked_.crend(); ++it) {
+    for (auto it = spotlighted_.crbegin(); it != spotlighted_.crend(); ++it) {
         SceneItem *item = *it;
         if (item->contains(item->mapFromScene(scenePos)))
             return item;
@@ -323,9 +324,9 @@ SceneItem *View::itemAtPoint(const QPoint &viewportPos) const
     return dynamic_cast<SceneItem *>(itemAt(viewportPos));
 }
 
-void View::setPeek(const QVector<SceneItem *> &items)
+void View::setSpotlight(const QVector<SceneItem *> &items)
 {
-    // Store the peek in the configured stacking order, so the draw
+    // Store the spotlight in the configured stacking order, so the draw
     // order is stable and the foreground pass never scans the scene.
     QVector<SceneItem *> next;
     next.reserve(items.size());
@@ -334,9 +335,9 @@ void View::setPeek(const QVector<SceneItem *> &items)
         if (item && items.contains(item))
             next.append(item);
     }
-    if (next == peeked_)
+    if (next == spotlighted_)
         return;
-    peeked_ = next;
+    spotlighted_ = next;
     viewport()->update();
 }
 
@@ -358,6 +359,7 @@ void View::mouseDoubleClickEvent(QMouseEvent *event)
             if (!item->isSelected())
                 item->setSelected(true);
             fitRect(item->sceneBoundingRect());
+            emit itemDoubleClicked(item);
             event->accept();
             return;
         }
@@ -1135,9 +1137,9 @@ void View::keyPressEvent(QKeyEvent *event)
             return;
         }
     }
-    // Esc dismisses a peek when no mode above claimed it.
-    if (event->key() == Qt::Key_Escape && !peeked_.isEmpty()) {
-        clearPeek();
+    // Esc dismisses a spotlight when no mode above claimed it.
+    if (event->key() == Qt::Key_Escape && !spotlighted_.isEmpty()) {
+        clearSpotlight();
         event->accept();
         return;
     }
@@ -1151,18 +1153,18 @@ void View::leaveEvent(QEvent *event)
     QGraphicsView::leaveEvent(event);
 }
 
-void View::drawPeeks(QPainter *painter) const
+void View::drawSpotlight(QPainter *painter) const
 {
-    // peeked_ is kept in ascending stacking order, so the lowest peeked
-    // item is drawn first and the topmost of them stays on top, exactly
-    // as if the whole group were really raised.
-    for (SceneItem *item : peeked_) {
+    // The list is kept in ascending stacking order, so the lowest
+    // spotlighted item is drawn first and the topmost of them stays on
+    // top, exactly as if the whole group were really raised.
+    for (SceneItem *item : spotlighted_) {
         painter->save();
         painter->setTransform(item->sceneTransform(), true);
         painter->setOpacity(item->opacity());
         item->paintContent(painter);
-        // A dashed marker at full opacity, so a view-only peek cannot be
-        // mistaken for a real Raise to Top.
+        // A dashed marker at full opacity, so a view-only spotlight
+        // cannot be mistaken for a real Raise to Top.
         painter->setOpacity(1.0);
         QPen pen(theme::selection, 0);
         pen.setCosmetic(true);
@@ -1179,13 +1181,13 @@ void View::drawForeground(QPainter *painter, const QRectF &rect)
     Q_UNUSED(rect);
     if (!boardScene_)
         return;
-    // The crop editor brings its own frame; peeks and handles would
-    // only get in the way. A peek is suspended, not cleared, while
+    // The crop editor brings its own frame; spotlights and handles would
+    // only get in the way. A spotlight is suspended, not cleared, while
     // cropping, so it comes back when the crop session ends.
     if (cropItem_)
         return;
-    if (!peeked_.isEmpty())
-        drawPeeks(painter);
+    if (!spotlighted_.isEmpty())
+        drawSpotlight(painter);
 
     const QRectF bounds = boardScene_->selectionBounds();
     if (bounds.isEmpty())

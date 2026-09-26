@@ -407,6 +407,8 @@ public:
                   << " -> " << QString::number(view->transform().m11(), 'f', 3) << ", item now "
                   << fitted.width() << "x" << fitted.height() << " in viewport "
                   << viewport->width() << "x" << viewport->height() << "\n";
+            // The default setting also spotlights the double-clicked item.
+            out() << "double-click spotlights: " << window_.view()->hasSpotlight() << "\n";
             snapshot(QStringLiteral("21-double-click-fit"));
 
 
@@ -600,35 +602,35 @@ public:
                 out() << "context menu: " << topLevel.join(QStringLiteral(" | ")) << "\n";
             }
 
-            // Peek on Top: a view-only raise that Esc clears. The
+            // Spotlight: a view-only raise that Esc clears. The
             // bottom-most item, so the screenshot shows the raise.
             {
                 window_.scene()->clearSelection();
-                ui::SceneItem *peeked = window_.scene()->pixmapItemViews().value(
+                ui::SceneItem *spotlighted = window_.scene()->pixmapItemViews().value(
                     window_.scene()->pixmapItemViews().size() - 1);
-                if (peeked) {
-                    peeked->setSelected(true);
-                    actionByText(QStringLiteral("Peek on &Top"))->trigger();
+                if (spotlighted) {
+                    spotlighted->setSelected(true);
+                    actionByText(QStringLiteral("&Spotlight"))->trigger();
                     QTest::qWait(300);
-                    out() << "peek on top: " << window_.view()->hasPeek() << "\n";
-                    snapshot(QStringLiteral("38-peek"));
-                    // A click follows the drawn order: the peeked item
-                    // takes it although it is configured below.
-                    const QPoint peekCentre =
-                        view->mapFromScene(peeked->sceneBoundingRect().center());
-                    sendMouse(viewport, QEvent::MouseButtonPress, peekCentre, Qt::LeftButton,
+                    out() << "spotlight: " << window_.view()->hasSpotlight() << "\n";
+                    snapshot(QStringLiteral("38-spotlight"));
+                    // A click follows the drawn order: the spotlighted
+                    // item takes it although it is configured below.
+                    const QPoint spotCentre =
+                        view->mapFromScene(spotlighted->sceneBoundingRect().center());
+                    sendMouse(viewport, QEvent::MouseButtonPress, spotCentre, Qt::LeftButton,
                               Qt::LeftButton);
-                    sendMouse(viewport, QEvent::MouseButtonRelease, peekCentre, Qt::LeftButton,
+                    sendMouse(viewport, QEvent::MouseButtonRelease, spotCentre, Qt::LeftButton,
                               Qt::NoButton);
                     const QVector<ui::SceneItem *> chosen = window_.scene()->selectedItemViews();
                     const QSize chosenSize =
                         chosen.size() == 1 ? chosen.first()->item()->originalSize() : QSize();
-                    out() << "peek click selects " << chosenSize.width() << "x"
+                    out() << "spotlight click selects " << chosenSize.width() << "x"
                           << chosenSize.height() << "\n";
                     QTest::keyClick(view, Qt::Key_Escape);
                     QTest::qWait(300);
-                    out() << "peek cleared: " << !window_.view()->hasPeek() << "\n";
-                    snapshot(QStringLiteral("39-peek-cleared"));
+                    out() << "spotlight cleared: " << !window_.view()->hasSpotlight() << "\n";
+                    snapshot(QStringLiteral("39-spotlight-cleared"));
                 }
             }
 

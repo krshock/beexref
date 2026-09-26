@@ -380,7 +380,7 @@ void SceneItem::paint(QPainter *painter, const QStyleOptionGraphicsItem *option,
     paintContent(painter);
 
     // The crop editor's frame already marks the item; an outline would
-    // only get in the way (and the overlay never peeks it).
+    // only get in the way (and the overlay never spotlights it).
     if (cropMode_)
         return;
 

@@ -149,6 +149,12 @@ const QVector<FieldUi> &fieldTable()
                      QStringLiteral("Arrange Vertical (by filename)")},
                     {QStringLiteral("square"), QStringLiteral("Square (by filename)"),
                      QStringLiteral("Arrange Square (by filename)")}}),
+        checkboxField(QStringLiteral("Items/double_click_spotlight"),
+                      QStringLiteral("Double-click an image:"),
+                      QStringLiteral("Double-clicking an image fits it in the view. Should it "
+                                     "also be spotlighted, a view-only raise above the other "
+                                     "images? The configured z-order is not changed."),
+                      QStringLiteral("Also spotlight it")),
     };
     return fields;
 }
@@ -378,6 +384,7 @@ SettingsDialog::SettingsDialog(QWidget *parent)
     itemsLayout->addWidget(group(QStringLiteral("Items/image_storage_format")), 0, 0);
     itemsLayout->addWidget(group(QStringLiteral("Items/arrange_gap")), 0, 1);
     itemsLayout->addWidget(group(QStringLiteral("Items/arrange_default")), 1, 0, 1, 2);
+    itemsLayout->addWidget(group(QStringLiteral("Items/double_click_spotlight")), 2, 0, 1, 2);
     tabs->addTab(items, QStringLiteral("&Images && Items"));
 
     auto *layout = new QVBoxLayout(this);

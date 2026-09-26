@@ -289,6 +289,7 @@ const QVector<FieldSpec> &fields()
         {QStringLiteral("Items/arrange_default"), QStringLiteral("optimal"), nullptr,
          oneOf({QStringLiteral("optimal"), QStringLiteral("horizontal"),
                 QStringLiteral("vertical"), QStringLiteral("square")})},
+        {QStringLiteral("Items/double_click_spotlight"), true, boolCast(), nullptr},
         {QStringLiteral("Items/image_allocation_limit"), 256, intCast(), atLeast(0)},
         {QStringLiteral("Items/lod_method"), QStringLiteral("fixed"), nullptr,
          oneOf({QStringLiteral("single"), QStringLiteral("fixed"),

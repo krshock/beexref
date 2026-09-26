@@ -82,14 +82,16 @@ public:
     void fitScene();
     void fitSelection();
 
-    // Peek: a view-only raise. The selected items are painted above
-    // everything in the foreground pass, without touching their
-    // configured z or the document. togglePeek() peeks the selection,
-    // or clears when the selection is already the peek; clearPeek()
+    // Spotlight: a view-only raise. The selected items are painted
+    // above everything in the foreground pass, without touching their
+    // configured z or the document. toggleSpotlight() spotlights the
+    // selection, or clears when the selection is already spotlighted;
+    // setSpotlight() replaces it with the given items; clearSpotlight()
     // ends it (Esc). Deleted items drop out and a new board clears it.
-    void togglePeek();
-    void clearPeek();
-    bool hasPeek() const { return !peeked_.isEmpty(); }
+    void toggleSpotlight();
+    void setSpotlight(const QVector<SceneItem *> &items);
+    void clearSpotlight();
+    bool hasSpotlight() const { return !spotlighted_.isEmpty(); }
 
     // delta is a wheel angleDelta step; anchor is in viewport pixels.
     void zoomAt(int delta, const QPoint &anchor);
@@ -105,6 +107,9 @@ signals:
     // A right click on the canvas, with the global position for the
     // window's context menu.
     void contextMenuRequested(const QPoint &globalPos);
+    // A left double-click selected and fitted an item; the window may
+    // spotlight it (the Items/double_click_spotlight setting).
+    void itemDoubleClicked(SceneItem *item);
 
 protected:
     void contextMenuEvent(QContextMenuEvent *event) override;
@@ -163,11 +168,11 @@ private:
     void finishTransformGesture();
     void updateHoverCursor(const QPoint &viewportPos);
 
-    // Peek state: the view-only raised items.
-    void setPeek(const QVector<SceneItem *> &items);
-    void drawPeeks(QPainter *painter) const;
-    // The item under a viewport point in the order it is drawn: peeked
-    // items first (topmost of them), then Qt's configured order.
+    // Spotlight state: the view-only raised items.
+    void drawSpotlight(QPainter *painter) const;
+    // The item under a viewport point in the order it is drawn:
+    // spotlighted items first (topmost of them), then Qt's configured
+    // order.
     SceneItem *itemAtPoint(const QPoint &viewportPos) const;
 
     // Crop session (the reference's CropEditor, driven by the view).
@@ -209,10 +214,10 @@ private:
     // Last region the selection overlay was known to occupy.
     QRectF overlayRegion_;
 
-    // The view-only raised items (peek), in ascending stacking order:
-    // exactly the order the foreground pass draws them in. Never part
-    // of the document.
-    QVector<SceneItem *> peeked_;
+    // The view-only raised items (spotlight), in ascending stacking
+    // order: exactly the order the foreground pass draws them in. Never
+    // part of the document.
+    QVector<SceneItem *> spotlighted_;
 
     // Sample colour mode.
     bool sampling_ = false;
