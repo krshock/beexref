@@ -19,6 +19,7 @@
 
 class QKeyEvent;
 class QMimeData;
+class QTimer;
 
 namespace ui {
 
@@ -167,6 +168,9 @@ private:
     void applyTransformGesture(const QPointF &scenePos, bool snap);
     void finishTransformGesture();
     void updateHoverCursor(const QPoint &viewportPos);
+    // One move-window step: follows the global cursor, so the window
+    // keeps moving while the pointer is outside it.
+    void moveWindowTick();
 
     // Spotlight state: the view-only raised items.
     void drawSpotlight(QPainter *painter) const;
@@ -200,7 +204,14 @@ private:
     // Drag-zoom (the reference's ZOOM_MODE): a bound button drag zooms.
     bool dragZoom_ = false;
     bool movingWindow_ = false;
+    // Whether the mode started from a held mouse button (a drag) or
+    // was armed by the action (keyboard/menu), where no button is held.
+    bool moveWindowPressed_ = false;
+    // Whether the window was active when the mode was armed: only then
+    // does losing activation end it.
+    bool moveWindowWasActive_ = false;
     QPointF moveWindowGlobal_;
+    QTimer *moveWindowTimer_ = nullptr;
     bool dragZoomInverted_ = false;
     QPoint dragZoomStart_;
     QPoint dragZoomAnchor_;

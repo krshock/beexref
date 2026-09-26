@@ -12,6 +12,7 @@
 #include <QApplication>
 #include <QContextMenuEvent>
 #include <QDragEnterEvent>
+#include <QGuiApplication>
 #include <QDragMoveEvent>
 #include <QDropEvent>
 #include <QMimeData>
@@ -32,6 +33,13 @@ View::View(QWidget *parent)
     : QGraphicsView(parent)
 {
     lod_ = new LodManager(this);
+
+    // Move-window mode: the window follows the global cursor on a timer,
+    // so it keeps moving when the pointer leaves the window (widget
+    // mouse events stop at the edge, which used to strand the mode).
+    moveWindowTimer_ = new QTimer(this);
+    moveWindowTimer_->setInterval(10);
+    connect(moveWindowTimer_, &QTimer::timeout, this, &View::moveWindowTick);
 
     setRenderHints(QPainter::Antialiasing | QPainter::SmoothPixmapTransform);
     setViewportUpdateMode(QGraphicsView::MinimalViewportUpdate);
@@ -570,12 +578,8 @@ void View::mouseMoveEvent(QMouseEvent *event)
     const QPoint position = event->position().toPoint();
 
     if (movingWindow_) {
-        // The window follows the pointer by the global cursor delta.
-        const QPointF global = event->globalPosition();
-        const QPointF delta = global - moveWindowGlobal_;
-        moveWindowGlobal_ = global;
-        if (QWidget *top = window())
-            top->move(top->pos() + delta.toPoint());
+        // The timer moves the window; keep the cursor and skip the
+        // other interactions.
         event->accept();
         return;
     }
@@ -1031,6 +1035,12 @@ void View::enterMoveWindow()
     movingWindow_ = true;
     viewport()->setCursor(Qt::SizeAllCursor);
     moveWindowGlobal_ = QCursor::pos();
+    // A drag ends when its button comes up; an armed mode (the action
+    // from the keyboard or the menu) has no button and ends on the next
+    // press or Esc instead.
+    moveWindowPressed_ = QGuiApplication::mouseButtons() != Qt::NoButton;
+    moveWindowWasActive_ = window() && window()->isActiveWindow();
+    moveWindowTimer_->start();
 }
 
 void View::exitMoveWindow()
@@ -1038,7 +1048,37 @@ void View::exitMoveWindow()
     if (!movingWindow_)
         return;
     movingWindow_ = false;
+    moveWindowPressed_ = false;
+    moveWindowWasActive_ = false;
+    moveWindowTimer_->stop();
     viewport()->unsetCursor();
+}
+
+void View::moveWindowTick()
+{
+    if (!movingWindow_)
+        return;
+    // A drag that was released outside the window never reaches
+    // mouseReleaseEvent; the global button state does.
+    if (moveWindowPressed_ && QGuiApplication::mouseButtons() == Qt::NoButton) {
+        exitMoveWindow();
+        return;
+    }
+    // The armed mode should not keep following the cursor once another
+    // application comes to the front (only when the window was active
+    // when it was armed).
+    if (!moveWindowPressed_ && moveWindowWasActive_ && window()
+        && !window()->isActiveWindow()) {
+        exitMoveWindow();
+        return;
+    }
+    const QPointF global = QCursor::pos();
+    const QPointF delta = global - moveWindowGlobal_;
+    if (delta.isNull())
+        return;
+    moveWindowGlobal_ = global;
+    if (QWidget *top = window())
+        top->move(top->pos() + delta.toPoint());
 }
 
 void View::startSampleColor()

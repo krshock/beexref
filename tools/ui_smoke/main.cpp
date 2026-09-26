@@ -648,6 +648,15 @@ public:
             actionByText(QStringLiteral("Show &Scrollbars"))->trigger();
             QTest::qWait(200);
 
+            // Move-window mode follows the global cursor on a timer, so
+            // it keeps working when the pointer leaves the window.
+            actionByText(QStringLiteral("Move &Window"))->trigger();
+            QTest::qWait(100);
+            out() << "move window armed: " << window_.view()->movingWindow() << "\n";
+            QTest::keyClick(view, Qt::Key_Escape);
+            QTest::qWait(100);
+            out() << "move window cleared: " << !window_.view()->movingWindow() << "\n";
+
             actionByText(QStringLiteral("&Help"))->trigger();
             QTest::qWait(600);
             for (QDialog *candidate : window_.findChildren<QDialog *>()) {

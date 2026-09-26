@@ -2804,16 +2804,14 @@ void TestUiScene::moveWindowModeFollowsThePointer()
     QVERIFY(view->movingWindow());
     QCOMPARE(view->viewport()->cursor().shape(), Qt::SizeAllCursor);
 
-    // Moving the pointer moves the window (the platform may clamp the
-    // requested position, so only the change is asserted).
+    // The window follows the global cursor on a timer, so it keeps
+    // moving even where widget mouse events stop (the platform may
+    // clamp the requested position, so only the change is asserted).
     const QPoint centre = view->viewport()->rect().center();
     const QPoint beforeMove = window.pos();
-    sendMouse(view->viewport(), QEvent::MouseMove, centre, Qt::NoButton, Qt::NoButton);
-    const QPoint afterFirstMove = window.pos();
-    QVERIFY(afterFirstMove != beforeMove);
-    sendMouse(view->viewport(), QEvent::MouseMove, centre + QPoint(25, 15), Qt::NoButton,
-              Qt::NoButton);
-    QVERIFY(window.pos() != afterFirstMove);
+    QCursor::setPos(QCursor::pos() + QPoint(30, 20));
+    QTest::qWait(60);
+    QVERIFY(window.pos() != beforeMove);
 
     // A press ends the mode.
     sendMouse(view->viewport(), QEvent::MouseButtonPress, centre, Qt::LeftButton, Qt::LeftButton);
