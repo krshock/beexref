@@ -8,8 +8,8 @@ out deliberate deviations.
 
 ## References (not in this repo)
 
-- Python reference: `~/git/beeref/beeref/beerefx/`
-- Go/Fyne reference: `~/git/beeref/beerefx-go/beexref/`
+- Python reference: `../beeref/beerefx/` (sibling checkout)
+- Go/Fyne reference: `../beerefx-go/beexref/` (sibling checkout)
 - When semantics are unclear, read these. `fileio/legacy.py`, `fileio/sql.py`,
   `fileio/export.py` define the on-disk and export shapes.
 
@@ -23,7 +23,8 @@ ctest --preset linux-debug
 
 - Presets live in `CMakePresets.json`. `linux-debug` is **RelWithDebInfo**, not
   a debug build. Both use ccache and mold (LTO is on for release).
-- Qt is at `~/Qt/6.11.2/gcc_64` (via `CMAKE_PREFIX_PATH`); requires Qt >= 6.8.
+- Requires Qt >= 6.8. Point `CMAKE_PREFIX_PATH` at your Qt install: edit
+  the `base` preset or pass `-DCMAKE_PREFIX_PATH=...`.
 - Binaries land in `build/linux-{debug,release}/`: `beexref`,
   `beexref-boardcheck`, `beexref-ui-smoke`.
 - Single test binary: `./build/linux-debug/tests/test_<name> <slotName>`
