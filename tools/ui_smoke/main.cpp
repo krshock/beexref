@@ -26,6 +26,7 @@
 #include <QPushButton>
 #include <QSlider>
 #include <QTabWidget>
+#include <QTextEdit>
 #include <QMouseEvent>
 #include <QScrollBar>
 #include <QTextStream>
@@ -666,6 +667,22 @@ public:
                 QTest::qWait(200);
                 out() << "move handle hidden with titlebar again: " << !handle->isVisible()
                       << "\n";
+            }
+
+            // Insert > Text creates an item and opens the editor.
+            {
+                actionByText(QStringLiteral("&Text"))->trigger();
+                QTest::qWait(100);
+                auto *editor =
+                    window_.view()->findChild<QTextEdit *>(QStringLiteral("textEditor"));
+                out() << "text editor open: " << (editor && editor->isVisible()) << "\n";
+                if (editor) {
+                    editor->setPlainText(QStringLiteral("BeeXRef note"));
+                    QTest::keyClick(editor, Qt::Key_Return);
+                    QTest::qWait(100);
+                }
+                out() << "text editor closed: " << (!editor || !editor->isVisible()) << "\n";
+                snapshot(QStringLiteral("41-insert-text"));
             }
 
             // Move-window mode follows the global cursor on a timer, so

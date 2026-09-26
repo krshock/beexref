@@ -646,6 +646,7 @@ void MainWindow::applyHistoryStep(bool undo)
     // undo or redo touches the items they edit.
     view_->cancelCrop();
     view_->cancelSampleColor();
+    view_->commitTextEdit();
     const bool changed = undo ? undoStack_.undo() : undoStack_.redo();
     if (!changed)
         return;
@@ -1151,6 +1152,22 @@ void MainWindow::buildActions()
     actions_->add(QStringLiteral("insert_images"), QStringLiteral("&Images..."),
                   QKeySequence(QStringLiteral("Ctrl+I")), G::Always,
                   [this](bool) { insertImages(); });
+    // The reference's insert_text: a text item at the pointer, ready to
+    // edit (Ctrl+T).
+    actions_->add(QStringLiteral("insert_text"), QStringLiteral("&Text"),
+                  QKeySequence(QStringLiteral("Ctrl+T")), G::Always, [this](bool) {
+                      QPoint position = view_->viewport()->mapFromGlobal(QCursor::pos());
+                      if (!view_->viewport()->rect().contains(position))
+                          position = view_->viewport()->rect().center();
+                      const doc::ItemPtr item =
+                          input_->insertText(QStringLiteral("Text"),
+                                             view_->mapToScene(position),
+                                             view_->transform().m11());
+                      if (item) {
+                          if (SceneItem *view = scene_->itemViewFor(item))
+                              view_->startTextEdit(view);
+                      }
+                  });
 
     // Transform.
     actions_->add(QStringLiteral("crop"), QStringLiteral("&Crop"),
@@ -1389,9 +1406,10 @@ void MainWindow::buildMenus()
     actions_->appendSeparator(viewMenu);
     actions_->append(viewMenu, QStringLiteral("move_window"));
 
-    // Insert: text arrives with text editing.
+    // Insert: images and text items.
     auto *insertMenu = menuBar()->addMenu(QStringLiteral("&Insert"));
     actions_->append(insertMenu, QStringLiteral("insert_images"));
+    actions_->append(insertMenu, QStringLiteral("insert_text"));
 
     auto *transformMenu = menuBar()->addMenu(QStringLiteral("&Transform"));
     actions_->append(transformMenu, QStringLiteral("crop"));

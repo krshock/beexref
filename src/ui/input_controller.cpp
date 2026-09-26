@@ -116,15 +116,17 @@ void InputController::insertUrls(const QList<QUrl> &urls, const QPointF &scenePo
     }
 }
 
-void InputController::insertText(const QString &text, const QPointF &scenePos, double viewScale)
+doc::ItemPtr InputController::insertText(const QString &text, const QPointF &scenePos,
+                                         double viewScale)
 {
     if (text.isEmpty())
-        return;
+        return {};
     auto item = std::make_shared<doc::Item>(doc::kTypeText);
     item->setText(text);
     if (viewScale > 0)
         item->scale = 1.0 / viewScale;
     insertItems({item}, scenePos, QStringLiteral("Insert text"));
+    return item;
 }
 
 void InputController::insertLoaded(const doc::LoadedImage &loaded, const QPointF &scenePos)

@@ -39,6 +39,10 @@ public:
     bool acceptsMimeData(const QMimeData &data) const;
     void insertMimeData(const QMimeData &data, const QPointF &scenePos, double viewScale = 1.0);
 
+    // Creates a text item at scenePos with its own undo step and returns
+    // it, so the caller can start editing it; empty text inserts nothing.
+    doc::ItemPtr insertText(const QString &text, const QPointF &scenePos, double viewScale = 1.0);
+
     void copy();
     void cut();
     void paste(const QPointF &scenePos, double viewScale = 1.0);
@@ -63,7 +67,6 @@ private:
     void insertLoaded(const doc::LoadedImage &loaded, const QPointF &scenePos);
     void insertItems(QVector<doc::ItemPtr> items, const QPointF &scenePos, const QString &text);
     void insertUrls(const QList<QUrl> &urls, const QPointF &scenePos);
-    void insertText(const QString &text, const QPointF &scenePos, double viewScale);
     void spillToCache(const doc::ItemPtr &item);
     void arrangeInserted(const QVector<doc::ItemPtr> &items, const QPointF &scenePos);
 

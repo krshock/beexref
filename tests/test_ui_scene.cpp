@@ -31,6 +31,7 @@
 #include <QTabWidget>
 #include <QTableWidget>
 #include <QTemporaryDir>
+#include <QTextEdit>
 #include <QtTest>
 #include <QWheelEvent>
 
@@ -234,6 +235,8 @@ private slots:
     void canvasContextMenuMirrorsTheMenuBar();
     void moveWindowModeFollowsThePointer();
     void moveHandleShowsWhenTheTitleBarIsOff();
+    void insertTextActionCreatesAnEditableItem();
+    void doubleClickOnTextEditsIt();
     void infoDialogsShowTheExpectedContent();
     void metadataPanelEditsAndCommits();
     void hudPreviewShowsTheStyledPanel();
@@ -2910,6 +2913,76 @@ void TestUiScene::moveHandleShowsWhenTheTitleBarIsOff()
     QVERIFY(titlebar->isChecked());
     QVERIFY(!window.windowFlags().testFlag(Qt::FramelessWindowHint));
     QVERIFY(!handle->isVisible());
+}
+
+void TestUiScene::insertTextActionCreatesAnEditableItem()
+{
+    ui::MainWindow window;
+    window.show();
+    QTest::qWait(50);
+    ui::View *view = window.view();
+
+    actionByText(window, QStringLiteral("&Text"))->trigger();
+    QTest::qWait(20);
+
+    QCOMPARE(window.scene()->itemViews().size(), 1);
+    ui::SceneItem *item = window.scene()->itemViews().first();
+    QVERIFY(item->isText());
+    QCOMPARE(item->item()->text(), QStringLiteral("Text"));
+
+    // The editor is open over the item with the reference's default text.
+    auto *editor = view->findChild<QTextEdit *>(QStringLiteral("textEditor"));
+    QVERIFY(editor);
+    QVERIFY(editor->isVisible());
+    QCOMPARE(editor->toPlainText(), QStringLiteral("Text"));
+
+    // Typing and Enter commit as one undo step.
+    editor->setPlainText(QStringLiteral("hello"));
+    QTest::keyClick(editor, Qt::Key_Return);
+    QTest::qWait(20);
+    QVERIFY(!editor->isVisible());
+    QCOMPARE(item->item()->text(), QStringLiteral("hello"));
+
+    actionByText(window, QStringLiteral("&Undo"))->trigger();
+    QTest::qWait(20);
+    QCOMPARE(item->item()->text(), QStringLiteral("Text"));
+}
+
+void TestUiScene::doubleClickOnTextEditsIt()
+{
+    ui::MainWindow window;
+    window.show();
+    QTest::qWait(50);
+    ui::View *view = window.view();
+
+    // A text item on the board.
+    const doc::ItemPtr note = textItem(QStringLiteral("note"));
+    window.scene()->document()->addItem(note);
+    window.scene()->syncDocument();
+    QCOMPARE(window.scene()->itemViews().size(), 1);
+    ui::SceneItem *item = window.scene()->itemViewFor(note);
+    QVERIFY(item);
+    QVERIFY(item->isText());
+
+    // A double-click opens the editor instead of fitting the item.
+    view->centerOn(item->sceneBoundingRect().center());
+    QTest::qWait(20);
+    const double scaleBefore = view->transform().m11();
+    const QPoint centre = view->mapFromScene(item->sceneBoundingRect().center());
+    sendMouse(view->viewport(), QEvent::MouseButtonDblClick, centre, Qt::LeftButton,
+              Qt::LeftButton);
+    QTest::qWait(20);
+    auto *editor = view->findChild<QTextEdit *>(QStringLiteral("textEditor"));
+    QVERIFY(editor);
+    QVERIFY(editor->isVisible());
+    QCOMPARE(editor->toPlainText(), QStringLiteral("note"));
+    QCOMPARE(view->transform().m11(), scaleBefore);
+
+    // Esc cancels: the text is untouched and the editor closes.
+    QTest::keyClick(editor, Qt::Key_Escape);
+    QTest::qWait(20);
+    QVERIFY(!editor->isVisible());
+    QCOMPARE(item->item()->text(), QStringLiteral("note"));
 }
 
 void TestUiScene::infoDialogsShowTheExpectedContent()

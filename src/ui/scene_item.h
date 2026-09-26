@@ -40,6 +40,18 @@ public:
     // it to build the SVG styles.
     const QFont &font() const { return font_; }
 
+    // Text items wrap at this width in local coordinates; the in-place
+    // editor uses the same width so the layout does not jump on commit.
+    static constexpr double kTextWrapWidth = 320.0;
+
+    // Sets the model text with the geometry bookkeeping a changed
+    // bounding rect needs.
+    void setText(const QString &text);
+    // While the in-place editor is open the item hides its own text, so
+    // the editor is not drawn over a second copy.
+    bool textEditing() const { return textEditing_; }
+    void setTextEditing(bool editing);
+
     // Crop mode (the reference's CropEditor): the item shows the whole
     // image with the editable rectangle on top; the model is untouched
     // until commitCrop().
@@ -143,6 +155,7 @@ private:
     QRectF cropRect_;
     QRectF displayBounds_;
     QFont font_;
+    bool textEditing_ = false;
 
     QVector<Level> levels_;
     QImage coarsestLevel_;

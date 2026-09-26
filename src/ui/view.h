@@ -19,6 +19,7 @@
 
 class QKeyEvent;
 class QMimeData;
+class QTextEdit;
 class QTimer;
 
 namespace ui {
@@ -77,6 +78,14 @@ public:
     void cancelCrop();
     bool cropActive() const { return cropItem_ != nullptr; }
 
+    // In-place text editing: started by a double-click on a text item or
+    // by Insert > Text. Enter or a click elsewhere commits (one undo
+    // step), Esc cancels, Shift+Enter inserts a newline.
+    void startTextEdit(SceneItem *item);
+    void commitTextEdit();
+    void cancelTextEdit();
+    bool textEditing() const { return textItem_ != nullptr; }
+
     // Sample colour mode: a crosshair and a swatch follow the pointer;
     // the next click reports the colour under it and leaves the mode
     // (the reference's Sample Color action).
@@ -128,6 +137,7 @@ protected:
     void mouseReleaseEvent(QMouseEvent *event) override;
     void mouseDoubleClickEvent(QMouseEvent *event) override;
     void keyPressEvent(QKeyEvent *event) override;
+    bool eventFilter(QObject *watched, QEvent *event) override;
     void leaveEvent(QEvent *event) override;
     void resizeEvent(QResizeEvent *event) override;
     void scrollContentsBy(int dx, int dy) override;
@@ -182,6 +192,11 @@ private:
     // Puts the move handle in the canvas' top-left corner.
     void positionMoveHandle();
 
+    // Text editing session: the editor overlay tracks the item's
+    // viewport rect while the view scrolls, zooms or resizes.
+    void positionTextEditor();
+    void finishTextEdit(bool commit);
+
     // Spotlight state: the view-only raised items.
     void drawSpotlight(QPainter *painter) const;
     // The item under a viewport point in the order it is drawn:
@@ -223,6 +238,9 @@ private:
     QPointF moveWindowGlobal_;
     QTimer *moveWindowTimer_ = nullptr;
     MoveHandle *moveHandle_ = nullptr;
+    QTextEdit *textEditor_ = nullptr;
+    SceneItem *textItem_ = nullptr;
+    QString textBefore_;
     bool dragZoomInverted_ = false;
     QPoint dragZoomStart_;
     QPoint dragZoomAnchor_;

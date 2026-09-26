@@ -96,8 +96,8 @@ QRectF SceneItem::boundingRect() const
         return cropMode_ ? imageBounds() : displayBounds_;
     if (isText()) {
         const QFontMetricsF metrics(font_);
-        const QRectF bounds =
-            metrics.boundingRect(QRectF(0, 0, 320, 10000), Qt::TextWordWrap, item_->text());
+        const QRectF bounds = metrics.boundingRect(QRectF(0, 0, kTextWrapWidth, 10000),
+                                                   Qt::TextWordWrap, item_->text());
         return QRectF(0, 0, qMax(bounds.width(), 40.0), qMax(bounds.height(), 20.0));
     }
     const QFontMetricsF metrics(font_);
@@ -333,6 +333,25 @@ void SceneItem::syncPositionToModel()
     item_->y = pos().y();
 }
 
+void SceneItem::setText(const QString &text)
+{
+    if (item_->text() == text)
+        return;
+    // The bounding rect follows the text, so Qt has to be told before
+    // the layout changes.
+    prepareGeometryChange();
+    item_->setText(text);
+    update();
+}
+
+void SceneItem::setTextEditing(bool editing)
+{
+    if (textEditing_ == editing)
+        return;
+    textEditing_ = editing;
+    update();
+}
+
 void SceneItem::paintContent(QPainter *painter)
 {
     // Stated unconditionally: painter state leaks between items in a
@@ -361,8 +380,10 @@ void SceneItem::paintContent(QPainter *painter)
             painter->drawImage(crop, displayLevel(), source);
         }
     } else if (isText()) {
-        painter->setPen(theme::text);
-        painter->drawText(boundingRect(), Qt::TextWordWrap, item_->text());
+        if (!textEditing_) {
+            painter->setPen(theme::text);
+            painter->drawText(boundingRect(), Qt::TextWordWrap, item_->text());
+        }
     } else {
         const QRectF bounds = boundingRect();
         QColor background = theme::error;

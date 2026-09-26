@@ -20,6 +20,7 @@
 #include <QMouseEvent>
 #include <QPainter>
 #include <QScrollBar>
+#include <QTextEdit>
 #include <QTimer>
 #include <QCursor>
 #include <QKeyEvent>
@@ -113,6 +114,8 @@ void View::setBoardScene(Scene *scene)
                         cropItem_ = nullptr;
                         cropDrag_ = crop::Part::None;
                     }
+                    if (view == textItem_)
+                        cancelTextEdit();
                     spotlighted_.removeAll(view);
                     lod_->forgetItem(view);
                 });
@@ -379,19 +382,23 @@ void View::mouseDoubleClickEvent(QMouseEvent *event)
         return;
     }
 
-    // The reference cancels active modes first, then fits the item
-    // unless it is editable: text items enter edit mode there, which is
-    // not ported yet, so they keep the default behaviour.
+    // The reference cancels active modes first: a text item enters edit
+    // mode, anything else is selected and fitted.
     cancelCrop();
     if (SceneItem *item = itemAtPoint(event->position().toPoint())) {
-        if (!item->isText()) {
+        if (item->isText()) {
             if (!item->isSelected())
                 item->setSelected(true);
-            fitRect(item->sceneBoundingRect());
-            emit itemDoubleClicked(item);
+            startTextEdit(item);
             event->accept();
             return;
         }
+        if (!item->isSelected())
+            item->setSelected(true);
+        fitRect(item->sceneBoundingRect());
+        emit itemDoubleClicked(item);
+        event->accept();
+        return;
     }
     QGraphicsView::mouseDoubleClickEvent(event);
 }
@@ -1028,6 +1035,113 @@ void View::cancelCrop()
     finishCropSession(false);
 }
 
+void View::startTextEdit(SceneItem *item)
+{
+    if (!item || !item->isText())
+        return;
+    if (textItem_ == item) {
+        if (textEditor_)
+            textEditor_->setFocus();
+        return;
+    }
+    // Commit whatever another item's editor still holds.
+    if (textItem_)
+        commitTextEdit();
+
+    textItem_ = item;
+    textBefore_ = item->item()->text();
+
+    if (!textEditor_) {
+        textEditor_ = new QTextEdit(viewport());
+        textEditor_->setObjectName(QStringLiteral("textEditor"));
+        textEditor_->setAcceptRichText(false);
+        textEditor_->setFrameShape(QFrame::NoFrame);
+        textEditor_->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+        textEditor_->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+        textEditor_->setStyleSheet(
+            QStringLiteral("QTextEdit { background: %1; color: %2;"
+                           " border: 1px dashed %3; padding: 2px; }")
+                .arg(theme::canvas.name(), theme::text.name(), theme::selection.name()));
+        textEditor_->installEventFilter(this);
+        connect(textEditor_, &QTextEdit::textChanged, this, [this]() { positionTextEditor(); });
+    }
+
+    textEditor_->setPlainText(textBefore_);
+    textEditor_->selectAll();
+    item->setTextEditing(true);
+    textEditor_->show();
+    textEditor_->setFocus();
+    positionTextEditor();
+}
+
+void View::commitTextEdit()
+{
+    finishTextEdit(true);
+}
+
+void View::cancelTextEdit()
+{
+    finishTextEdit(false);
+}
+
+void View::finishTextEdit(bool commit)
+{
+    if (!textItem_ || !textEditor_)
+        return;
+
+    SceneItem *item = textItem_;
+    const QString text = textEditor_->toPlainText();
+
+    // Cleared before hiding: hiding delivers a focus-out that would
+    // otherwise re-enter this function.
+    textItem_ = nullptr;
+    textEditor_->hide();
+    item->setTextEditing(false);
+
+    if (!commit || text == textBefore_)
+        return;
+
+    const doc::ChangeItemCommand::State before =
+        doc::ChangeItemCommand::State::capture(*item->item());
+    item->setText(text);
+    if (undoStack_) {
+        undoStack_->push(std::make_unique<doc::ChangeItemCommand>(
+            item->item(), before, doc::ChangeItemCommand::State::capture(*item->item()),
+            QStringLiteral("Edit text")));
+    }
+    if (boardScene_ && boardScene_->document())
+        boardScene_->document()->setModified(true);
+}
+
+void View::positionTextEditor()
+{
+    if (!textItem_ || !textEditor_ || !textEditor_->isVisible())
+        return;
+
+    // The text is drawn in item-local pixels, scaled by the item's
+    // transform and the view; the editor's font must match that.
+    const double totalScale = qMax(0.0001, transform().m11() * textItem_->item()->scale);
+    QFont font = textItem_->font();
+    if (font.pointSizeF() > 0)
+        font.setPointSizeF(qMax(1.0, font.pointSizeF() * totalScale));
+    else if (font.pixelSize() > 0)
+        font.setPixelSize(qMax(1, qRound(font.pixelSize() * totalScale)));
+    textEditor_->setFont(font);
+
+    const QRect viewRect =
+        mapFromScene(textItem_->mapToScene(textItem_->boundingRect())).boundingRect();
+
+    // The same wrap width the item uses, so the committed layout matches
+    // what was typed; never wider than the viewport allows.
+    const int room = qMax(60, viewport()->width() - viewRect.x() - 4);
+    const int width = qBound(60, qRound(SceneItem::kTextWrapWidth * totalScale), room);
+    textEditor_->setFixedWidth(width);
+    const int content =
+        static_cast<int>(std::ceil(textEditor_->document()->size().height())) + 4;
+    textEditor_->setFixedHeight(qMax(viewRect.height(), content));
+    textEditor_->move(viewRect.topLeft());
+}
+
 void View::finishCropSession(bool changed)
 {
     recalculateSceneRect();
@@ -1228,6 +1342,30 @@ void View::keyPressEvent(QKeyEvent *event)
     QGraphicsView::keyPressEvent(event);
 }
 
+bool View::eventFilter(QObject *watched, QEvent *event)
+{
+    if (watched == textEditor_ && textEditor_) {
+        if (event->type() == QEvent::KeyPress) {
+            auto *key = static_cast<QKeyEvent *>(event);
+            if (key->key() == Qt::Key_Escape) {
+                cancelTextEdit();
+                return true;
+            }
+            // Enter commits, Shift+Enter falls through to the editor's
+            // newline, like the reference's text item.
+            if ((key->key() == Qt::Key_Return || key->key() == Qt::Key_Enter)
+                && !key->modifiers().testFlag(Qt::ShiftModifier)) {
+                commitTextEdit();
+                return true;
+            }
+        } else if (event->type() == QEvent::FocusOut) {
+            // Clicking elsewhere in the canvas commits.
+            commitTextEdit();
+        }
+    }
+    return QGraphicsView::eventFilter(watched, event);
+}
+
 void View::leaveEvent(QEvent *event)
 {
     if (drag_ == Drag::None && !panning_ && !sampling_ && !movingWindow_)
@@ -1297,6 +1435,7 @@ void View::resizeEvent(QResizeEvent *event)
 {
     QGraphicsView::resizeEvent(event);
     positionMoveHandle();
+    positionTextEditor();
     updateViewState();
     recalculateSceneRect();
     lod_->schedule();
@@ -1305,6 +1444,7 @@ void View::resizeEvent(QResizeEvent *event)
 void View::scrollContentsBy(int dx, int dy)
 {
     QGraphicsView::scrollContentsBy(dx, dy);
+    positionTextEditor();
     updateViewState();
     lod_->schedule();
 }
