@@ -47,5 +47,5 @@ the original BeeRef can be opened and imported.
 ## License
 
 BeeXRef is free software under the GPL-3.0 license (see `LICENSE`).
-It is part of the [BeeRefX fork](https://github.com/rbreu/beeref) of
-BeeRef. Developers: see `AGENTS.md`.
+It is a fork of [BeeRef](https://github.com/rbreu/beeref) by Rebecca
+Breu, maintained by krshock. Developers: see `AGENTS.md`.

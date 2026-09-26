@@ -1,6 +1,6 @@
 # AGENTS.md
 
-BeeXRef in C++/Qt6: a port of the BeeRefX infinite-canvas reference-image
+BeeXRef in C++/Qt6: a port of the BeeRef infinite-canvas reference-image
 viewer. It must stay byte-compatible with the `.beex` format and share the
 app's config/cache paths. Priorities, in order: low RAM, then low CPU, then
 simplicity. Match the Python reference's behaviour including its quirks; call

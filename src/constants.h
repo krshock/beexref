@@ -11,6 +11,8 @@ inline constexpr char AppNameFull[] = "BeeXRef Reference Image Viewer";
 inline constexpr char Version[] = BEEXREF_VERSION;
 // The reference's about box text.
 inline constexpr char Copyright[] = "Copyright \u00A9 2021-2024 Rebecca Breu";
+// The fork's own copyright: this port's changes.
+inline constexpr char ForkCopyright[] = "Copyright \u00A9 2026 krshock";
 
 inline constexpr char BeeFileExtension[] = ".bee";
 inline constexpr char BeexFileExtension[] = ".beex";
