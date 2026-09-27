@@ -41,8 +41,8 @@ The project needs C++20.
 - **windeployqt** (ships with Qt) for packaging.
 
 SQLite is vendored in `third_party/sqlite3`, so there is nothing to
-install for it. `ccache` and `mold` are only used by the Linux presets
-and are not needed on Windows.
+install for it. `ccache` and `mold` are Linux build conveniences and are
+not needed on Windows.
 
 ## Native build
 
@@ -63,9 +63,9 @@ cmake --build build
 ```
 
 Use `C:/Qt/6.11.2/msvc2022_64` as `CMAKE_PREFIX_PATH` for the MSVC kit.
-The committed CMake presets are Linux-only (Linux Qt path, ccache,
-`-fuse-ld=mold`), so configure explicitly as above until a Windows
-preset exists.
+The committed CMake presets are Linux-only (Ninja, ccache, the Linux
+toolchain), so configure explicitly as above until a Windows preset
+exists.
 
 ### 3. Run the tests
 
