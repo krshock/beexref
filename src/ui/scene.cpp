@@ -44,6 +44,10 @@ void Scene::syncDocument()
         return;
     }
 
+    // Removed views first, then new ones. Existing views reapply their
+    // model state only when a command noted them dirty, so a refresh
+    // costs the item count once instead of reapplying every transform.
+    bool changed = false;
     QSet<const doc::Item *> live;
     for (const doc::ItemPtr &item : document_->items())
         live.insert(item.get());
@@ -54,19 +58,26 @@ void Scene::syncDocument()
             emit itemViewAboutToBeRemoved(view);
             removeItem(view);
             delete view;
+            changed = true;
         }
     }
 
+    const bool dirty = !document_->dirtyItems().isEmpty();
     for (const doc::ItemPtr &item : document_->items()) {
         SceneItem *view = itemViewFor(item);
         if (!view) {
             view = new SceneItem(item);
             addItem(view);
             applyPlaceholder(view);
+            view->applyModelState();
+            changed = true;
+        } else if (document_->dirtyItems().contains(item.get())) {
+            view->applyModelState();
         }
-        view->applyModelState();
     }
-    emit itemsChanged();
+    document_->clearDirtyItems();
+    if (changed || dirty)
+        emit itemsChanged();
 }
 
 void Scene::applyPlaceholder(SceneItem *view)

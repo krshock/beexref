@@ -6,6 +6,7 @@
 #include "board/write.h"
 
 #include <QString>
+#include <QSet>
 #include <QVector>
 
 #include <memory>
@@ -54,6 +55,14 @@ public:
     QVector<ItemPtr> &items() { return items_; }
     const QVector<ItemPtr> &items() const { return items_; }
 
+    // Items whose state changed since the UI last synced; commands call
+    // noteItemChanged(), so a canvas refresh only reapplies the items
+    // that actually moved (a board with thousands of items would
+    // otherwise reapply every transform on every undo).
+    void noteItemChanged(const ItemPtr &item) { dirty_.insert(item.get()); }
+    const QSet<const Item *> &dirtyItems() const { return dirty_; }
+    void clearDirtyItems() { dirty_.clear(); }
+
     void addItem(const ItemPtr &item);
     void insertItem(qsizetype index, const ItemPtr &item);
     void removeItem(const ItemPtr &item);
@@ -91,6 +100,7 @@ private:
     QString path_;
     QString tempDir_;
     QVector<ItemPtr> items_;
+    QSet<const Item *> dirty_;
     bool modified_ = false;
     std::shared_ptr<board::Board> board_;
 };

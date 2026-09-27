@@ -244,16 +244,20 @@ ChangeItemCommand::ChangeItemCommand(ItemPtr item, State before, State after, QS
 {
 }
 
-void ChangeItemCommand::redo(Document &)
+void ChangeItemCommand::redo(Document &document)
 {
-    if (item_)
-        after_.apply(*item_);
+    if (!item_)
+        return;
+    after_.apply(*item_);
+    document.noteItemChanged(item_);
 }
 
-void ChangeItemCommand::undo(Document &)
+void ChangeItemCommand::undo(Document &document)
 {
-    if (item_)
-        before_.apply(*item_);
+    if (!item_)
+        return;
+    before_.apply(*item_);
+    document.noteItemChanged(item_);
 }
 
 } // namespace doc

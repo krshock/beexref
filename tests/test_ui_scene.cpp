@@ -240,6 +240,7 @@ private slots:
     void moveHandleShowsOverTheWelcomeOverlay();
     void dragZoomFollowsTheBinding();
     void unknownItemTypeRendersAsUnsupported();
+    void syncDocumentAppliesOnlyNotedChanges();
     void infoDialogsShowTheExpectedContent();
     void metadataPanelEditsAndCommits();
     void hudPreviewShowsTheStyledPanel();
@@ -1375,6 +1376,7 @@ void TestUiScene::cropShrinksTheItemToTheCrop()
     view->setLevel(level, 1.0);
 
     item->setCrop(QRectF(1, 0, 2, 2));
+    document->noteItemChanged(item);
     scene.syncDocument();
     QCOMPARE(view->boundingRect(), QRectF(1, 0, 2, 2));
     QCOMPARE(view->transformOriginPoint(), QRectF(1, 0, 2, 2).center());
@@ -1738,6 +1740,7 @@ void TestUiScene::sampleColorReadsTheDisplayedPixel()
 
     // Grayscale items sample their grey copy.
     item->setGrayscale(true);
+    document->noteItemChanged(item);
     scene.syncDocument();
     const QColor grey = view->sampleColorAt(view->mapToScene(QPointF(0.5, 0.5)));
     QVERIFY(grey.isValid());
@@ -3072,6 +3075,55 @@ void TestUiScene::unknownItemTypeRendersAsUnsupported()
     // cannot render.
     const QByteArray svg = ui::renderSceneToSvg(scene, ui::sceneExportFrame(scene));
     QVERIFY(!svg.contains("<image"));
+}
+
+void TestUiScene::syncDocumentAppliesOnlyNotedChanges()
+{
+    auto document = std::make_shared<doc::Document>(doc::Document::create());
+    const doc::ItemPtr first = pixmapItem(40, 30, Qt::red);
+    const doc::ItemPtr second = pixmapItem(40, 30, Qt::blue);
+    document->addItem(first);
+    document->addItem(second);
+
+    ui::Scene scene;
+    scene.setDocument(document);
+    QCOMPARE(scene.itemViews().size(), 2);
+    SceneItem *firstView = scene.itemViewFor(first);
+    SceneItem *secondView = scene.itemViewFor(second);
+    QVERIFY(firstView && secondView);
+    QCOMPARE(firstView->transform().m11(), 1.0);
+
+    QSignalSpy changed(&scene, &ui::Scene::itemsChanged);
+
+    // Nothing noted: a sync is a no-op, no signal and no reapply.
+    first->scale = 2.0;
+    scene.syncDocument();
+    QCOMPARE(changed.count(), 0);
+    QCOMPARE(firstView->transform().m11(), 1.0);
+
+    // A noted change reapplies that item only.
+    document->noteItemChanged(first);
+    scene.syncDocument();
+    QCOMPARE(changed.count(), 1);
+    QCOMPARE(firstView->transform().m11(), 2.0);
+    QCOMPARE(secondView->transform().m11(), 1.0);
+    QVERIFY(document->dirtyItems().isEmpty());
+
+    // A command notes its item on push, undo and redo.
+    doc::UndoStack stack(document.get());
+    const doc::ChangeItemCommand::State before =
+        doc::ChangeItemCommand::State::capture(*second);
+    second->scale = 3.0;
+    stack.push(std::make_unique<doc::ChangeItemCommand>(
+        second, before, doc::ChangeItemCommand::State::capture(*second),
+        QStringLiteral("Scale")));
+    QVERIFY(document->dirtyItems().contains(second.get()));
+    scene.syncDocument();
+    QCOMPARE(secondView->transform().m11(), 3.0);
+
+    QVERIFY(stack.undo());
+    scene.syncDocument();
+    QCOMPARE(secondView->transform().m11(), 1.0);
 }
 
 void TestUiScene::infoDialogsShowTheExpectedContent()
