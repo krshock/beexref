@@ -106,8 +106,16 @@ board::Result<Document> Document::open(const QString &path, const QString &tempD
     auto board = std::make_shared<board::Board>(opened.take());
 
     auto rows = board->items();
-    if (!rows)
-        return rows.error();
+    bool salvagedRows = false;
+    if (!rows) {
+        // The item rows cannot be read at all: recover the images from
+        // the blob store instead of giving up on the scene.
+        auto salvaged = board->salvageItems();
+        if (!salvaged || salvaged.value().isEmpty())
+            return rows.error(); // nothing to recover: the real reason it failed
+        rows = std::move(salvaged);
+        salvagedRows = true;
+    }
     const auto sizes = board->originalSizes(); // best-effort, like the Go port
     const auto floors = board->floorLevels();
     const auto blobIds = board->blobIds(); // best-effort: skip the check if unreadable
@@ -131,6 +139,11 @@ board::Result<Document> Document::open(const QString &path, const QString &tempD
         item->scale = row.scale;
         item->rotation = row.rotation;
         item->flip = row.flip == 1 ? 1.0 : -1.0;
+        if (salvagedRows) {
+            damage.append({Damage::Kind::RecoveredImage, row.id,
+                           QStringLiteral("item %1: image recovered without its position")
+                               .arg(row.id)});
+        }
         bool jsonOk = true;
         item->data = parseJsonObject(row.data, &jsonOk);
         item->meta = parseJsonObject(row.meta, &jsonOk);
@@ -191,6 +204,11 @@ board::Result<Document> Document::open(const QString &path, const QString &tempD
         damage.append({Damage::Kind::OrphanedFloor, 0,
                        QStringLiteral("%1 thumbnail rows have no item").arg(orphans.value())});
     }
+    if (board->isNewerVersion()) {
+        damage.append({Damage::Kind::NewerVersion, 0,
+                       QStringLiteral("written by a newer version of the app; Save As writes a "
+                                      "recovered copy")});
+    }
 
     for (const Damage &entry : damage) {
         logging::warn(QStringLiteral("Board opened with a problem"),
@@ -225,6 +243,10 @@ QString damageLabel(Damage::Kind kind)
         return QStringLiteral("invalid geometry");
     case Damage::Kind::OrphanedFloor:
         return QStringLiteral("orphaned thumbnail");
+    case Damage::Kind::RecoveredImage:
+        return QStringLiteral("recovered image");
+    case Damage::Kind::NewerVersion:
+        return QStringLiteral("newer board version");
     }
     return QStringLiteral("problem");
 }

@@ -19,10 +19,12 @@ namespace doc {
 struct Damage
 {
     enum class Kind {
-        MissingBlob,   // a pixmap row without its encoded image
-        BadJson,       // data/meta that is not a JSON object
-        BadGeometry,   // non-finite position, scale or rotation
-        OrphanedFloor, // a floor row whose item is gone (board-level)
+        MissingBlob,    // a pixmap row without its encoded image
+        BadJson,        // data/meta that is not a JSON object
+        BadGeometry,    // non-finite position, scale or rotation
+        OrphanedFloor,  // a floor row whose item is gone (board-level)
+        RecoveredImage, // an image salvaged without its item row
+        NewerVersion,   // written by a newer app version (board-level)
     };
 
     Kind kind = Kind::MissingBlob;

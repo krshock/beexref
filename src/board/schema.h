@@ -33,6 +33,9 @@ Result<int> readApplicationId(Connection &db);
 
 // True when the items table exists; used to reject non-board files.
 Result<bool> hasItemsTable(Connection &db);
+// Whether a table with this name exists; the salvage path uses it to see
+// what is still readable in a damaged file.
+Result<bool> hasTable(Connection &db, const QString &name);
 
 // Migrates a read-write connection to the current version inside one
 // transaction. Idempotent: columns are only added when absent, so a

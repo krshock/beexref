@@ -124,6 +124,11 @@ changelog, both artifacts, checksums, GitHub release); see
   floors), the open dialog summarises by kind with the full list in the
   scrollable details area, and the status bar keeps a `recovered · N`
   badge counting the entries whose item is still in the scene.
+- A newer-version file opens read-only and is marked (`newer board
+  version`), never migrated or downgraded in place. A file whose item
+  table is gone but whose blob store survives is salvaged: the images
+  come back as items with their filename and no position (`recovered
+  image` entries), and Save As writes them into a current-format copy.
 - A damaged board is never saved in place: `Document::save` refuses
   (createNew false) and Save As writes a recovered copy whose imageless
   items are explicit placeholders (`data["placeholder"]`, no blob). The

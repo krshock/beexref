@@ -37,6 +37,14 @@ struct FloorLevel
     QByteArray data;
 };
 
+// One image in the blob store, for salvaging a board whose item rows are
+// gone: the blob store keeps the image and the name it was saved under.
+struct BlobRow
+{
+    qint64 itemId = 0;
+    QString name;
+};
+
 // Which optional columns and tables the file has; files written before
 // them are still readable.
 struct Columns
@@ -60,9 +68,12 @@ public:
     Board(Board &&other) noexcept;
     Board &operator=(Board &&other) noexcept;
 
-    // Opens path for the app. Fails for files without an items table
-    // and for versions newer than supported; in both cases nothing is
-    // written.
+    // Opens path for the app. Older files are migrated on a temp copy.
+    // A newer file, and a file whose item table is gone but whose blob
+    // store survives, still open read-only and are flagged
+    // (isNewerVersion()/isSalvaged()) so the caller can recover them;
+    // nothing is written either way. A file with neither an items table
+    // nor blobs fails.
     static Result<Board> open(const QString &path, const QString &tempDir);
 
     // Copies path to tempDir, migrates the copy and opens it read-only.
@@ -76,7 +87,21 @@ public:
     Connection &connection() { return db_; }
     const Columns &columns() const { return columns_; }
 
+    // The file was written by a newer version of the app. It is opened
+    // read-only and the caller marks it, so a save never downgrades it in
+    // place.
+    bool isNewerVersion() const { return newerVersion_; }
+    // The item table was missing or unreadable and the caller recovered
+    // the images from the blob store.
+    bool isSalvaged() const { return salvaged_; }
+
     Result<QVector<ItemRow>> items();
+    // The images in the blob store, and item rows synthesized from them,
+    // for a board whose item table cannot be read. The rows carry the
+    // filename from the blob's name and default geometry: the position is
+    // lost with the item table.
+    Result<QVector<BlobRow>> blobRows();
+    Result<QVector<ItemRow>> salvageItems();
     Result<QByteArray> blob(qint64 itemId);
     // The encoded blob's format, from the sqlar name's extension. Empty
     // when the item has no blob.
@@ -100,6 +125,8 @@ private:
     QString path_;
     QString tempPath_;
     Columns columns_;
+    bool newerVersion_ = false;
+    bool salvaged_ = false;
 };
 
 Result<Columns> detectColumns(Connection &db);

@@ -8,6 +8,8 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QJsonDocument>
+#include <QJsonObject>
 
 #include <atomic>
 #include <utility>
@@ -44,16 +46,7 @@ Result<QString> copyToTemp(const QString &source, const QString &tempDir)
 
 Error notABoardError(const QString &path)
 {
-    return Error{0, QStringLiteral("Not a BeeXRef board file (no items table)"), path};
-}
-
-Error newerVersionError(int version, const QString &path)
-{
-    return Error{0,
-                 QStringLiteral("File format version %1 is newer than supported (%2)")
-                     .arg(version)
-                     .arg(schema::kUserVersion),
-                 path};
+    return Error{0, QStringLiteral("Not a BeeXRef board file (no items table or image data)"), path};
 }
 
 } // namespace
@@ -71,11 +64,14 @@ Board::~Board()
     close();
 }
 
+// Hand-written moves: every new member must be moved here too.
 Board::Board(Board &&other) noexcept
     : db_(std::move(other.db_))
     , path_(std::move(other.path_))
     , tempPath_(std::move(other.tempPath_))
     , columns_(other.columns_)
+    , newerVersion_(other.newerVersion_)
+    , salvaged_(other.salvaged_)
 {
     other.tempPath_.clear();
 }
@@ -89,6 +85,8 @@ Board &Board::operator=(Board &&other) noexcept
     path_ = std::move(other.path_);
     tempPath_ = std::move(other.tempPath_);
     columns_ = other.columns_;
+    newerVersion_ = other.newerVersion_;
+    salvaged_ = other.salvaged_;
     other.tempPath_.clear();
     return *this;
 }
@@ -111,15 +109,38 @@ Result<Board> Board::open(const QString &path, const QString &tempDir)
     auto hasItems = schema::hasItemsTable(db.value());
     if (!hasItems)
         return hasItems.error();
-    if (!hasItems.value())
-        return notABoardError(path);
+    if (!hasItems.value()) {
+        // The item table is gone, but the blob store may still hold the
+        // images: open such a file so the caller can recover them.
+        auto hasBlobs = schema::hasTable(db.value(), QStringLiteral("sqlar"));
+        if (!hasBlobs)
+            return hasBlobs.error();
+        if (!hasBlobs.value())
+            return notABoardError(path);
+        Columns columns;
+        auto lod = schema::hasTable(db.value(), QStringLiteral("lod"));
+        if (!lod)
+            return lod.error();
+        columns.lod = lod.value();
+        Board board(db.take(), path, QString(), columns);
+        board.salvaged_ = true;
+        return board;
+    }
 
     auto version = schema::readUserVersion(db.value());
     if (!version)
         return version.error();
 
-    if (version.value() > schema::kUserVersion)
-        return newerVersionError(version.value(), path);
+    if (version.value() > schema::kUserVersion) {
+        // A newer file still opens read-only: the scene is not lost, and
+        // the caller marks it so a save never downgrades it in place.
+        auto columns = detectColumns(db.value());
+        if (!columns)
+            return columns.error();
+        Board board(db.take(), path, QString(), columns.take());
+        board.newerVersion_ = true;
+        return board;
+    }
 
     if (version.value() < schema::kUserVersion)
         return prepare(path, tempDir);
@@ -233,6 +254,49 @@ Result<QVector<ItemRow>> Board::items()
         item.uuid = stmt.columnText(10);
         rows.append(std::move(item));
     }
+    return rows;
+}
+
+Result<QVector<BlobRow>> Board::blobRows()
+{
+    auto statement = db_.prepare(QStringLiteral("SELECT item_id, name FROM sqlar"));
+    if (!statement)
+        return statement.error();
+    QVector<BlobRow> rows;
+    while (true) {
+        auto row = statement.value().step();
+        if (!row)
+            return row.error();
+        if (!row.value())
+            break;
+        BlobRow blob;
+        blob.itemId = statement.value().columnInt64(0);
+        blob.name = statement.value().columnText(1);
+        rows.append(std::move(blob));
+    }
+    return rows;
+}
+
+Result<QVector<ItemRow>> Board::salvageItems()
+{
+    auto blobs = blobRows();
+    if (!blobs)
+        return blobs.error();
+    QVector<ItemRow> rows;
+    rows.reserve(blobs.value().size());
+    for (const BlobRow &blob : blobs.value()) {
+        ItemRow row;
+        row.id = blob.itemId;
+        row.type = QStringLiteral("pixmap");
+        row.flip = 1;
+        // The blob store carries only the name: the position and the rest
+        // of the item state were in the lost item table.
+        QJsonObject data;
+        data.insert(QStringLiteral("filename"), QFileInfo(blob.name).fileName());
+        row.data = QString::fromUtf8(QJsonDocument(data).toJson(QJsonDocument::Compact));
+        rows.append(std::move(row));
+    }
+    salvaged_ = true;
     return rows;
 }
 

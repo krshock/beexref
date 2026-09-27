@@ -184,16 +184,23 @@ Result<int> readApplicationId(Connection &db)
     return static_cast<int>(statement.value().columnInt64(0));
 }
 
-Result<bool> hasItemsTable(Connection &db)
+Result<bool> hasTable(Connection &db, const QString &name)
 {
-    auto statement = db.prepare(QStringLiteral(
-        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='items'"));
+    auto statement =
+        db.prepare(QStringLiteral("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?"));
     if (!statement)
         return statement.error();
+    if (Status status = statement.value().bind(1, name); !status)
+        return status.error();
     auto row = statement.value().step();
     if (!row)
         return row.error();
     return row.value();
+}
+
+Result<bool> hasItemsTable(Connection &db)
+{
+    return hasTable(db, QStringLiteral("items"));
 }
 
 Status migrateToCurrent(Connection &db)

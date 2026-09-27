@@ -93,6 +93,8 @@ private slots:
     void activeDamageCountFollowsDeletedItems();
     void refusesInPlaceSaveForDamagedBoards();
     void savesRecoveredCopiesWithMarkedPlaceholders();
+    void opensNewerVersionBoardsAsRecovered();
+    void recoversImagesWhenTheItemRowsAreGone();
 };
 
 void TestDocument::savesAndReopensEveryField()
@@ -572,6 +574,96 @@ void TestDocument::savesRecoveredCopiesWithMarkedPlaceholders()
     QVERIFY(!reopened.damaged());
     QCOMPARE(reopened.placeholderCount(), 1);
     QCOMPARE(reopened.items().size(), 2);
+}
+
+void TestDocument::opensNewerVersionBoardsAsRecovered()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString path = dir.filePath(QStringLiteral("future.beex"));
+
+    QVERIFY(board::save(path, {pixmapRecord(1, makePng(300, 200, Qt::red), QStringLiteral("a.png"))})
+                .isOk());
+    QVERIFY(execOnBoard(path, QStringLiteral("PRAGMA user_version=6")));
+
+    auto opened = doc::Document::open(path, dir.filePath(QStringLiteral("cache")));
+    if (!opened)
+        QFAIL(qPrintable(opened.error().toString()));
+    doc::Document document = opened.take();
+
+    // The scene is not lost: it loads and is marked as newer.
+    QCOMPARE(document.items().size(), 1);
+    QVERIFY(document.damaged());
+    QStringList kinds;
+    for (const doc::Damage &entry : document.damage())
+        kinds << doc::damageLabel(entry.kind);
+    QVERIFY2(kinds.contains(QStringLiteral("newer board version")), qPrintable(kinds.join("; ")));
+
+    // It is never downgraded in place; a recovered copy carries it into
+    // the current format.
+    const QByteArray before = fileBytes(path);
+    QVERIFY(!document.save(path).isOk());
+    QCOMPARE(fileBytes(path), before);
+
+    const QString copy = dir.filePath(QStringLiteral("copy.beex"));
+    QVERIFY(document.save(copy, true, {}, true).isOk());
+    auto again = doc::Document::open(copy, dir.filePath(QStringLiteral("cache")));
+    QVERIFY(again.isOk());
+    QVERIFY(!again.value().damaged());
+    QCOMPARE(again.value().items().size(), 1);
+}
+
+void TestDocument::recoversImagesWhenTheItemRowsAreGone()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString path = dir.filePath(QStringLiteral("blobs-only.beex"));
+
+    // A file whose item table is gone but whose blob store survived.
+    const QByteArray png = makePng(300, 200, Qt::red);
+    {
+        auto db = board::Connection::open(path, board::Connection::OpenMode::Create);
+        QVERIFY(db.isOk());
+        QVERIFY(db.value()
+                    .exec(QStringLiteral("CREATE TABLE sqlar (name TEXT PRIMARY KEY, "
+                                         "item_id INTEGER NOT NULL UNIQUE, mode INT, mtime INT, "
+                                         "sz INT, data BLOB)"))
+                    .isOk());
+        auto insert = db.value().prepare(
+            QStringLiteral("INSERT INTO sqlar (name, item_id, sz, data) VALUES (?, ?, ?, ?)"));
+        QVERIFY(insert);
+        QVERIFY(insert.value().bind(1, QStringLiteral("a.png")).isOk());
+        QVERIFY(insert.value().bind(2, qint64(1)).isOk());
+        QVERIFY(insert.value().bind(3, qint64(png.size())).isOk());
+        QVERIFY(insert.value().bind(4, png).isOk());
+        QVERIFY(insert.value().exec().isOk());
+    }
+
+    auto opened = doc::Document::open(path, dir.filePath(QStringLiteral("cache")));
+    if (!opened)
+        QFAIL(qPrintable(opened.error().toString()));
+    doc::Document document = opened.take();
+
+    // The image is back as an item: filename from the blob store, no
+    // position (that was in the lost item table).
+    QCOMPARE(document.items().size(), 1);
+    QVERIFY(document.items().first()->isPixmap());
+    QCOMPARE(document.items().first()->filename, QStringLiteral("a.png"));
+    QCOMPARE(document.blob(*document.items().first()).value(), png);
+    QVERIFY(document.damaged());
+    QStringList kinds;
+    for (const doc::Damage &entry : document.damage())
+        kinds << doc::damageLabel(entry.kind);
+    QVERIFY2(kinds.contains(QStringLiteral("recovered image")), qPrintable(kinds.join("; ")));
+
+    // Save As writes a normal board with the image intact.
+    const QString copy = dir.filePath(QStringLiteral("recovered.beex"));
+    QVERIFY(document.save(copy, true, {}, true).isOk());
+    auto again = doc::Document::open(copy, dir.filePath(QStringLiteral("cache")));
+    QVERIFY(again.isOk());
+    QVERIFY(!again.value().damaged());
+    QCOMPARE(again.value().items().size(), 1);
+    QCOMPARE(again.value().blob(*again.value().items().first()).value(), png);
 }
 
 QTEST_GUILESS_MAIN(TestDocument)

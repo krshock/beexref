@@ -122,7 +122,8 @@ class TestBoard : public QObject
 private slots:
     void opensCurrentBoardInPlace();
     void migratesOldBoardOnCopy();
-    void rejectsNewerVersionUntouched();
+    void opensNewerVersionReadOnlyUntouched();
+    void salvagesImagesWithoutItemRows();
     void rejectsNonBoardFile();
     void readsFilesWithMissingOptionalColumns();
     void missingBlobIsAnError();
@@ -225,7 +226,7 @@ void TestBoard::migratesOldBoardOnCopy()
     QVERIFY(!QFile::exists(tempPath));
 }
 
-void TestBoard::rejectsNewerVersionUntouched()
+void TestBoard::opensNewerVersionReadOnlyUntouched()
 {
     QTemporaryDir dir;
     QVERIFY(dir.isValid());
@@ -237,11 +238,59 @@ void TestBoard::rejectsNewerVersionUntouched()
         QVERIFY(db.value().exec(QStringLiteral("PRAGMA user_version=6")).isOk());
     }
 
+    // A newer file still opens -- the scene is not lost -- but it is
+    // marked so a save never downgrades it in place, and it is opened in
+    // place (no migration copy).
     const QByteArray hashBefore = fileHash(path);
     auto board = board::Board::open(path, dir.filePath(QStringLiteral("cache")));
-    QVERIFY(!board.isOk());
-    QVERIFY(board.error().message.contains(QStringLiteral("newer than supported")));
+    if (!board)
+        QFAIL(qPrintable(board.error().toString()));
+    QVERIFY(board.value().isNewerVersion());
+    QVERIFY(board.value().tempPath().isEmpty());
+    auto items = board.value().items();
+    QVERIFY(items.isOk());
+    QCOMPARE(items.value().size(), 1);
     QCOMPARE(fileHash(path), hashBefore);
+}
+
+void TestBoard::salvagesImagesWithoutItemRows()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString path = dir.filePath(QStringLiteral("blobs-only.beex"));
+
+    // A file whose item table is gone but whose blob store survived.
+    {
+        auto db = board::Connection::open(path, board::Connection::OpenMode::Create);
+        QVERIFY(db.isOk());
+        QVERIFY(db.value()
+                    .exec(QStringLiteral("CREATE TABLE sqlar (name TEXT PRIMARY KEY, "
+                                         "item_id INTEGER NOT NULL UNIQUE, mode INT, mtime INT, "
+                                         "sz INT, data BLOB)"))
+                    .isOk());
+        QVERIFY(db.value()
+                    .exec(QStringLiteral("INSERT INTO sqlar (name, item_id, sz, data) "
+                                         "VALUES ('a.png', 1, 4, x'01020304')"))
+                    .isOk());
+        QVERIFY(db.value()
+                    .exec(QStringLiteral("INSERT INTO sqlar (name, item_id, sz, data) "
+                                         "VALUES ('b.jpg', 2, 4, x'05060708')"))
+                    .isOk());
+    }
+
+    auto board = board::Board::open(path, dir.filePath(QStringLiteral("cache")));
+    if (!board)
+        QFAIL(qPrintable(board.error().toString()));
+    QVERIFY(board.value().isSalvaged());
+    QVERIFY(!board.value().items().isOk()); // there is no items table
+
+    auto salvaged = board.value().salvageItems();
+    QVERIFY(salvaged.isOk());
+    QCOMPARE(salvaged.value().size(), 2);
+    QCOMPARE(salvaged.value().first().type, QStringLiteral("pixmap"));
+    QCOMPARE(salvaged.value().first().id, qint64(1));
+    QVERIFY(salvaged.value().first().data.contains(QStringLiteral("a.png")));
+    QCOMPARE(board.value().blob(1).value(), QByteArray::fromHex("01020304"));
 }
 
 void TestBoard::rejectsNonBoardFile()
