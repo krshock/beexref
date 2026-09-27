@@ -693,20 +693,23 @@ Status update(const QString &path, const QVector<Record> &changed, const QVector
         if (Status status = insertItem(connection, record, id, false); !status)
             return status;
 
-        QByteArray pixmap = record.pixmap;
-        if (pixmap.isEmpty() && record.pixmapSource)
-            pixmap = record.pixmapSource();
-        if (pixmap.isEmpty()) {
-            // A placeholder is an explicit, known-gone image; anything
-            // else must not be written without its bytes.
-            if (!record.placeholder)
-                return Error{0, missingImagesMessage({id}), {}};
-        } else {
-            if (Status status = insertBlob(connection, record, id, pixmap); !status)
-                return status;
-            if (storeThumbnails) {
-                if (Status status = writeThumbnail(connection, id, record, pixmap); !status)
+        // Only pixmaps carry a blob; text and other types are just rows.
+        if (record.type == QLatin1String("pixmap")) {
+            QByteArray pixmap = record.pixmap;
+            if (pixmap.isEmpty() && record.pixmapSource)
+                pixmap = record.pixmapSource();
+            if (pixmap.isEmpty()) {
+                // A placeholder is an explicit, known-gone image; anything
+                // else must not be written without its bytes.
+                if (!record.placeholder)
+                    return Error{0, missingImagesMessage({id}), {}};
+            } else {
+                if (Status status = insertBlob(connection, record, id, pixmap); !status)
                     return status;
+                if (storeThumbnails) {
+                    if (Status status = writeThumbnail(connection, id, record, pixmap); !status)
+                        return status;
+                }
             }
         }
         report(++done);

@@ -8,11 +8,17 @@
 #include <atomic>
 #include <thread>
 
+#if defined(Q_OS_UNIX)
+#include <sys/stat.h>
+#endif
+
 #include "board/board.h"
 #include "board/write.h"
 #include "doc/document.h"
 #include "doc/item.h"
 #include "doc/source.h"
+#include "settings.h"
+#include "test_env.h"
 
 namespace {
 
@@ -58,6 +64,16 @@ QByteArray fileBytes(const QString &path)
     return file.readAll();
 }
 
+// The file's inode: an in-place update keeps it, an atomic save (temp +
+// rename) replaces it. Zero when the file is gone.
+#if defined(Q_OS_UNIX)
+quint64 inodeOf(const QString &path)
+{
+    struct stat info;
+    return ::stat(QFile::encodeName(path).constData(), &info) == 0 ? quint64(info.st_ino) : 0;
+}
+#endif
+
 doc::ItemPtr pixmapItem(const QByteArray &png)
 {
     auto item = std::make_shared<doc::Item>(doc::kTypePixmap);
@@ -77,6 +93,12 @@ class TestDocument : public QObject
     Q_OBJECT
 
 private slots:
+    // The settings/cache/log paths are pointed at a throwaway directory,
+    // so a test can never read or write the real configuration. The
+    // scratch dir is shared by the suite, so a test that changes a
+    // setting puts it back (see updatesTheFileInPlaceWhenPossible).
+    void initTestCase() { testenv::isolate(); }
+    void cleanup() { testenv::isolate(); }
     void savesAndReopensEveryField();
     void reopenReadsTheBlobFormat();
     void reusesSavedFloors();
@@ -98,6 +120,8 @@ private slots:
     void tracksSaveChanges();
     void changesFollowTheSavedFile();
     void refusesInPlaceSaveWhenTheFileChanged();
+    void updatesTheFileInPlaceWhenPossible();
+    void incrementalSaveCarriesAddsAndDeletes();
 };
 
 void TestDocument::savesAndReopensEveryField()
@@ -778,6 +802,111 @@ void TestDocument::refusesInPlaceSaveWhenTheFileChanged()
     auto reopened = doc::Document::open(copy, dir.filePath(QStringLiteral("cache")));
     QVERIFY(reopened.isOk());
     QCOMPARE(reopened.value().items().size(), 1);
+}
+
+void TestDocument::updatesTheFileInPlaceWhenPossible()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString path = dir.filePath(QStringLiteral("board.beex"));
+
+    doc::Document document = doc::Document::create();
+    const doc::ItemPtr item = pixmapItem(makePng(300, 200, Qt::red));
+    document.addItem(item);
+    QVERIFY(document.save(path).isOk()); // first save: no path yet, so full
+    document.setPath(path);
+    document.adoptFileSources();
+
+#if defined(Q_OS_UNIX)
+    const quint64 firstInode = inodeOf(path);
+    QVERIFY(firstInode != 0);
+#endif
+
+    // A change is applied to the same file, not a replacement.
+    item->x = 42;
+    document.noteItemChanged(item);
+    QVERIFY(document.save(path).isOk());
+#if defined(Q_OS_UNIX)
+    QCOMPARE(inodeOf(path), firstInode);
+#endif
+
+    auto reopened = doc::Document::open(path, dir.filePath(QStringLiteral("cache")));
+    QVERIFY(reopened.isOk());
+    QCOMPARE(reopened.value().items().size(), 1);
+    QCOMPARE(reopened.value().items().first()->x, 42.0);
+
+    // The setting is the safety valve: off means a complete new file.
+    document.setPath(path);
+    document.adoptFileSources();
+    {
+        settings::File file(settings::iniPath());
+        file.load();
+        file.setValue(QStringLiteral("Save"), QStringLiteral("incremental"),
+                      QStringLiteral("false"));
+        QVERIFY(file.sync());
+    }
+    item->x = 43;
+    document.noteItemChanged(item);
+    QVERIFY(document.save(path).isOk());
+#if defined(Q_OS_UNIX)
+    QVERIFY(inodeOf(path) != firstInode);
+#endif
+
+    auto again = doc::Document::open(path, dir.filePath(QStringLiteral("cache")));
+    QVERIFY(again.isOk());
+    QCOMPARE(again.value().items().first()->x, 43.0);
+
+    // The suite shares one scratch directory, so put the setting back for
+    // the tests that follow.
+    {
+        settings::File file(settings::iniPath());
+        file.load();
+        file.setValue(QStringLiteral("Save"), QStringLiteral("incremental"),
+                      QStringLiteral("true"));
+        QVERIFY(file.sync());
+    }
+}
+
+void TestDocument::incrementalSaveCarriesAddsAndDeletes()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString path = dir.filePath(QStringLiteral("board.beex"));
+
+    doc::Document document = doc::Document::create();
+    const doc::ItemPtr first = pixmapItem(makePng(300, 200, Qt::red));
+    const doc::ItemPtr second = pixmapItem(makePng(120, 90, Qt::blue));
+    document.addItem(first);
+    document.addItem(second);
+    QVERIFY(document.save(path).isOk());
+    document.setPath(path);
+    document.adoptFileSources();
+    const qint64 firstId = first->id;
+    const qint64 secondId = second->id;
+    QVERIFY(firstId > 0);
+    QVERIFY(secondId > 0);
+    QVERIFY(firstId != secondId);
+
+    // Move one, delete the other and add a third: one in-place update.
+    first->x = 77;
+    document.noteItemChanged(first);
+    document.removeItem(second);
+    const doc::ItemPtr third = pixmapItem(makePng(60, 40, Qt::green));
+    document.addItem(third);
+    QVERIFY(document.save(path).isOk());
+
+    auto reopened = doc::Document::open(path, dir.filePath(QStringLiteral("cache")));
+    QVERIFY(reopened.isOk());
+    const doc::Document &board = reopened.value();
+    QCOMPARE(board.items().size(), 2);
+    QVERIFY(board.itemById(firstId));
+    QCOMPARE(board.itemById(firstId)->x, 77.0);
+    QVERIFY(!board.itemById(secondId));
+    QVERIFY(third->id > 0);
+    QVERIFY(board.itemById(third->id));
+    // The blobs are intact: the kept image and the new one.
+    QCOMPARE(board.blob(*board.itemById(firstId)).value(), makePng(300, 200, Qt::red));
+    QCOMPARE(board.blob(*board.itemById(third->id)).value(), makePng(60, 40, Qt::green));
 }
 
 QTEST_GUILESS_MAIN(TestDocument)

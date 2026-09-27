@@ -65,6 +65,12 @@ const QVector<FieldUi> &fieldTable()
                       QStringLiteral("When about to close an unsaved file, should BeeXRef ask "
                                      "for confirmation?"),
                       QStringLiteral("Confirm when closing")),
+        checkboxField(QStringLiteral("Save/incremental"),
+                      QStringLiteral("Incremental saves:"),
+                      QStringLiteral("Write only what changed into the board file instead of "
+                                     "rewriting all of it. Faster on large boards; turn this off "
+                                     "to always write a complete new file."),
+                      QStringLiteral("Write only what changed")),
         radioField(QStringLiteral("Items/lod_method"), QStringLiteral("LOD Method:"),
                    QStringLiteral("How image levels of detail are generated. Applies to images "
                                   "that have been saved to a bee file."),
@@ -357,6 +363,7 @@ SettingsDialog::SettingsDialog(QWidget *parent)
     auto *miscLayout = new QGridLayout(misc);
     misc->setLayout(miscLayout);
     miscLayout->addWidget(group(QStringLiteral("Save/confirm_close_unsaved")), 0, 0);
+    miscLayout->addWidget(group(QStringLiteral("Save/incremental")), 1, 0);
     tabs->addTab(misc, QStringLiteral("&Miscellaneous"));
 
     auto *perf = new QWidget(tabs);

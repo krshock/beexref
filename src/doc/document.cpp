@@ -1,8 +1,10 @@
 #include "document.h"
 
 #include "logging.h"
+#include "settings.h"
 
 #include <QBuffer>
+#include <QFileInfo>
 #include <QImageReader>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -78,6 +80,7 @@ Document::Document(Document &&other) noexcept
     , damage_(std::move(other.damage_))
     , changes_(std::move(other.changes_))
     , savedIds_(std::move(other.savedIds_))
+    , maxSeenId_(other.maxSeenId_)
     , modified_(other.modified_)
     , board_(std::move(other.board_))
 {
@@ -95,6 +98,7 @@ Document &Document::operator=(Document &&other) noexcept
     damage_ = std::move(other.damage_);
     changes_ = std::move(other.changes_);
     savedIds_ = std::move(other.savedIds_);
+    maxSeenId_ = other.maxSeenId_;
     modified_ = other.modified_;
     board_ = std::move(other.board_);
     other.modified_ = false;
@@ -327,6 +331,7 @@ void Document::noteItemAdded(const ItemPtr &item)
     // removal set; a row the file already holds is an update, anything
     // else an insert.
     changes_.removedIds.remove(item->id);
+    maxSeenId_ = qMax(maxSeenId_, item->id);
     if (item->id > 0 && savedIds_.contains(item->id))
         changes_.changed.insert(item.get());
     else
@@ -338,9 +343,57 @@ void Document::clearChanges()
     changes_ = {};
     savedIds_.clear();
     for (const ItemPtr &item : items_) {
-        if (item->id > 0)
+        if (item->id > 0) {
             savedIds_.insert(item->id);
+            // The high-water mark only rises: an id freed by a delete must
+            // not be handed to a new row while undo could restore it.
+            maxSeenId_ = qMax(maxSeenId_, item->id);
+        }
     }
+}
+
+bool Document::canUpdateInPlace(const QString &path, bool createNew) const
+{
+    if (createNew || path != path_ || !board_)
+        return false;
+    // A migrated file's original is older, a newer/salvaged file is not
+    // ours to rewrite, and a damaged one is refused before this.
+    if (!board_->tempPath().isEmpty() || board_->isNewerVersion() || board_->isSalvaged())
+        return false;
+    if (damaged() || !QFileInfo(path).isWritable())
+        return false;
+
+    // The setting is read at use time, like every other setting.
+    settings::File file(settings::iniPath());
+    file.load();
+    return settings::valueOrDefault(file, QStringLiteral("Save/incremental")).toBool();
+}
+
+board::Status Document::updateInPlace(const QString &path, bool storeThumbnails,
+                                      const board::Progress &progress)
+{
+    QVector<board::Record> changed;
+    QVector<board::Record> added;
+    QVector<ItemPtr> addedItems;
+    for (const ItemPtr &item : items_) {
+        if (changes().changed.contains(item.get())) {
+            changed.append(buildRecord(*item));
+        } else if (changes().added.contains(item.get())) {
+            added.append(buildRecord(*item));
+            addedItems.append(item);
+        }
+    }
+    const QVector<qint64> removed(changes().removedIds.cbegin(), changes().removedIds.cend());
+
+    QVector<qint64> ids;
+    const board::Status status = board::update(path, changed, added, removed, maxSeenId_ + 1,
+                                               storeThumbnails, progress, &ids);
+    if (!status)
+        return status;
+    // The writer assigned a row id to every added record, in order.
+    for (qsizetype i = 0; i < addedItems.size() && i < ids.size(); ++i)
+        addedItems.at(i)->id = ids.at(i);
+    return status;
 }
 
 qsizetype Document::indexOf(const Item &item) const
@@ -415,6 +468,18 @@ board::Status Document::save(const QString &path, bool storeThumbnails,
             item->id = 0;
     }
 
+    // The document's own file is updated in place when nothing forces a
+    // full rewrite: only what changed is written, and an unchanged
+    // document is not written at all (board::update returns early).
+    if (canUpdateInPlace(path, createNew)) {
+        const board::Status status = updateInPlace(path, storeThumbnails, progress);
+        if (!status)
+            return status;
+        damage_.clear();
+        clearChanges();
+        return status;
+    }
+
     const QVector<board::Record> records = buildRecords();
     QVector<qint64> ids;
     const board::Status status = board::save(path, records, storeThumbnails, progress, &ids);
@@ -444,41 +509,45 @@ QVector<board::Record> Document::buildRecords() const
 {
     QVector<board::Record> records;
     records.reserve(items_.size());
-    for (const ItemPtr &item : items_) {
-        board::Record record;
-        record.saveId = item->id;
-        record.type = item->type;
-        record.x = item->x;
-        record.y = item->y;
-        record.z = item->z;
-        record.scale = item->scale;
-        record.rotation = item->rotation;
-        record.flip = item->flip;
-        record.dataJson = jsonString(savedData(*item));
-        record.metaJson = jsonString(item->meta);
-        record.uuid = item->uuid;
-
-        if (item->isPixmap()) {
-            // Capture the immutable source, not the item: the writer may
-            // run on a worker while the document keeps changing.
-            const SourcePtr source = item->source;
-            if (source && source->isValid())
-                record.pixmapSource = [source]() { return source->bytes(); };
-            record.placeholder = item->data.value(QLatin1String(kPlaceholderKey)).toBool();
-            record.format = item->format;
-            record.filename = item->filename.isEmpty()
-                ? item->data.value(QStringLiteral("filename")).toString()
-                : item->filename;
-            record.floorData = item->floorData;
-            record.floorFraction = item->floorFraction;
-            record.floorFormat = item->floorFormat;
-            const QSize size = item->originalSize();
-            record.origW = size.width();
-            record.origH = size.height();
-        }
-        records.append(record);
-    }
+    for (const ItemPtr &item : items_)
+        records.append(buildRecord(*item));
     return records;
+}
+
+board::Record Document::buildRecord(const Item &item) const
+{
+    board::Record record;
+    record.saveId = item.id;
+    record.type = item.type;
+    record.x = item.x;
+    record.y = item.y;
+    record.z = item.z;
+    record.scale = item.scale;
+    record.rotation = item.rotation;
+    record.flip = item.flip;
+    record.dataJson = jsonString(savedData(item));
+    record.metaJson = jsonString(item.meta);
+    record.uuid = item.uuid;
+
+    if (item.isPixmap()) {
+        // Capture the immutable source, not the item: the writer may run
+        // on a worker while the document keeps changing.
+        const SourcePtr source = item.source;
+        if (source && source->isValid())
+            record.pixmapSource = [source]() { return source->bytes(); };
+        record.placeholder = item.data.value(QLatin1String(kPlaceholderKey)).toBool();
+        record.format = item.format;
+        record.filename = item.filename.isEmpty()
+            ? item.data.value(QStringLiteral("filename")).toString()
+            : item.filename;
+        record.floorData = item.floorData;
+        record.floorFraction = item.floorFraction;
+        record.floorFormat = item.floorFormat;
+        const QSize size = item.originalSize();
+        record.origW = size.width();
+        record.origH = size.height();
+    }
+    return record;
 }
 
 void Document::adoptFileSources()

@@ -138,6 +138,14 @@ changelog, both artifacts, checksums, GitHub release); see
   copy reopens clean -- the mark means "known gone", not damage -- and
   can be saved in place from then on. The `.bee` export stays strict and
   refuses placeholder rows.
+- A save into the document's own file applies only its change set in
+  place (`Document::changes()` -> `board::update`) when the file is
+  native, current, healthy, writable and unchanged on disk, and
+  `Save/incremental` is on (the default); everything else -- Save As, a
+  migrated or newer file, the setting off -- writes a complete new file
+  atomically. New row ids start above the highest id ever seen
+  (`Document::maxSeenId_`), so a freed id is never reused while undo
+  could restore an item that carries it.
 - `beexref-boardcheck [--write-back PATH] <board>...` migrates on a copy,
   decodes every blob, checks dimensions and diffs all tables; use it to verify
   writer/reader changes against the other ports.

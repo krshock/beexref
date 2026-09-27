@@ -164,8 +164,18 @@ public:
     void close();
 
 private:
-    // One writer record per item, in item order.
+    // One writer record per item, in item order; buildRecord is the
+    // single-item form the incremental update uses.
     QVector<board::Record> buildRecords() const;
+    board::Record buildRecord(const Item &item) const;
+    // Whether this save can apply its change set to the document's own
+    // file: same path, native and current version, not migrated, healthy,
+    // writable, and the Save/incremental setting is on.
+    bool canUpdateInPlace(const QString &path, bool createNew) const;
+    // Applies changes() to the file with board::update() and writes the
+    // assigned ids back to the added items.
+    board::Status updateInPlace(const QString &path, bool storeThumbnails,
+                                const board::Progress &progress);
     // Records an item that entered the document (add, insert or undo of
     // a removal): a row the file already holds is an update, anything
     // else is an insert, and a pending removal of that id is cancelled.
@@ -177,6 +187,9 @@ private:
     QVector<Damage> damage_;
     Changes changes_;
     QSet<qint64> savedIds_;
+    // The highest row id this document has ever seen, so a new row never
+    // reuses an id an item restored by undo could still carry.
+    qint64 maxSeenId_ = 0;
     QSet<const Item *> dirty_;
     bool modified_ = false;
     std::shared_ptr<board::Board> board_;
