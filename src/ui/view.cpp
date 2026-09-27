@@ -268,6 +268,12 @@ void View::panStep(const QPoint &delta)
     lod_->schedule();
 }
 
+double View::scaleFor(const SceneItem *item) const
+{
+    const double viewScale = transform().m11();
+    return item ? viewScale * item->item()->scale : viewScale;
+}
+
 double View::zoomExtent(bool maximum) const
 {
     if (!scene())

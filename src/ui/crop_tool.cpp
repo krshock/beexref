@@ -99,7 +99,7 @@ bool CropTool::mousePress(QMouseEvent *event)
         return false;
     const QPoint viewportPos = event->position().toPoint();
     const QPointF itemPos = item_->mapFromScene(view_->mapToScene(viewportPos));
-    const crop::Part part = crop::hitTest(item_->cropRect(), scale(), itemPos);
+    const crop::Part part = crop::hitTest(item_->cropRect(), view_->scaleFor(item_), itemPos);
     if (part != crop::Part::None) {
         drag_ = part;
         pressItem_ = itemPos;
@@ -154,12 +154,6 @@ bool CropTool::keyPress(QKeyEvent *event)
     return false;
 }
 
-double CropTool::scale() const
-{
-    const double viewScale = view_->transform().m11();
-    return item_ ? viewScale * item_->item()->scale : viewScale;
-}
-
 void CropTool::updateHoverCursor(const QPoint &viewportPos)
 {
     if (!item_) {
@@ -167,7 +161,7 @@ void CropTool::updateHoverCursor(const QPoint &viewportPos)
         return;
     }
     const QPointF itemPos = item_->mapFromScene(view_->mapToScene(viewportPos));
-    const crop::Part part = crop::hitTest(item_->cropRect(), scale(), itemPos);
+    const crop::Part part = crop::hitTest(item_->cropRect(), view_->scaleFor(item_), itemPos);
     switch (part) {
     case crop::Part::None:
         view_->viewport()->unsetCursor();

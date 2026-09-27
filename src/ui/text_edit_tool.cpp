@@ -109,7 +109,7 @@ void TextEditTool::positionEditor()
 
     // The text is drawn in item-local pixels, scaled by the item's
     // transform and the view; the editor's font must match that.
-    const double totalScale = qMax(0.0001, view_->transform().m11() * item_->item()->scale);
+    const double totalScale = qMax(0.0001, view_->scaleFor(item_));
     QFont font = item_->font();
     if (font.pointSizeF() > 0)
         font.setPointSizeF(qMax(1.0, font.pointSizeF() * totalScale));

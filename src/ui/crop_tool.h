@@ -42,9 +42,6 @@ public:
     bool keyPress(QKeyEvent *event) override;
 
 private:
-    // The view scale times the item's scale: the reference's
-    // fixed_length_for_viewport denominator.
-    double scale() const;
     void updateHoverCursor(const QPoint &viewportPos);
 
     View *view_ = nullptr;

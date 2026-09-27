@@ -1,5 +1,7 @@
 #pragma once
 
+#include <QPoint>
+#include <QSize>
 #include <QString>
 #include <QWidget>
 
@@ -12,6 +14,17 @@ namespace ui::hud {
 // any others: the reference's toast stack (top margin 10, spacing 8, up
 // to five visible, three seconds each), sliding in and fading out.
 void toast(QWidget *host, const QString &text, int timeoutMs = 3000);
+
+// Where a HUD element sits inside its host.
+enum class Anchor {
+    TopLeft,
+    TopCenter,
+    TopRight,
+};
+
+// The top-left position for an element of this size in host, honouring
+// the anchor and the margin; the element never leaves the host.
+QPoint anchoredPos(const QWidget *host, const QSize &size, Anchor anchor, int margin);
 
 // The reference's HUDWidget: a translucent glass panel with a painted
 // soft shadow. Content goes into body()/bodyLayout().

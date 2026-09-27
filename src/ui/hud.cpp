@@ -170,8 +170,7 @@ private:
                 break;
             y += other->height() + kSpacing;
         }
-        const int x = (host_->width() - toast->width()) / 2;
-        return QPoint(qMax(0, x), y);
+        return QPoint(anchoredPos(host_, toast->size(), Anchor::TopCenter, 0).x(), y);
     }
 
     void moveToast(HudPanel *toast, const QPoint &pos)
@@ -193,6 +192,17 @@ private:
 } // namespace
 
 // --- HudPanel ---------------------------------------------------------
+
+QPoint anchoredPos(const QWidget *host, const QSize &size, Anchor anchor, int margin)
+{
+    const int hostWidth = host ? host->width() : 0;
+    int x = margin;
+    if (anchor == Anchor::TopCenter)
+        x = (hostWidth - size.width()) / 2;
+    else if (anchor == Anchor::TopRight)
+        x = hostWidth - size.width() - margin;
+    return QPoint(qMax(0, x), qMax(0, margin));
+}
 
 HudPanel::HudPanel(QWidget *parent, bool shadow)
     : QWidget(parent)

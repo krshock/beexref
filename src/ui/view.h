@@ -143,6 +143,10 @@ public:
     // A pan drag step: scrolls by the delta and refreshes the view state
     // and the LOD queue (the pan tool and the wheel panning).
     void panStep(const QPoint &delta);
+    // The on-screen scale of an item: the view transform times the
+    // item's own scale (the reference's fixed_length_for_viewport
+    // denominator). A null item gives the plain view scale.
+    double scaleFor(const SceneItem *item) const;
 
 signals:
     // A colour was sampled and the mode ended; the window copies it.

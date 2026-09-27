@@ -88,8 +88,7 @@ void HudPreview::moveToTopRight(int margin)
     if (!view_)
         return;
     adjustSize();
-    const int x = view_->width() - width() - margin;
-    move(qMax(0, x), qMax(0, margin));
+    move(hud::anchoredPos(view_, size(), hud::Anchor::TopRight, margin));
 }
 
 bool HudPreview::eventFilter(QObject *watched, QEvent *event)
