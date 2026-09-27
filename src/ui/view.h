@@ -16,6 +16,7 @@
 #include <QVector>
 
 #include <functional>
+#include <memory>
 
 class QKeyEvent;
 class QMimeData;
@@ -24,10 +25,11 @@ class QTimer;
 
 namespace ui {
 
-class ColorSwatch;
+class ColorSamplerTool;
 class LevelLoader;
 class LodManager;
 class MoveHandle;
+class ToolController;
 
 // Canvas view: pan, zoom, fit, rubber-band selection and
 // threshold-based moving of the selected items. Viewport changes drive
@@ -92,12 +94,17 @@ public:
     // items; a new mode must be added here once, not at every call site.
     void cancelModes();
 
+    // The tools report their results through the view's signals, and
+    // hit-test through the same order the painting uses.
+    void reportColorSampled(const QColor &color) { emit colorSampled(color); }
+    SceneItem *itemAtPoint(const QPoint &viewportPos) const;
+
     // Sample colour mode: a crosshair and a swatch follow the pointer;
     // the next click reports the colour under it and leaves the mode
     // (the reference's Sample Color action).
     void startSampleColor();
     void cancelSampleColor();
-    bool samplingColor() const { return sampling_; }
+    bool samplingColor() const;
     // The colour currently shown in the swatch; invalid when none.
     QColor sampledColor() const;
     // Commands for completed gestures (moves) are pushed here.
@@ -205,16 +212,11 @@ private:
 
     // Spotlight state: the view-only raised items.
     void drawSpotlight(QPainter *painter) const;
-    // The item under a viewport point in the order it is drawn:
-    // spotlighted items first (topmost of them), then Qt's configured
-    // order.
-    SceneItem *itemAtPoint(const QPoint &viewportPos) const;
 
     // Crop session (the reference's CropEditor, driven by the view).
     void confirmCrop();
     void finishCropSession(bool changed);
     void updateCropHoverCursor(const QPoint &viewportPos);
-    void updateSampleSwatch(const QPoint &viewportPos);
     // View scale times the item's scale: the reference's
     // fixed_length_for_viewport denominator.
     double cropScale() const;
@@ -265,9 +267,10 @@ private:
     // part of the document.
     QVector<SceneItem *> spotlighted_;
 
-    // Sample colour mode.
-    bool sampling_ = false;
-    ColorSwatch *swatch_ = nullptr;
+    // The interactive modes, in dispatch order; each tool owns its
+    // session state.
+    std::unique_ptr<ToolController> tools_;
+    ColorSamplerTool *sampler_ = nullptr;
 
     // Crop session state.
     SceneItem *cropItem_ = nullptr;

@@ -1,12 +1,13 @@
 #include "view.h"
 
-#include "color_swatch.h"
+#include "color_sampler_tool.h"
 #include "cursors.h"
 #include "lod_manager.h"
 #include "move_handle.h"
 #include "rendering.h"
 #include "selection_ops.h"
 #include "theme.h"
+#include "tool.h"
 
 #include "doc/undo.h"
 
@@ -36,6 +37,11 @@ View::View(QWidget *parent)
     : QGraphicsView(parent)
 {
     lod_ = new LodManager(this);
+
+    // The interactive modes. Each tool owns its session state and the
+    // controller dispatches to whichever is active.
+    tools_ = std::make_unique<ToolController>(this);
+    sampler_ = tools_->add<ColorSamplerTool>(this);
 
     // Move-window mode: the window follows the global cursor on a timer,
     // so it keeps moving when the pointer leaves the window (widget
@@ -484,17 +490,9 @@ void View::mousePressEvent(QMouseEvent *event)
         return;
     }
 
-    if (sampling_) {
-        if (event->button() == Qt::LeftButton) {
-            const QPoint viewportPos = event->position().toPoint();
-            if (SceneItem *item = itemAtPoint(viewportPos)) {
-                const QColor color = item->sampleColorAt(mapToScene(viewportPos));
-                if (color.isValid())
-                    emit colorSampled(color);
-            }
-        }
-        // Any button leaves the mode, like the reference.
-        cancelSampleColor();
+    // The active tool (colour sampling, and later the other modes)
+    // consumes the event before the item interactions.
+    if (tools_->mousePress(event)) {
         event->accept();
         return;
     }
@@ -635,8 +633,7 @@ void View::mouseMoveEvent(QMouseEvent *event)
         return;
     }
 
-    if (sampling_) {
-        updateSampleSwatch(position);
+    if (tools_->mouseMove(event)) {
         event->accept();
         return;
     }
@@ -1038,7 +1035,7 @@ void View::cancelCrop()
 void View::cancelModes()
 {
     cancelCrop();
-    cancelSampleColor();
+    tools_->cancel();
     commitTextEdit();
     exitMoveWindow();
 }
@@ -1251,49 +1248,22 @@ void View::moveWindowTick()
 
 void View::startSampleColor()
 {
-    // Only one tool runs at a time, like the reference's
-    // cancel_active_modes().
-    cancelCrop();
-    sampling_ = true;
-    viewport()->setCursor(Qt::CrossCursor);
-    if (!swatch_)
-        swatch_ = new ColorSwatch(viewport());
-
-    // Show the colour under the pointer right away.
-    const QPoint pos = viewport()->mapFromGlobal(QCursor::pos());
-    if (viewport()->rect().contains(pos))
-        updateSampleSwatch(pos);
-    setFocus();
+    sampler_->start();
 }
 
 void View::cancelSampleColor()
 {
-    if (!sampling_)
-        return;
-    sampling_ = false;
-    if (viewport())
-        viewport()->unsetCursor();
-    if (swatch_)
-        swatch_->hide();
+    sampler_->cancel();
+}
+
+bool View::samplingColor() const
+{
+    return sampler_ && sampler_->active();
 }
 
 QColor View::sampledColor() const
 {
-    return swatch_ ? swatch_->color() : QColor();
-}
-
-void View::updateSampleSwatch(const QPoint &viewportPos)
-{
-    if (!swatch_)
-        return;
-    QColor color;
-    if (SceneItem *item = itemAtPoint(viewportPos))
-        color = item->sampleColorAt(mapToScene(viewportPos));
-    // Without a colour the swatch stays visible but transparent, like
-    // the reference's NONE_COLOR.
-    swatch_->setColor(color);
-    swatch_->moveNear(viewportPos);
-    swatch_->show();
+    return sampler_ ? sampler_->color() : QColor();
 }
 
 void View::updateCropHoverCursor(const QPoint &viewportPos)
@@ -1328,8 +1298,7 @@ void View::keyPressEvent(QKeyEvent *event)
         event->accept();
         return;
     }
-    if (sampling_) {
-        cancelSampleColor();
+    if (tools_->keyPress(event)) {
         event->accept();
         return;
     }
@@ -1380,7 +1349,7 @@ bool View::eventFilter(QObject *watched, QEvent *event)
 
 void View::leaveEvent(QEvent *event)
 {
-    if (drag_ == Drag::None && !panning_ && !sampling_ && !movingWindow_)
+    if (drag_ == Drag::None && !panning_ && !samplingColor() && !movingWindow_)
         viewport()->unsetCursor();
     QGraphicsView::leaveEvent(event);
 }

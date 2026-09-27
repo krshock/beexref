@@ -78,6 +78,8 @@ qt_add_library(beexref_core STATIC
     src/ui/controls_dialog.cpp
     src/ui/controls_dialog.h
     src/ui/color_gamut.h
+    src/ui/color_sampler_tool.cpp
+    src/ui/color_sampler_tool.h
     src/ui/color_swatch.cpp
     src/ui/color_swatch.h
     src/ui/color_tools.cpp
@@ -136,6 +138,8 @@ qt_add_library(beexref_core STATIC
     src/ui/rendering.cpp
     src/ui/rendering.h
     src/ui/theme.h
+    src/ui/tool.cpp
+    src/ui/tool.h
     src/ui/welcome_overlay.cpp
     src/ui/welcome_overlay.h
     src/ui/view.cpp
