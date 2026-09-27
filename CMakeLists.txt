@@ -140,6 +140,8 @@ qt_add_library(beexref_core STATIC
     src/ui/rendering.cpp
     src/ui/rendering.h
     src/ui/theme.h
+    src/ui/text_edit_tool.cpp
+    src/ui/text_edit_tool.h
     src/ui/tool.cpp
     src/ui/tool.h
     src/ui/welcome_overlay.cpp

@@ -30,6 +30,7 @@ class LevelLoader;
 class LodManager;
 class MoveHandle;
 class MoveWindowTool;
+class TextEditTool;
 class ToolController;
 
 // Canvas view: pan, zoom, fit, rubber-band selection and
@@ -87,7 +88,7 @@ public:
     void startTextEdit(SceneItem *item);
     void commitTextEdit();
     void cancelTextEdit();
-    bool textEditing() const { return textItem_ != nullptr; }
+    bool textEditing() const;
 
     // The reference's cancel_active_modes(): ends every mode that owns
     // the interaction (crop, colour sampling, text editing, move
@@ -110,6 +111,10 @@ public:
     QColor sampledColor() const;
     // Commands for completed gestures (moves) are pushed here.
     void setUndoStack(doc::UndoStack *stack) { undoStack_ = stack; }
+    doc::UndoStack *undoStack() const { return undoStack_; }
+    // Tools report changes through the view: the document is marked
+    // modified, so closing asks to save.
+    void markDocumentModified();
 
     void fitScene();
     void fitSelection();
@@ -203,11 +208,6 @@ private:
     // Puts the move handle in the canvas' top-left corner.
     void positionMoveHandle();
 
-    // Text editing session: the editor overlay tracks the item's
-    // viewport rect while the view scrolls, zooms or resizes.
-    void positionTextEditor();
-    void finishTextEdit(bool commit);
-
     // Spotlight state: the view-only raised items.
     void drawSpotlight(QPainter *painter) const;
 
@@ -236,9 +236,6 @@ private:
     bool dragZoom_ = false;
     QTimer *moveWindowTimer_ = nullptr;
     MoveHandle *moveHandle_ = nullptr;
-    QTextEdit *textEditor_ = nullptr;
-    SceneItem *textItem_ = nullptr;
-    QString textBefore_;
     bool dragZoomInverted_ = false;
     QPoint dragZoomStart_;
     QPoint dragZoomAnchor_;
@@ -262,6 +259,7 @@ private:
     std::unique_ptr<ToolController> tools_;
     ColorSamplerTool *sampler_ = nullptr;
     MoveWindowTool *moveWindowTool_ = nullptr;
+    TextEditTool *textEditTool_ = nullptr;
 
     // Crop session state.
     SceneItem *cropItem_ = nullptr;
