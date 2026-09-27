@@ -214,6 +214,17 @@ install(TARGETS beexref
     BUNDLE DESTINATION .
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 
+# Desktop integration for distro packages and the AppImage build (the
+# icon keeps the desktop entry's Icon= name). The AppImage script stages
+# the same two files; see docs/linux-appimage.md.
+if(UNIX AND NOT APPLE)
+    install(FILES packaging/beexref.desktop
+        DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/applications)
+    install(FILES assets/logo.png
+        DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/256x256/apps
+        RENAME beexref.png)
+endif()
+
 if(BUILD_TESTING)
     add_subdirectory(tests)
 endif()

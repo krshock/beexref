@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=BeeXRef
+Comment=Infinite-canvas reference image viewer
+Exec=beexref
+Icon=beexref
+Categories=Graphics;Viewer;
+Terminal=false

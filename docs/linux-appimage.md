@@ -225,8 +225,8 @@ SQLite is vendored in `third_party/sqlite3`; nothing to install.
 
 Run the commands from the repository root. Three things are involved:
 
-- `appimage/` — two source files you create once: the `.desktop` entry
-  and the icon.
+- `appimage/` — the staged desktop entry and icon, copied from
+  `packaging/beexref.desktop` and `assets/logo.png` in step 1.
 - `AppDir/` — the staging tree. **linuxdeploy creates it** (`--appdir
   AppDir`); you never fill it by hand. After step 2 it looks like:
 
@@ -246,21 +246,14 @@ Run the commands from the repository root. Three things are involved:
 
 ### 1. Desktop entry and icon
 
-The repository has no `.desktop` file (the Windows package does not need
-one). Create one in the repository root:
+The entry ships in `packaging/beexref.desktop` and the icon is
+`assets/logo.png` (both are also installed by `cmake --install`, for
+distro packages). linuxdeploy wants the icon file named after the
+desktop `Icon=` key, so stage both under `appimage/`:
 
 ```
 mkdir -p appimage
-cat > appimage/beexref.desktop <<'EOF'
-[Desktop Entry]
-Type=Application
-Name=BeeXRef
-Comment=Infinite-canvas reference image viewer
-Exec=beexref
-Icon=beexref
-Categories=Graphics;Viewer;
-Terminal=false
-EOF
+cp packaging/beexref.desktop appimage/
 cp assets/logo.png appimage/beexref.png
 ```
 
