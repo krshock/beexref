@@ -709,14 +709,9 @@ void MainWindow::openHelp()
 
 void MainWindow::showAbout()
 {
-    QMessageBox::about(
-        this, QStringLiteral("About %1").arg(QString::fromLatin1(constants::AppName)),
-        QStringLiteral("<h2>%1 %2</h2><p>%3</p><p>%4</p><p>%5</p>")
-            .arg(QString::fromLatin1(constants::AppName),
-                 QString::fromLatin1(constants::Version),
-                 QString::fromLatin1(constants::AppNameFull),
-                 QString::fromUtf8(constants::Copyright),
-                 QString::fromUtf8(constants::ForkCopyright)));
+    auto *dialog = new AboutDialog(this);
+    dialog->setAttribute(Qt::WA_DeleteOnClose);
+    dialog->show();
 }
 
 void MainWindow::openDebugLog()

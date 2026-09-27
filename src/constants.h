@@ -13,6 +13,10 @@ inline constexpr char Version[] = BEEXREF_VERSION;
 inline constexpr char Copyright[] = "Copyright \u00A9 2021-2024 Rebecca Breu";
 // The fork's own copyright: this port's changes.
 inline constexpr char ForkCopyright[] = "Copyright \u00A9 2026 krshock";
+// The About box's free-software notice links the licence name to its
+// full text.
+inline constexpr char LicenseName[] = "GNU GPL v3";
+inline constexpr char LicenseUrl[] = "https://www.gnu.org/licenses/gpl-3.0.html";
 
 inline constexpr char BeeFileExtension[] = ".bee";
 inline constexpr char BeexFileExtension[] = ".beex";

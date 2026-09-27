@@ -728,6 +728,17 @@ public:
                 candidate->close();
             }
 
+            actionByText(QStringLiteral("&About"))->trigger();
+            QTest::qWait(300);
+            for (QDialog *candidate : window_.findChildren<QDialog *>()) {
+                if (!candidate->windowTitle().startsWith(QStringLiteral("About")))
+                    continue;
+                const QString path = outputDir_ + QStringLiteral("/35-about.png");
+                candidate->grab().save(path);
+                out() << "about dialog -> " << path << "\n";
+                candidate->close();
+            }
+
             // Image Info needs one selected image. The copied settings
             // may carry View/panel_keep=true, which leaves the panel
             // open on its own; close it first so the shortcut's effect

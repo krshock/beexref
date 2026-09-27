@@ -3042,6 +3042,26 @@ void TestUiScene::infoDialogsShowTheExpectedContent()
     QVERIFY(debug->findChild<QPlainTextEdit *>());
     debug->close();
 
+    // The About box carries the free-software notice, with the licence
+    // name linking to its full text.
+    actionByText(window, QStringLiteral("&About"))->trigger();
+    QDialog *about = nullptr;
+    for (QDialog *candidate : window.findChildren<QDialog *>()) {
+        if (candidate->windowTitle().startsWith(QStringLiteral("About")))
+            about = candidate;
+    }
+    QVERIFY(about);
+    QLabel *aboutLogo = about->findChild<QLabel *>(QStringLiteral("aboutLogo"));
+    QVERIFY(aboutLogo);
+    QVERIFY(!aboutLogo->pixmap().isNull());
+    QLabel *aboutText = about->findChild<QLabel *>(QStringLiteral("aboutText"));
+    QVERIFY(aboutText);
+    QVERIFY(aboutText->text().contains(QStringLiteral("free software")));
+    QVERIFY(aboutText->text().contains(QStringLiteral("GNU GPL v3")));
+    QVERIFY(aboutText->text().contains(QStringLiteral("gpl-3.0.html")));
+    QVERIFY(aboutText->text().contains(QString::fromUtf8(constants::ForkCopyright)));
+    about->close();
+
     // The old Image Info window is gone: the panel's Info tab carries
     // those rows (checked in the metadata panel test).
     QVERIFY(!actionByText(window, QStringLiteral("Show Image &Info")));

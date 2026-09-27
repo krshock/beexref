@@ -7,6 +7,7 @@
 #include <QDialogButtonBox>
 #include <QFile>
 #include <QGuiApplication>
+#include <QIcon>
 #include <QLabel>
 #include <QPlainTextEdit>
 #include <QPushButton>
@@ -15,6 +16,44 @@
 #include <QVBoxLayout>
 
 namespace ui {
+
+// --- AboutDialog ------------------------------------------------------
+
+AboutDialog::AboutDialog(QWidget *parent)
+    : QDialog(parent)
+{
+    setWindowTitle(QStringLiteral("About %1").arg(QString::fromLatin1(constants::AppName)));
+
+    auto *layout = new QVBoxLayout(this);
+    // The app logo above the text, like the welcome card's.
+    auto *logo = new QLabel(this);
+    logo->setObjectName(QStringLiteral("aboutLogo"));
+    logo->setPixmap(QIcon(QStringLiteral(":/assets/logo.png")).pixmap(64, 64));
+    logo->setAlignment(Qt::AlignHCenter);
+    layout->addWidget(logo);
+    auto *label = new QLabel(this);
+    label->setObjectName(QStringLiteral("aboutText"));
+    label->setTextFormat(Qt::RichText);
+    label->setWordWrap(true);
+    // The licence name links to the full text.
+    label->setOpenExternalLinks(true);
+    const QString notice =
+        QStringLiteral("%1 is free software under the <a href=\"%2\">%3</a> or later. "
+                       "You may use, study, share and improve it; no warranty.")
+            .arg(QString::fromLatin1(constants::AppName),
+                 QString::fromLatin1(constants::LicenseUrl),
+                 QString::fromLatin1(constants::LicenseName));
+    label->setText(QStringLiteral("<h2>%1 %2</h2><p>%3</p><p>%4</p><p>%5</p><p>%6</p>")
+                       .arg(QString::fromLatin1(constants::AppName),
+                            QString::fromLatin1(constants::Version),
+                            QString::fromLatin1(constants::AppNameFull),
+                            QString::fromUtf8(constants::Copyright),
+                            QString::fromUtf8(constants::ForkCopyright), notice));
+    layout->addWidget(label);
+    auto *buttons = new QDialogButtonBox(QDialogButtonBox::Close, this);
+    connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
+    layout->addWidget(buttons);
+}
 
 // --- HelpDialog -------------------------------------------------------
 
