@@ -4,6 +4,7 @@
 #include "sqlite.h"
 
 #include <QByteArray>
+#include <QDateTime>
 #include <QHash>
 #include <QSet>
 #include <QSize>
@@ -95,6 +96,11 @@ public:
     // the images from the blob store.
     bool isSalvaged() const { return salvaged_; }
 
+    // Whether the file changed on disk since it was opened: another
+    // instance, a sync client, or a replaced file. An in-place write must
+    // not clobber that; reopening after a save records a fresh identity.
+    bool hasChangedOnDisk();
+
     Result<QVector<ItemRow>> items();
     // The images in the blob store, and item rows synthesized from them,
     // for a board whose item table cannot be read. The rows carry the
@@ -121,12 +127,20 @@ public:
 private:
     Board(Connection db, QString path, QString tempPath, Columns columns);
 
+    // Remembers the file's identity (size, mtime, SQLite data_version)
+    // so hasChangedOnDisk() can tell whether another process replaced or
+    // committed to the file since the open.
+    void recordFileIdentity();
+
     Connection db_;
     QString path_;
     QString tempPath_;
     Columns columns_;
     bool newerVersion_ = false;
     bool salvaged_ = false;
+    qint64 dataVersion_ = -1;
+    qint64 fileSize_ = -1;
+    QDateTime fileMtime_;
 };
 
 Result<Columns> detectColumns(Connection &db);

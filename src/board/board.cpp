@@ -57,6 +57,41 @@ Board::Board(Connection db, QString path, QString tempPath, Columns columns)
     , tempPath_(std::move(tempPath))
     , columns_(columns)
 {
+    recordFileIdentity();
+}
+
+void Board::recordFileIdentity()
+{
+    const QFileInfo info(path_);
+    fileSize_ = info.exists() ? info.size() : -1;
+    fileMtime_ = info.lastModified();
+
+    dataVersion_ = -1;
+    auto statement = db_.prepare(QStringLiteral("PRAGMA data_version"));
+    if (!statement)
+        return;
+    auto row = statement.value().step();
+    if (row && row.value())
+        dataVersion_ = statement.value().columnInt64(0);
+}
+
+bool Board::hasChangedOnDisk()
+{
+    // A replaced, resized or retimed file is a change whatever SQLite
+    // thinks.
+    const QFileInfo info(path_);
+    if (!info.exists() || info.size() != fileSize_ || info.lastModified() != fileMtime_)
+        return true;
+
+    // A commit from another connection bumps data_version; this
+    // connection's own writes do not, so the app's own saves stay quiet.
+    auto statement = db_.prepare(QStringLiteral("PRAGMA data_version"));
+    if (!statement)
+        return true; // cannot tell: treat it as changed
+    auto row = statement.value().step();
+    if (!row || !row.value())
+        return true;
+    return statement.value().columnInt64(0) != dataVersion_;
 }
 
 Board::~Board()
@@ -72,6 +107,9 @@ Board::Board(Board &&other) noexcept
     , columns_(other.columns_)
     , newerVersion_(other.newerVersion_)
     , salvaged_(other.salvaged_)
+    , dataVersion_(other.dataVersion_)
+    , fileSize_(other.fileSize_)
+    , fileMtime_(other.fileMtime_)
 {
     other.tempPath_.clear();
 }
@@ -87,6 +125,9 @@ Board &Board::operator=(Board &&other) noexcept
     columns_ = other.columns_;
     newerVersion_ = other.newerVersion_;
     salvaged_ = other.salvaged_;
+    dataVersion_ = other.dataVersion_;
+    fileSize_ = other.fileSize_;
+    fileMtime_ = other.fileMtime_;
     other.tempPath_.clear();
     return *this;
 }

@@ -388,12 +388,15 @@ void MainWindow::saveDocument()
     // over its source, and a read-only file cannot be replaced; both go
     // through Save As, with a toast saying why.
     const bool recovered = document_ && document_->damaged();
+    const bool changedOnDisk = document_ && document_->hasChangedOnDisk();
     const bool readOnly = !path.isEmpty() && !QFileInfo(path).isWritable();
     if (path.isEmpty() || path.endsWith(QStringLiteral(".bee"), Qt::CaseInsensitive) || recovered
-        || readOnly) {
+        || changedOnDisk || readOnly) {
         if (recovered) {
             hud::toast(view_, QStringLiteral("This board was opened with problems; saving a "
                                              "recovered copy instead"));
+        } else if (changedOnDisk) {
+            hud::toast(view_, QStringLiteral("The file changed on disk; saving a copy instead"));
         } else if (readOnly) {
             hud::toast(view_, QStringLiteral("This file is read-only; saving a copy instead"));
         }

@@ -281,6 +281,7 @@ private slots:
     void damagedBoardShowsTheBadgeAndReport();
     void recoveredSaveClearsTheBadge();
     void noOpSaveLeavesTheFileUntouched();
+    void externalChangeRefusesTheInPlaceSave();
     void infoDialogsShowTheExpectedContent();
     void metadataPanelEditsAndCommits();
     void hudPreviewShowsTheStyledPanel();
@@ -3726,6 +3727,43 @@ void TestUiScene::noOpSaveLeavesTheFileUntouched()
     QVERIFY(window.input()->insertText(QStringLiteral("note"), QPointF(10, 10)));
     QVERIFY(window.saveDocumentTo(path, false));
     QVERIFY(fileBytes(path) != before);
+
+    settings::setSettingsDir(QString());
+}
+
+void TestUiScene::externalChangeRefusesTheInPlaceSave()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    settings::setSettingsDir(dir.path());
+
+    ui::MainWindow window;
+    QImage image(40, 30, QImage::Format_ARGB32);
+    image.fill(Qt::green);
+    QMimeData mime;
+    mime.setImageData(image);
+    window.input()->insertMimeData(mime, QPointF(0, 0));
+
+    const QString path = dir.filePath(QStringLiteral("board.beex"));
+    QVERIFY(window.saveDocumentTo(path, false));
+
+    // Edit, then change the file behind the window.
+    QVERIFY(window.input()->insertText(QStringLiteral("note"), QPointF(5, 5)));
+    {
+        auto db = board::Connection::open(path, board::Connection::OpenMode::ReadWrite);
+        QVERIFY(db.isOk());
+        QVERIFY(db.value().exec(QStringLiteral("UPDATE items SET x = x + 5")).isOk());
+    }
+
+    // The in-place save refuses and leaves the file alone; the warning
+    // dialog is dismissed from inside.
+    QTimer::singleShot(0, [&]() {
+        if (auto *box = qobject_cast<QMessageBox *>(QApplication::activeModalWidget()))
+            box->accept();
+    });
+    const QByteArray before = fileBytes(path);
+    QVERIFY(!window.saveDocumentTo(path, false));
+    QCOMPARE(fileBytes(path), before);
 
     settings::setSettingsDir(QString());
 }

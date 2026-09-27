@@ -113,6 +113,11 @@ public:
     // in-memory document matches the file again.
     void clearDamage() { damage_.clear(); }
 
+    // Whether the file changed on disk since it was opened (another
+    // instance, a sync client, a replaced file): an in-place save must
+    // not clobber it.
+    bool hasChangedOnDisk();
+
     // Items whose state changed since the UI last synced; commands call
     // noteItemChanged(), so a canvas refresh only reapplies the items
     // that actually moved (a board with thousands of items would

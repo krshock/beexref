@@ -277,6 +277,11 @@ int Document::placeholderCount() const
     return count;
 }
 
+bool Document::hasChangedOnDisk()
+{
+    return board_ && board_->hasChangedOnDisk();
+}
+
 void Document::addItem(const ItemPtr &item)
 {
     items_.append(item);
@@ -391,6 +396,16 @@ board::Status Document::save(const QString &path, bool storeThumbnails,
         return board::Error{0,
                             QStringLiteral("This board was opened with problems; use Save As "
                                            "to write a recovered copy."),
+                            path_};
+    }
+
+    // The file changed since it was opened (another instance, a sync
+    // client, a replaced file): an in-place write would clobber that, so
+    // the caller writes a copy instead.
+    if (!createNew && hasChangedOnDisk()) {
+        return board::Error{0,
+                            QStringLiteral("The file changed on disk since it was opened; use "
+                                           "Save As to write a copy."),
                             path_};
     }
 

@@ -124,6 +124,8 @@ private slots:
     void migratesOldBoardOnCopy();
     void opensNewerVersionReadOnlyUntouched();
     void salvagesImagesWithoutItemRows();
+    void detectsExternalChanges();
+    void detectsReplacedFiles();
     void rejectsNonBoardFile();
     void readsFilesWithMissingOptionalColumns();
     void missingBlobIsAnError();
@@ -449,6 +451,54 @@ void TestBoard::normalizesOddFlipValues()
         QCOMPARE(items.value().size(), 1);
         QCOMPARE(items.value().first().flip, stored == 1 ? qint64(1) : qint64(-1));
     }
+}
+
+void TestBoard::detectsExternalChanges()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString path = dir.filePath(QStringLiteral("board.beex"));
+    QVERIFY(createBoard(path, board::schema::kUserVersion, true, true, true).isOk());
+
+    auto board = board::Board::open(path, dir.filePath(QStringLiteral("cache")));
+    QVERIFY(board.isOk());
+    QVERIFY(!board.value().hasChangedOnDisk());
+
+    // A commit from another connection is a change.
+    {
+        auto other = board::Connection::open(path, board::Connection::OpenMode::ReadWrite);
+        QVERIFY(other.isOk());
+        QVERIFY(other.value().exec(QStringLiteral("UPDATE items SET x = x + 1")).isOk());
+    }
+    QVERIFY(board.value().hasChangedOnDisk());
+}
+
+void TestBoard::detectsReplacedFiles()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString path = dir.filePath(QStringLiteral("board.beex"));
+    QVERIFY(createBoard(path, board::schema::kUserVersion, true, true, true).isOk());
+
+    auto board = board::Board::open(path, dir.filePath(QStringLiteral("cache")));
+    QVERIFY(board.isOk());
+    QVERIFY(!board.value().hasChangedOnDisk());
+
+    // Growing the file behind the board's back is a change even though
+    // its connection saw no commit (the app's own atomic save replaces
+    // the file the same way, which is why a board is reopened after a
+    // save).
+    {
+        QFile file(path);
+        QVERIFY(file.open(QIODevice::Append));
+        QVERIFY(file.write(QByteArrayLiteral("x")) == 1);
+    }
+    QVERIFY(board.value().hasChangedOnDisk());
+
+    // A reopen records a fresh identity, so the next check is quiet.
+    auto reopened = board::Board::open(path, dir.filePath(QStringLiteral("cache")));
+    QVERIFY(reopened.isOk());
+    QVERIFY(!reopened.value().hasChangedOnDisk());
 }
 
 QTEST_GUILESS_MAIN(TestBoard)

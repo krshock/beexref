@@ -97,6 +97,7 @@ private slots:
     void recoversImagesWhenTheItemRowsAreGone();
     void tracksSaveChanges();
     void changesFollowTheSavedFile();
+    void refusesInPlaceSaveWhenTheFileChanged();
 };
 
 void TestDocument::savesAndReopensEveryField()
@@ -744,6 +745,39 @@ void TestDocument::changesFollowTheSavedFile()
     // A row deleted after the save is a pending delete on reopen too.
     again.removeItem(row);
     QCOMPARE(again.changes().removedIds.size(), 1);
+}
+
+void TestDocument::refusesInPlaceSaveWhenTheFileChanged()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString path = dir.filePath(QStringLiteral("changed.beex"));
+
+    doc::Document document = doc::Document::create();
+    document.addItem(pixmapItem(makePng(300, 200, Qt::red)));
+    QVERIFY(document.save(path).isOk());
+    // The app adopts the file after a save (setPath + adoptFileSources in
+    // MainWindow), which is what gives the document a file identity to
+    // compare against.
+    document.setPath(path);
+    document.adoptFileSources();
+    QVERIFY(!document.hasChangedOnDisk());
+
+    // Another connection commits to the file behind the document.
+    QVERIFY(execOnBoard(path, QStringLiteral("UPDATE items SET x = x + 5")));
+    QVERIFY(document.hasChangedOnDisk());
+
+    // An in-place save would clobber that; a copy still works.
+    const auto status = document.save(path);
+    QVERIFY(!status.isOk());
+    QVERIFY2(status.error().message.contains(QStringLiteral("changed on disk")),
+             qPrintable(status.error().toString()));
+
+    const QString copy = dir.filePath(QStringLiteral("copy.beex"));
+    QVERIFY(document.save(copy, true, {}, true).isOk());
+    auto reopened = doc::Document::open(copy, dir.filePath(QStringLiteral("cache")));
+    QVERIFY(reopened.isOk());
+    QCOMPARE(reopened.value().items().size(), 1);
 }
 
 QTEST_GUILESS_MAIN(TestDocument)

@@ -118,7 +118,10 @@ changelog, both artifacts, checksums, GitHub release); see
   save instead of writing an image-less row, and a failed rename keeps
   the complete temp file and reports its path. On Windows the replace is
   retried for about 1.5 s on sharing/lock/access errors first, for
-  antivirus, the indexer and sync clients.
+  antivirus, the indexer and sync clients. An in-place save refuses when
+  the file changed on disk since it was opened (`Board::hasChangedOnDisk`
+  checks size, mtime and SQLite's `data_version`), so another instance or
+  a sync client is never clobbered: the caller writes a copy instead.
 - A board with item-level problems still opens: `Document::damage()` lists
   them (missing blobs, non-JSON metadata, non-finite geometry, orphaned
   floors), the open dialog summarises by kind with the full list in the
