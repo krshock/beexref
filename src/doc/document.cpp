@@ -147,10 +147,22 @@ board::Result<Document> Document::open(const QString &path, const QString &tempD
         if (item->isPixmap()) {
             item->filename = item->data.value(QStringLiteral("filename")).toString();
             item->source = std::make_shared<BoardSource>(board, item->id);
-            if (blobIds.isOk() && !blobIds.value().contains(row.id)) {
-                damage.append(
-                    {Damage::Kind::MissingBlob, row.id,
-                     QStringLiteral("item %1: no image data in the file").arg(row.id)});
+            if (blobIds.isOk()) {
+                if (!blobIds.value().contains(row.id)) {
+                    // A row already marked in the file is an explicit
+                    // placeholder from a recovered copy, not damage; one
+                    // that is not gets marked now, so the recovered save
+                    // can write it instead of refusing.
+                    if (!item->data.value(QLatin1String(kPlaceholderKey)).toBool()) {
+                        damage.append(
+                            {Damage::Kind::MissingBlob, row.id,
+                             QStringLiteral("item %1: no image data in the file").arg(row.id)});
+                    }
+                    item->data.insert(QLatin1String(kPlaceholderKey), true);
+                } else {
+                    // The image is back; a stale mark would be misleading.
+                    item->data.remove(QLatin1String(kPlaceholderKey));
+                }
             }
             // The true encoded format comes from the sqlar name, not the
             // thumbnail: a JPEG original may have a PNG floor.
@@ -227,6 +239,16 @@ int Document::activeDamageCount() const
     return count;
 }
 
+int Document::placeholderCount() const
+{
+    int count = 0;
+    for (const ItemPtr &item : items_) {
+        if (item->isPixmap() && item->data.value(QLatin1String(kPlaceholderKey)).toBool())
+            ++count;
+    }
+    return count;
+}
+
 void Document::addItem(const ItemPtr &item)
 {
     items_.append(item);
@@ -289,8 +311,17 @@ board::Result<QByteArray> Document::blob(const Item &item) const
 }
 
 board::Status Document::save(const QString &path, bool storeThumbnails,
-                      const board::Progress &progress, bool createNew) const
+                      const board::Progress &progress, bool createNew)
 {
+    // A board with problems is never written back over its source: the
+    // recovered copy is what makes the placeholders explicit.
+    if (damaged() && !createNew) {
+        return board::Error{0,
+                            QStringLiteral("This board was opened with problems; use Save As "
+                                           "to write a recovered copy."),
+                            path_};
+    }
+
     if (createNew) {
         // A new file gets fresh row ids.
         for (const ItemPtr &item : items_)
@@ -307,6 +338,9 @@ board::Status Document::save(const QString &path, bool storeThumbnails,
         for (qsizetype i = 0; i < items_.size(); ++i)
             items_.at(i)->id = ids.at(i);
     }
+    // The file now matches what the document knows: the placeholders are
+    // explicit rows and everything else is complete.
+    damage_.clear();
     return status;
 }
 
@@ -341,6 +375,7 @@ QVector<board::Record> Document::buildRecords() const
             const SourcePtr source = item->source;
             if (source && source->isValid())
                 record.pixmapSource = [source]() { return source->bytes(); };
+            record.placeholder = item->data.value(QLatin1String(kPlaceholderKey)).toBool();
             record.format = item->format;
             record.filename = item->filename.isEmpty()
                 ? item->data.value(QStringLiteral("filename")).toString()

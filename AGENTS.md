@@ -124,6 +124,12 @@ changelog, both artifacts, checksums, GitHub release); see
   floors), the open dialog summarises by kind with the full list in the
   scrollable details area, and the status bar keeps a `recovered · N`
   badge counting the entries whose item is still in the scene.
+- A damaged board is never saved in place: `Document::save` refuses
+  (createNew false) and Save As writes a recovered copy whose imageless
+  items are explicit placeholders (`data["placeholder"]`, no blob). The
+  copy reopens clean -- the mark means "known gone", not damage -- and
+  can be saved in place from then on. The `.bee` export stays strict and
+  refuses placeholder rows.
 - `beexref-boardcheck [--write-back PATH] <board>...` migrates on a copy,
   decodes every blob, checks dimensions and diffs all tables; use it to verify
   writer/reader changes against the other ports.

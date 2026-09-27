@@ -384,11 +384,23 @@ void MainWindow::saveDocument()
     view_->cancelModes();
     const QString path = document_ ? document_->path() : QString();
     // A legacy .bee file is import-only; a document without a file must
-    // be saved as one.
-    if (path.isEmpty() || path.endsWith(QStringLiteral(".bee"), Qt::CaseInsensitive))
+    // be saved as one. A board opened with problems must not be written
+    // over its source, and a read-only file cannot be replaced; both go
+    // through Save As, with a toast saying why.
+    const bool recovered = document_ && document_->damaged();
+    const bool readOnly = !path.isEmpty() && !QFileInfo(path).isWritable();
+    if (path.isEmpty() || path.endsWith(QStringLiteral(".bee"), Qt::CaseInsensitive) || recovered
+        || readOnly) {
+        if (recovered) {
+            hud::toast(view_, QStringLiteral("This board was opened with problems; saving a "
+                                             "recovered copy instead"));
+        } else if (readOnly) {
+            hud::toast(view_, QStringLiteral("This file is read-only; saving a copy instead"));
+        }
         saveDocumentAs();
-    else
-        saveDocumentTo(path, false);
+        return;
+    }
+    saveDocumentTo(path, false);
 }
 
 void MainWindow::saveDocumentAs()
@@ -400,8 +412,25 @@ void MainWindow::saveDocumentAs()
     const QString filename = QFileDialog::getSaveFileName(
         this, QStringLiteral("Save file"), startDir,
         QStringLiteral("BeeXRef File (*.beex)"));
-    if (!filename.isEmpty())
-        saveDocumentTo(filename, true);
+    if (filename.isEmpty())
+        return;
+
+    // A recovered board writes its imageless items as explicit
+    // placeholders; say how many before writing anything.
+    if (document_ && document_->placeholderCount() > 0) {
+        const int count = document_->placeholderCount();
+        const QString text = count == 1
+            ? QStringLiteral("1 item has no image data and will be saved as a placeholder.")
+            : QStringLiteral("%1 items have no image data and will be saved as placeholders.")
+                  .arg(count);
+        const auto answer = QMessageBox::warning(
+            this, QStringLiteral("Save a recovered copy"),
+            QStringLiteral("%1\nThe original file is not modified.").arg(text),
+            QMessageBox::Save | QMessageBox::Cancel, QMessageBox::Save);
+        if (answer != QMessageBox::Save)
+            return;
+    }
+    saveDocumentTo(filename, true);
 }
 
 void MainWindow::exportBee()
@@ -625,6 +654,9 @@ bool MainWindow::saveDocumentTo(const QString &path, bool createNew)
     rebuildRecentMenu();
     updateActions();
     updateTitle();
+    // Document::save cleared the damage list: the written file matches
+    // what the scene knows, so the badge goes away.
+    updateStatusBar();
     logging::info(QStringLiteral("File saved"),
                   {{QStringLiteral("file"), filename},
                    {QStringLiteral("items"), document_->items().size()}});
@@ -1387,6 +1419,15 @@ void MainWindow::updateActions()
     state.canUndo = undoStack_.canUndo();
     state.canRedo = undoStack_.canRedo();
     actions_->setState(state);
+
+    // A recovered board keeps Save enabled but redirects to Save As, so
+    // the tooltip says what the click will do.
+    if (QAction *save = actions_->action(QStringLiteral("save"))) {
+        save->setToolTip(document_ && document_->damaged()
+                             ? QStringLiteral("This board was opened with problems; Save "
+                                              "writes a recovered copy via Save As")
+                             : QString());
+    }
 }
 
 void MainWindow::updateTitle()

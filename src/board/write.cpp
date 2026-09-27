@@ -339,10 +339,11 @@ Status writeAll(Connection &db, const QVector<Record> &records, bool storeThumbn
         if (pixmap.isEmpty() && record.pixmapSource)
             pixmap = record.pixmapSource();
         if (pixmap.isEmpty()) {
-            // An image row must never be written without its image:
-            // collect it and fail the whole save, so the caller removes
-            // the temp file and the target keeps its previous content.
-            missingBytes.append(id);
+            // An image row is never written without its image, unless it
+            // is an explicit placeholder from a recovered board; the row
+            // data carries the mark. The .bee interchange stays strict.
+            if (!record.placeholder || legacy)
+                missingBytes.append(id);
             continue;
         }
 
@@ -447,7 +448,7 @@ Status verifyWritten(Connection &db, const QVector<Record> &records, Format form
 
     qint64 expectedBlobs = 0;
     for (const Record &record : records) {
-        if (record.type == QLatin1String("pixmap"))
+        if (record.type == QLatin1String("pixmap") && !record.placeholder)
             ++expectedBlobs;
     }
     const auto blobRows = countRows(db, QStringLiteral("SELECT count(*) FROM sqlar"));

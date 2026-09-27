@@ -132,6 +132,27 @@ QByteArray makePng(int width, int height, const QColor &color)
     return bytes;
 }
 
+// Writes a one-image board into dir and removes its blob on disk, so
+// opening it reports missing image data. Empty on failure.
+QString damagedBoardFile(const QTemporaryDir &dir, const QString &name)
+{
+    const QString path = dir.filePath(name);
+    board::Record record;
+    record.saveId = 1;
+    record.type = QStringLiteral("pixmap");
+    record.dataJson = QStringLiteral("{\"filename\":\"a.png\"}");
+    record.metaJson = QStringLiteral("{}");
+    record.uuid = QStringLiteral("uuid-1");
+    record.pixmap = makePng(300, 200, Qt::red);
+    record.format = QStringLiteral("png");
+    if (!board::save(path, {record}).isOk())
+        return {};
+    auto db = board::Connection::open(path, board::Connection::OpenMode::ReadWrite);
+    if (!db.isOk() || !db.value().exec(QStringLiteral("DELETE FROM sqlar WHERE item_id=1")).isOk())
+        return {};
+    return path;
+}
+
 doc::ItemPtr pixmapItem(int width, int height, const QColor &color)
 {
     auto item = std::make_shared<doc::Item>(doc::kTypePixmap);
@@ -249,6 +270,7 @@ private slots:
     void syncDocumentAppliesOnlyNotedChanges();
     void menuLayoutCoversEveryAction();
     void damagedBoardShowsTheBadgeAndReport();
+    void recoveredSaveClearsTheBadge();
     void infoDialogsShowTheExpectedContent();
     void metadataPanelEditsAndCommits();
     void hudPreviewShowsTheStyledPanel();
@@ -3598,21 +3620,8 @@ void TestUiScene::damagedBoardShowsTheBadgeAndReport()
     settings::setSettingsDir(dir.path());
 
     // A one-image board whose blob is removed on disk.
-    const QString path = dir.filePath(QStringLiteral("damaged.beex"));
-    board::Record record;
-    record.saveId = 1;
-    record.type = QStringLiteral("pixmap");
-    record.dataJson = QStringLiteral("{\"filename\":\"a.png\"}");
-    record.metaJson = QStringLiteral("{}");
-    record.uuid = QStringLiteral("uuid-1");
-    record.pixmap = makePng(300, 200, Qt::red);
-    record.format = QStringLiteral("png");
-    QVERIFY(board::save(path, {record}).isOk());
-    {
-        auto db = board::Connection::open(path, board::Connection::OpenMode::ReadWrite);
-        QVERIFY(db.isOk());
-        QVERIFY(db.value().exec(QStringLiteral("DELETE FROM sqlar WHERE item_id=1")).isOk());
-    }
+    const QString path = damagedBoardFile(dir, QStringLiteral("damaged.beex"));
+    QVERIFY(!path.isEmpty());
 
     ui::MainWindow window;
 
@@ -3639,6 +3648,41 @@ void TestUiScene::damagedBoardShowsTheBadgeAndReport()
     QVERIFY(badge);
     QVERIFY(!badge->isHidden());
     QCOMPARE(badge->text(), QStringLiteral("recovered · 1"));
+
+    settings::setSettingsDir(QString());
+}
+
+void TestUiScene::recoveredSaveClearsTheBadge()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    settings::setSettingsDir(dir.path());
+
+    const QString path = damagedBoardFile(dir, QStringLiteral("damaged.beex"));
+    QVERIFY(!path.isEmpty());
+
+    ui::MainWindow window;
+    QTimer::singleShot(0, [&]() {
+        if (auto *box = qobject_cast<QMessageBox *>(QApplication::activeModalWidget()))
+            box->accept();
+    });
+    QVERIFY(window.openBoard(path));
+    auto *badge = window.findChild<QToolButton *>(QStringLiteral("damageBadge"));
+    QVERIFY(badge);
+    QVERIFY(!badge->isHidden());
+
+    // Saving a recovered copy writes the placeholder explicitly, so the
+    // scene matches the file again and the badge goes away.
+    const QString recovered = dir.filePath(QStringLiteral("recovered.beex"));
+    QVERIFY(window.saveDocumentTo(recovered, true));
+    QVERIFY(QFile::exists(recovered));
+    QVERIFY(badge->isHidden());
+
+    // The copy reopens without problems: the placeholder is known.
+    auto reopened = doc::Document::open(recovered, settings::cacheDir());
+    QVERIFY(reopened.isOk());
+    QVERIFY(!reopened.value().damaged());
+    QCOMPARE(reopened.value().placeholderCount(), 1);
 
     settings::setSettingsDir(QString());
 }

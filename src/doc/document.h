@@ -30,6 +30,10 @@ struct Damage
     QString detail;    // one short line for the report and the log
 };
 
+// data key marking an item whose image is gone: a recovered save writes
+// the row as an explicit placeholder instead of refusing.
+inline constexpr char kPlaceholderKey[] = "placeholder";
+
 // User-facing label for a kind, shared by the log and the report.
 QString damageLabel(Damage::Kind kind);
 
@@ -82,6 +86,17 @@ public:
     // (board-level entries always count), so deleting a broken item
     // lowers the count the status bar shows.
     int activeDamageCount() const;
+    // Whether anything the board could not fully account for is still in
+    // the scene. Deleting the broken items fixes their entries, so once
+    // none are left an in-place save is allowed again; board-level
+    // entries (orphaned floors) stay until a recovered copy is written.
+    bool damaged() const { return activeDamageCount() > 0; }
+    // Items whose image is known to be gone, so a recovered save can say
+    // how many will be written as placeholders.
+    int placeholderCount() const;
+    // A successful save writes the placeholders explicitly, so the
+    // in-memory document matches the file again.
+    void clearDamage() { damage_.clear(); }
 
     // Items whose state changed since the UI last synced; commands call
     // noteItemChanged(), so a canvas refresh only reapplies the items
@@ -110,9 +125,11 @@ public:
     // file starts with fresh ids.
     //
     // After a successful save, adoptFileSources() points the images at
-    // the file and frees their in-RAM encoded buffers.
+    // the file and frees their in-RAM encoded buffers. A damaged board
+    // refuses an in-place save (createNew false); Save As writes a
+    // recovered copy whose imageless items are explicit placeholders.
     board::Status save(const QString &path, bool storeThumbnails = true,
-                       const board::Progress &progress = {}, bool createNew = false) const;
+                       const board::Progress &progress = {}, bool createNew = false);
 
     // Writes the legacy upstream .bee format (interchange only): no
     // thumbnails, no meta/uuid, the scene's ids and path untouched.

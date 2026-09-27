@@ -35,6 +35,10 @@ struct Record
     QString format;
     QString filename;
     std::function<QByteArray()> pixmapSource;
+    // True for an item whose image is known to be gone (a recovered
+    // board's placeholder): the row is written and marked in its data
+    // instead of failing the save. Native format only.
+    bool placeholder = false;
     QByteArray floorData;
     double floorFraction = 0;
     QString floorFormat;

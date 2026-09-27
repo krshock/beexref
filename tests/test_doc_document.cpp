@@ -50,6 +50,14 @@ bool execOnBoard(const QString &path, const QString &sql)
     return db.value().exec(sql).isOk();
 }
 
+QByteArray fileBytes(const QString &path)
+{
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly))
+        return {};
+    return file.readAll();
+}
+
 doc::ItemPtr pixmapItem(const QByteArray &png)
 {
     auto item = std::make_shared<doc::Item>(doc::kTypePixmap);
@@ -83,6 +91,8 @@ private slots:
     void reportsItemDamageWithoutRefusingToOpen();
     void reportsOrphanedFloors();
     void activeDamageCountFollowsDeletedItems();
+    void refusesInPlaceSaveForDamagedBoards();
+    void savesRecoveredCopiesWithMarkedPlaceholders();
 };
 
 void TestDocument::savesAndReopensEveryField()
@@ -482,6 +492,86 @@ void TestDocument::activeDamageCountFollowsDeletedItems()
     QVERIFY(broken);
     document.removeItem(broken);
     QCOMPARE(document.activeDamageCount(), before - 1);
+}
+
+void TestDocument::refusesInPlaceSaveForDamagedBoards()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString path = dir.filePath(QStringLiteral("damaged.beex"));
+
+    QVERIFY(board::save(path, {pixmapRecord(1, makePng(300, 200, Qt::red), QStringLiteral("a.png"))})
+                .isOk());
+    QVERIFY(execOnBoard(path, QStringLiteral("DELETE FROM sqlar WHERE item_id=1")));
+
+    auto opened = doc::Document::open(path, dir.filePath(QStringLiteral("cache")));
+    QVERIFY(opened.isOk());
+    doc::Document document = opened.take();
+    QVERIFY(document.damaged());
+
+    // The source file must not be written over: Save (in place) refuses
+    // and the file keeps its bytes.
+    const QByteArray before = fileBytes(path);
+    const auto status = document.save(path);
+    QVERIFY(!status.isOk());
+    QVERIFY2(status.error().message.contains(QStringLiteral("recovered copy")),
+             qPrintable(status.error().toString()));
+    QCOMPARE(fileBytes(path), before);
+}
+
+void TestDocument::savesRecoveredCopiesWithMarkedPlaceholders()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString path = dir.filePath(QStringLiteral("damaged.beex"));
+    const QString recovered = dir.filePath(QStringLiteral("recovered.beex"));
+
+    QVector<board::Record> records;
+    records << pixmapRecord(1, makePng(300, 200, Qt::red), QStringLiteral("a.png"));
+    records << pixmapRecord(2, makePng(300, 200, Qt::blue), QStringLiteral("b.png"));
+    QVERIFY(board::save(path, records).isOk());
+    QVERIFY(execOnBoard(path, QStringLiteral("DELETE FROM sqlar WHERE item_id=1")));
+
+    auto opened = doc::Document::open(path, dir.filePath(QStringLiteral("cache")));
+    QVERIFY(opened.isOk());
+    doc::Document document = opened.take();
+    QVERIFY(document.damaged());
+    QCOMPARE(document.placeholderCount(), 1);
+
+    // Save As writes the imageless item as an explicit placeholder row
+    // and the document matches the written file afterwards.
+    QVERIFY(document.save(recovered, true, {}, true).isOk());
+    QVERIFY(!document.damaged());
+    QCOMPARE(document.placeholderCount(), 1);
+
+    {
+        auto db = board::Connection::open(recovered, board::Connection::OpenMode::ReadOnly);
+        QVERIFY(db.isOk());
+        auto data = db.value().prepare(QStringLiteral("SELECT data FROM items WHERE id=1"));
+        QVERIFY(data);
+        auto row = data.value().step();
+        QVERIFY(row);
+        QVERIFY(row.value());
+        QVERIFY2(data.value().columnText(0).contains(QStringLiteral("placeholder")),
+                 qPrintable(data.value().columnText(0)));
+
+        // One blob for the two rows: the placeholder has no image.
+        auto blobs = db.value().prepare(QStringLiteral("SELECT count(*) FROM sqlar"));
+        QVERIFY(blobs);
+        auto blobRow = blobs.value().step();
+        QVERIFY(blobRow);
+        QVERIFY(blobRow.value());
+        QCOMPARE(blobs.value().columnInt64(0), qint64(1));
+    }
+
+    // Reopening the recovered copy is clean: the placeholder is known,
+    // not damage, so the copy can be saved in place from now on.
+    auto again = doc::Document::open(recovered, dir.filePath(QStringLiteral("cache")));
+    QVERIFY(again.isOk());
+    const doc::Document &reopened = again.value();
+    QVERIFY(!reopened.damaged());
+    QCOMPARE(reopened.placeholderCount(), 1);
+    QCOMPARE(reopened.items().size(), 2);
 }
 
 QTEST_GUILESS_MAIN(TestDocument)
