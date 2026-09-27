@@ -88,6 +88,8 @@ qt_add_library(beexref_core STATIC
     src/ui/export_conflict_dialog.cpp
     src/ui/export_conflict_dialog.h
     src/ui/crop_tools.h
+    src/ui/crop_tool.cpp
+    src/ui/crop_tool.h
     src/ui/downloader.cpp
     src/ui/downloader.h
     src/ui/grayscale.cpp

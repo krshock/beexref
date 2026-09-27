@@ -1,6 +1,7 @@
 #include "view.h"
 
 #include "color_sampler_tool.h"
+#include "crop_tool.h"
 #include "cursors.h"
 #include "lod_manager.h"
 #include "move_handle.h"
@@ -50,6 +51,7 @@ View::View(QWidget *parent)
     moveWindowTool_ = tools_->add<MoveWindowTool>(this, moveWindowTimer_);
     connect(moveWindowTimer_, &QTimer::timeout, this, [this]() { moveWindowTool_->tick(); });
     textEditTool_ = tools_->add<TextEditTool>(this);
+    cropTool_ = tools_->add<CropTool>(this);
 
     // The corner move handle: shown only while the window's title bar
     // is disabled (see setMoveHandleVisible). Pressing it starts the
@@ -117,10 +119,8 @@ void View::setBoardScene(Scene *scene)
                 [this](SceneItem *view) {
                     // Never keep a crop session or a spotlight pointing
                     // at a view the scene is about to delete.
-                    if (view == cropItem_) {
-                        cropItem_ = nullptr;
-                        cropDrag_ = crop::Part::None;
-                    }
+                    if (cropTool_)
+                        cropTool_->cancelIfItem(view);
                     if (textEditTool_)
                         textEditTool_->cancelIfItem(view);
                     spotlighted_.removeAll(view);
@@ -491,25 +491,6 @@ void View::mousePressEvent(QMouseEvent *event)
         return;
     }
 
-    if (cropItem_ && event->button() == Qt::LeftButton) {
-        const QPoint viewportPos = event->position().toPoint();
-        const QPointF itemPos = cropItem_->mapFromScene(mapToScene(viewportPos));
-        const crop::Part part = crop::hitTest(cropItem_->cropRect(), cropScale(), itemPos);
-        if (part != crop::Part::None) {
-            cropDrag_ = part;
-            cropPressItem_ = itemPos;
-            cropDragStartRect_ = cropItem_->cropRect();
-        } else if (cropItem_->cropRect().contains(itemPos)) {
-            // Clicking inside confirms, outside cancels, as the
-            // reference's crop editor does.
-            confirmCrop();
-        } else {
-            cancelCrop();
-        }
-        event->accept();
-        return;
-    }
-
     if (event->button() == Qt::LeftButton) {
         const QPoint viewportPos = event->position().toPoint();
         const QPointF scenePos = mapToScene(viewportPos);
@@ -632,20 +613,6 @@ void View::mouseMoveEvent(QMouseEvent *event)
         return;
     }
 
-    if (cropItem_) {
-        if (cropDrag_ != crop::Part::None && (event->buttons() & Qt::LeftButton)) {
-            const QPointF itemPos =
-                cropItem_->mapFromScene(mapToScene(position));
-            const QPointF delta = itemPos - cropPressItem_;
-            cropItem_->setCropRect(crop::draggedRect(cropDragStartRect_, cropDrag_, delta,
-                                                     cropItem_->imageBounds()));
-        } else {
-            updateCropHoverCursor(position);
-        }
-        event->accept();
-        return;
-    }
-
     if (drag_ == Drag::Scale || drag_ == Drag::Rotate) {
         // Wait for the drag threshold, like the Go port: a shaky click on
         // a handle must not scale or rotate the selection.
@@ -722,13 +689,6 @@ void View::mouseReleaseEvent(QMouseEvent *event)
 
     if (dragZoom_) {
         dragZoom_ = false;
-        event->accept();
-        return;
-    }
-
-    if (cropItem_) {
-        if (event->button() == Qt::LeftButton)
-            cropDrag_ = crop::Part::None;
         event->accept();
         return;
     }
@@ -957,81 +917,27 @@ void View::updateHoverCursor(const QPoint &viewportPos)
     viewport()->unsetCursor();
 }
 
-double View::cropScale() const
-{
-    if (cropItem_)
-        return transform().m11() * cropItem_->item()->scale;
-    return transform().m11();
-}
-
 void View::cropSelection()
 {
-    if (cropItem_)
-        return;
-    cancelSampleColor();
-    SceneItem *target = nullptr;
-    if (boardScene_) {
-        const QVector<SceneItem *> selected = boardScene_->selectedItemViews();
-        if (selected.size() == 1 && selected.first()->isPixmap() && !selected.first()->isError())
-            target = selected.first();
-    }
-    if (!target)
-        return;
-
-    cropItem_ = target;
-    cropDrag_ = crop::Part::None;
-    cropItem_->enterCropMode();
-    setFocus();
-    recalculateSceneRect();
-    refreshSelectionOverlay();
-    updateViewState();
-    lod_->evaluateNow();
-}
-
-void View::confirmCrop()
-{
-    if (!cropItem_)
-        return;
-    SceneItem *view = cropItem_;
-    cropItem_ = nullptr;
-    cropDrag_ = crop::Part::None;
-
-    const QRectF current =
-        view->item()->hasCrop() ? view->item()->crop() : view->imageBounds();
-    const QRectF rect = view->cropRect();
-    const bool changed = rect != current;
-    if (!changed) {
-        view->exitCropMode();
-        finishCropSession(false);
-        return;
-    }
-
-    const doc::ChangeItemCommand::State before =
-        doc::ChangeItemCommand::State::capture(*view->item());
-    view->commitCrop(rect);
-    if (undoStack_) {
-        undoStack_->push(std::make_unique<doc::ChangeItemCommand>(
-            view->item(), before, doc::ChangeItemCommand::State::capture(*view->item()),
-            QStringLiteral("Crop item")));
-    }
-    finishCropSession(true);
+    cropTool_->start();
 }
 
 void View::cancelCrop()
 {
-    if (!cropItem_)
-        return;
-    cropItem_->exitCropMode();
-    cropItem_ = nullptr;
-    cropDrag_ = crop::Part::None;
-    finishCropSession(false);
+    cropTool_->cancel();
+}
+
+bool View::cropActive() const
+{
+    return cropTool_ && cropTool_->active();
 }
 
 void View::cancelModes()
 {
-    cancelCrop();
-    tools_->cancel();
+    // A text edit commits (the editor closes through its focus-out
+    // path); the other tools just cancel.
     commitTextEdit();
+    tools_->cancel();
 }
 
 void View::startTextEdit(SceneItem *item)
@@ -1060,7 +966,7 @@ void View::markDocumentModified()
         boardScene_->document()->setModified(true);
 }
 
-void View::finishCropSession(bool changed)
+void View::sessionFinished(bool changed)
 {
     recalculateSceneRect();
     refreshSelectionOverlay();
@@ -1068,8 +974,7 @@ void View::finishCropSession(bool changed)
     lod_->evaluateNow();
     if (!changed)
         return;
-    if (boardScene_ && boardScene_->document())
-        boardScene_->document()->setModified(true);
+    markDocumentModified();
     emit documentModified();
 }
 
@@ -1138,31 +1043,6 @@ QColor View::sampledColor() const
     return sampler_ ? sampler_->color() : QColor();
 }
 
-void View::updateCropHoverCursor(const QPoint &viewportPos)
-{
-    if (!cropItem_) {
-        viewport()->unsetCursor();
-        return;
-    }
-    const QPointF itemPos = cropItem_->mapFromScene(mapToScene(viewportPos));
-    const crop::Part part = crop::hitTest(cropItem_->cropRect(), cropScale(), itemPos);
-    switch (part) {
-    case crop::Part::None:
-        viewport()->unsetCursor();
-        return;
-    case crop::Part::Top:
-    case crop::Part::Left:
-    case crop::Part::Bottom:
-    case crop::Part::Right:
-        viewport()->setCursor(crop::edgeCursor(part, cropItem_->item()->rotation));
-        return;
-    default:
-        viewport()->setCursor(crop::handleCursor(part, cropItem_->item()->rotation,
-                                                 cropItem_->item()->flip < 0));
-        return;
-    }
-}
-
 void View::keyPressEvent(QKeyEvent *event)
 {
     // Any key ends the active tool (move-window, colour sampling), like
@@ -1170,18 +1050,6 @@ void View::keyPressEvent(QKeyEvent *event)
     if (tools_->keyPress(event)) {
         event->accept();
         return;
-    }
-    if (cropItem_) {
-        if (event->key() == Qt::Key_Return || event->key() == Qt::Key_Enter) {
-            confirmCrop();
-            event->accept();
-            return;
-        }
-        if (event->key() == Qt::Key_Escape) {
-            cancelCrop();
-            event->accept();
-            return;
-        }
     }
     // Esc dismisses a spotlight when no mode above claimed it.
     if (event->key() == Qt::Key_Escape && !spotlighted_.isEmpty()) {
@@ -1238,7 +1106,7 @@ void View::drawForeground(QPainter *painter, const QRectF &rect)
     // The crop editor brings its own frame; spotlights and handles would
     // only get in the way. A spotlight is suspended, not cleared, while
     // cropping, so it comes back when the crop session ends.
-    if (cropItem_)
+    if (cropActive())
         return;
     if (!spotlighted_.isEmpty())
         drawSpotlight(painter);

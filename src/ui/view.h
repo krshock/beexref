@@ -26,6 +26,7 @@ class QTimer;
 namespace ui {
 
 class ColorSamplerTool;
+class CropTool;
 class LevelLoader;
 class LodManager;
 class MoveHandle;
@@ -48,6 +49,7 @@ public:
 
     void setLevelLoader(LevelLoader *loader);
     void setBoardScene(Scene *scene);
+    Scene *boardScene() const { return boardScene_; }
     void setMimeFilter(MimeFilter filter) { mimeFilter_ = std::move(filter); }
 
     void setLodSettings(const LodSettings &settings);
@@ -80,7 +82,7 @@ public:
     // Leaves crop mode without applying anything; the reference cancels
     // active modes before undo/redo and before a scene is replaced.
     void cancelCrop();
-    bool cropActive() const { return cropItem_ != nullptr; }
+    bool cropActive() const;
 
     // In-place text editing: started by a double-click on a text item or
     // by Insert > Text. Enter or a click elsewhere commits (one undo
@@ -115,6 +117,10 @@ public:
     // Tools report changes through the view: the document is marked
     // modified, so closing asks to save.
     void markDocumentModified();
+    // A tool session ended: refresh the scrollable area, the selection
+    // overlay and the LOD queue; changed also marks the document
+    // modified and tells the window.
+    void sessionFinished(bool changed);
 
     void fitScene();
     void fitSelection();
@@ -211,13 +217,6 @@ private:
     // Spotlight state: the view-only raised items.
     void drawSpotlight(QPainter *painter) const;
 
-    // Crop session (the reference's CropEditor, driven by the view).
-    void confirmCrop();
-    void finishCropSession(bool changed);
-    void updateCropHoverCursor(const QPoint &viewportPos);
-    // View scale times the item's scale: the reference's
-    // fixed_length_for_viewport denominator.
-    double cropScale() const;
     void setGestureFrozen(bool frozen);
     QVector<SceneItem *> transformableSelection() const;
 
@@ -260,12 +259,7 @@ private:
     ColorSamplerTool *sampler_ = nullptr;
     MoveWindowTool *moveWindowTool_ = nullptr;
     TextEditTool *textEditTool_ = nullptr;
-
-    // Crop session state.
-    SceneItem *cropItem_ = nullptr;
-    crop::Part cropDrag_ = crop::Part::None;
-    QPointF cropPressItem_;
-    QRectF cropDragStartRect_;
+    CropTool *cropTool_ = nullptr;
 
     // Scale/rotate gesture state.
     QRectF gestureBounds_;
