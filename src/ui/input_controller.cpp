@@ -25,6 +25,12 @@ namespace {
 // Inserted items go above everything, as the reference does.
 constexpr double kZStep = constants::kZStep;
 
+// Shown when a paste finds nothing it can insert.
+QString noPasteMessage()
+{
+    return QStringLiteral("No image data or text in clipboard or image too big");
+}
+
 bool isRemote(const QUrl &url)
 {
     const QString scheme = url.scheme().toLower();
@@ -73,13 +79,46 @@ InputController::InputController(Scene *scene, doc::UndoStack *undoStack, QObjec
 
 bool InputController::acceptsMimeData(const QMimeData &data) const
 {
-    return dropAccepts(data);
+    if (dropAccepts(data))
+        return true;
+    for (const InsertHandler &handler : insertHandlers_) {
+        if (handlerClaims(handler, data))
+            return true;
+    }
+    return false;
+}
+
+void InputController::addInsertHandler(InsertHandler handler)
+{
+    insertHandlers_.append(std::move(handler));
+}
+
+bool InputController::handlerClaims(const InsertHandler &handler, const QMimeData &data)
+{
+    for (const QString &format : handler.formats) {
+        if (data.hasFormat(format))
+            return true;
+    }
+    return false;
 }
 
 void InputController::insertMimeData(const QMimeData &data, const QPointF &scenePos,
                                      double viewScale)
 {
-    Q_UNUSED(viewScale);
+    // Registered routes first; the built-in classification below is the
+    // fallback, so a drop the reference understands behaves exactly as
+    // before.
+    for (const InsertHandler &handler : std::as_const(insertHandlers_)) {
+        if (!handlerClaims(handler, data))
+            continue;
+        const bool inserted = handler.insert ? handler.insert(data, scenePos, viewScale) : false;
+        if (!inserted) {
+            emit message(handler.failure.isEmpty() ? QString::fromLatin1(kNoDropMessage)
+                                                   : handler.failure);
+        }
+        return;
+    }
+
     const DropResult result = inspectDrop(data);
     switch (result.kind) {
     case DropKind::Urls:
@@ -332,6 +371,19 @@ void InputController::paste(const QPointF &scenePos, double viewScale)
     }
 
     if (mime) {
+        // Registered routes come after the internal clipboard (a copy of
+        // board items still pastes as items) and before the built-in
+        // image/URL/text classification.
+        for (const InsertHandler &handler : std::as_const(insertHandlers_)) {
+            if (!handlerClaims(handler, *mime))
+                continue;
+            const bool inserted =
+                handler.insert ? handler.insert(*mime, scenePos, viewScale) : false;
+            if (!inserted)
+                emit message(handler.failure.isEmpty() ? noPasteMessage() : handler.failure);
+            return;
+        }
+
         const QImage image = QApplication::clipboard()->image();
         if (!image.isNull()) {
             insertLoaded(doc::imageToLoaded(image), scenePos);
@@ -352,7 +404,7 @@ void InputController::paste(const QPointF &scenePos, double viewScale)
             return;
         }
     }
-    emit message(QStringLiteral("No image data or text in clipboard or image too big"));
+    emit message(noPasteMessage());
 }
 
 } // namespace ui

@@ -95,6 +95,7 @@ private slots:
     void pasteSystemClipboardText();
     void cutAndUndoRestores();
     void removingAnImageSpillsItsBytes();
+    void customInsertHandlerClaimsItsFormat();
 };
 
 void TestInput::dropsImageMimeData()
@@ -426,6 +427,67 @@ void TestInput::removingAnImageSpillsItsBytes()
     auto blob = document->blob(*document->items().first());
     QVERIFY(blob.isOk());
     QCOMPARE(blob.value(), png);
+}
+
+void TestInput::customInsertHandlerClaimsItsFormat()
+{
+    // An extension claims its own mime formats: the handler runs before
+    // the built-in classification, both for drops and pastes, and adds
+    // its items through insertItems() as one undo step.
+    auto document = std::make_shared<doc::Document>(doc::Document::create());
+    ui::Scene scene;
+    scene.setDocument(document);
+    doc::UndoStack stack(document.get());
+    ui::InputController controller(&scene, &stack);
+
+    const QString format = QStringLiteral("application/x-beexref-test-note");
+    controller.addInsertHandler(
+        {QStringList{format},
+         [&controller, &format](const QMimeData &data, const QPointF &scenePos, double) {
+             const QString text = QString::fromUtf8(data.data(format));
+             if (text.isEmpty())
+                 return false;
+             doc::ItemPtr item = doc::createItem(doc::kTypeText);
+             item->setText(text);
+             controller.insertItems({item}, scenePos, QStringLiteral("Test insert"));
+             return true;
+         },
+         QStringLiteral("Empty test payload")});
+
+    QMimeData mime;
+    mime.setData(format, QByteArrayLiteral("hello"));
+    QVERIFY(controller.acceptsMimeData(mime)); // drag-enter, formats only
+    controller.insertMimeData(mime, QPointF(20, 20));
+    QCOMPARE(document->items().size(), 1);
+    QVERIFY(document->items().first()->isText());
+    QCOMPARE(document->items().first()->text(), QStringLiteral("hello"));
+    QVERIFY(stack.canUndo());
+
+    // A payload the handler rejects reports its message and inserts
+    // nothing.
+    QSignalSpy messages(&controller, &ui::InputController::message);
+    QMimeData empty;
+    empty.setData(format, QByteArray());
+    controller.insertMimeData(empty, QPointF(20, 20));
+    QCOMPARE(document->items().size(), 1);
+    QCOMPARE(messages.count(), 1);
+    QCOMPARE(messages.first().first().toString(), QStringLiteral("Empty test payload"));
+
+    // Paste takes the same route (after the internal-items rule).
+    auto *clipboardMime = new QMimeData;
+    clipboardMime->setData(format, QByteArrayLiteral("pasted"));
+    QApplication::clipboard()->setMimeData(clipboardMime);
+    controller.paste(QPointF(30, 30));
+    QCOMPARE(document->items().size(), 2);
+    QCOMPARE(document->items().last()->text(), QStringLiteral("pasted"));
+
+    // The built-in route is untouched: an image drop still inserts.
+    QImage image(4, 4, QImage::Format_ARGB32);
+    image.fill(Qt::blue);
+    QMimeData imageMime;
+    imageMime.setImageData(image);
+    controller.insertMimeData(imageMime, QPointF(0, 0));
+    QCOMPARE(document->items().size(), 3);
 }
 
 QTEST_MAIN(TestInput)

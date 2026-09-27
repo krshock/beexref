@@ -7,8 +7,10 @@
 #include <QHash>
 #include <QObject>
 #include <QPointF>
+#include <QStringList>
 #include <QVector>
 
+#include <functional>
 #include <memory>
 
 class QMimeData;
@@ -26,6 +28,24 @@ class Scene;
 // the flattened image. Same format name as the Go ports.
 inline constexpr char kItemsMime[] = "beexref/items";
 
+// A payload route for drops and pastes, registered with
+// addInsertHandler(): the built-in classification (files, URLs, raw
+// images) is the fallback, so an extension claims its own mime formats
+// without touching the reference's port. Handlers are tried in
+// registration order; the first with one of its formats present wins.
+struct InsertHandler
+{
+    // The mime formats the handler claims. Checked with hasFormat()
+    // only: drag-enter must not read payloads (an early read can poison
+    // the drop-time read on some sources).
+    QStringList formats;
+    // Turns the payload into items, usually through insertItems().
+    // Returning false reports `failure` (or the usual message) and
+    // stops the dispatch, like a built-in extractor that found nothing.
+    std::function<bool(const QMimeData &, const QPointF &, double viewScale)> insert;
+    QString failure;
+};
+
 // Turns clipboard and drop payloads into board items: local files and
 // raw images insert immediately, remote URLs download and insert when
 // they arrive. Every insertion is a single undo step.
@@ -38,6 +58,16 @@ public:
 
     bool acceptsMimeData(const QMimeData &data) const;
     void insertMimeData(const QMimeData &data, const QPointF &scenePos, double viewScale = 1.0);
+
+    // Registers a payload route tried before the built-in classification
+    // (see InsertHandler).
+    void addInsertHandler(InsertHandler handler);
+
+    // Adds items at scenePos as one undo step and selects them; the
+    // documented way for handlers and extensions to put items on the
+    // board.
+    void insertItems(QVector<doc::ItemPtr> items, const QPointF &scenePos,
+                     const QString &text);
 
     // Creates a text item at scenePos with its own undo step and returns
     // it, so the caller can start editing it; empty text inserts nothing.
@@ -65,15 +95,17 @@ signals:
 
 private:
     void insertLoaded(const doc::LoadedImage &loaded, const QPointF &scenePos);
-    void insertItems(QVector<doc::ItemPtr> items, const QPointF &scenePos, const QString &text);
     void insertUrls(const QList<QUrl> &urls, const QPointF &scenePos);
     void spillToCache(const doc::ItemPtr &item);
     void arrangeInserted(const QVector<doc::ItemPtr> &items, const QPointF &scenePos);
+    // Whether a registered handler claims the payload (format names only).
+    static bool handlerClaims(const InsertHandler &handler, const QMimeData &data);
 
     Scene *scene_;
     doc::UndoStack *undoStack_;
     Downloader *downloader_;
     std::shared_ptr<cache::SessionCache> sessionCache_;
+    QVector<InsertHandler> insertHandlers_;
     QVector<doc::ItemPtr> internalClipboard_;
     QHash<quint64, QPointF> pendingDrops_;
     quint64 nextRequestId_ = 1;
