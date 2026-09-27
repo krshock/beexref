@@ -618,6 +618,17 @@ bool MainWindow::saveDocumentTo(const QString &path, bool createNew)
     if (!filename.endsWith(QStringLiteral(".beex"), Qt::CaseInsensitive))
         filename += QStringLiteral(".beex");
 
+    // A save with nothing to write is a no-op: the file already holds
+    // exactly this scene (same path, clean undo stack, no damage), so
+    // Ctrl+S on a big board must not rewrite a gigabyte. A migrated,
+    // deleted or externally changed file still goes through the write
+    // path.
+    if (!createNew && !document_->damaged() && undoStack_.isClean()
+        && filename == document_->path() && QFileInfo(filename).size() > 0
+        && document_->board() && document_->board()->tempPath().isEmpty()) {
+        return true;
+    }
+
     // Appears only if writing takes longer than the minimum duration.
     QProgressDialog progress(QStringLiteral("Saving %1").arg(filename), QString(), 0, 100, this);
     progress.setWindowModality(Qt::WindowModal);

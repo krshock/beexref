@@ -1,5 +1,6 @@
 #include <QAction>
 #include <QFile>
+#include <QFileInfo>
 #include <QBuffer>
 #include <QColor>
 #include <QContextMenuEvent>
@@ -153,6 +154,14 @@ QString damagedBoardFile(const QTemporaryDir &dir, const QString &name)
     return path;
 }
 
+QByteArray fileBytes(const QString &path)
+{
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly))
+        return {};
+    return file.readAll();
+}
+
 doc::ItemPtr pixmapItem(int width, int height, const QColor &color)
 {
     auto item = std::make_shared<doc::Item>(doc::kTypePixmap);
@@ -271,6 +280,7 @@ private slots:
     void menuLayoutCoversEveryAction();
     void damagedBoardShowsTheBadgeAndReport();
     void recoveredSaveClearsTheBadge();
+    void noOpSaveLeavesTheFileUntouched();
     void infoDialogsShowTheExpectedContent();
     void metadataPanelEditsAndCommits();
     void hudPreviewShowsTheStyledPanel();
@@ -3683,6 +3693,39 @@ void TestUiScene::recoveredSaveClearsTheBadge()
     QVERIFY(reopened.isOk());
     QVERIFY(!reopened.value().damaged());
     QCOMPARE(reopened.value().placeholderCount(), 1);
+
+    settings::setSettingsDir(QString());
+}
+
+void TestUiScene::noOpSaveLeavesTheFileUntouched()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    settings::setSettingsDir(dir.path());
+
+    ui::MainWindow window;
+    QImage image(40, 30, QImage::Format_ARGB32);
+    image.fill(Qt::green);
+    QMimeData mime;
+    mime.setImageData(image);
+    window.input()->insertMimeData(mime, QPointF(0, 0));
+
+    const QString path = dir.filePath(QStringLiteral("board.beex"));
+    QVERIFY(window.saveDocumentTo(path, false));
+    const QByteArray before = fileBytes(path);
+    QVERIFY(!before.isEmpty());
+    const QDateTime stamp = QFileInfo(path).lastModified();
+
+    // Nothing changed: the second save succeeds without touching the
+    // file, however large it is.
+    QVERIFY(window.saveDocumentTo(path, false));
+    QCOMPARE(fileBytes(path), before);
+    QCOMPARE(QFileInfo(path).lastModified(), stamp);
+
+    // A change writes again.
+    QVERIFY(window.input()->insertText(QStringLiteral("note"), QPointF(10, 10)));
+    QVERIFY(window.saveDocumentTo(path, false));
+    QVERIFY(fileBytes(path) != before);
 
     settings::setSettingsDir(QString());
 }
