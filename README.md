@@ -53,3 +53,9 @@ the same scene
 - Image smoothing settings
 - board and image exports (PNG/JPEG/SVG, or every image to a folder);
 - "spotlight" brings an image to the front without modifying its z-order (non-destructive)
+
+## Development
+
+The extension points — tools, item types, drop/paste handlers, export
+formats, LOD methods, settings and commands — are documented in
+[`docs/extending.md`](docs/extending.md).

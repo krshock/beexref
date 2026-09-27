@@ -71,6 +71,8 @@ ctest --preset linux-debug
   referenced through the constant.
 - Order-sensitive LOD tests pin `decodeThreads = 1`; completion order with
   N > 1 is not deterministic.
+- Extension points (tools, item types, insertion handlers, export formats,
+  LOD methods, settings, commands) are documented in `docs/extending.md`.
 
 ## Versioning
 
