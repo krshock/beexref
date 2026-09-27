@@ -86,6 +86,12 @@ public:
     void cancelTextEdit();
     bool textEditing() const { return textItem_ != nullptr; }
 
+    // The reference's cancel_active_modes(): ends every mode that owns
+    // the interaction (crop, colour sampling, text editing, move
+    // window). Undo, IO and scene actions call it before touching the
+    // items; a new mode must be added here once, not at every call site.
+    void cancelModes();
+
     // Sample colour mode: a crosshair and a swatch follow the pointer;
     // the next click reports the colour under it and leaves the mode
     // (the reference's Sample Color action).

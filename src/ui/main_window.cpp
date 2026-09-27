@@ -361,8 +361,7 @@ void MainWindow::openFileDialog()
 
 void MainWindow::saveDocument()
 {
-    view_->cancelCrop();
-    view_->cancelSampleColor();
+    view_->cancelModes();
     const QString path = document_ ? document_->path() : QString();
     // A legacy .bee file is import-only; a document without a file must
     // be saved as one (the reference's on_action_save).
@@ -374,8 +373,7 @@ void MainWindow::saveDocument()
 
 void MainWindow::saveDocumentAs()
 {
-    view_->cancelCrop();
-    view_->cancelSampleColor();
+    view_->cancelModes();
     const QString path = document_ ? document_->path() : QString();
     const QString startDir =
         path.isEmpty() ? settings::configDir() : QFileInfo(path).absolutePath();
@@ -388,8 +386,7 @@ void MainWindow::saveDocumentAs()
 
 void MainWindow::exportBee()
 {
-    view_->cancelCrop();
-    view_->cancelSampleColor();
+    view_->cancelModes();
     const QString path = document_ ? document_->path() : QString();
     const QString startDir =
         path.isEmpty() ? settings::configDir() : QFileInfo(path).absolutePath();
@@ -439,8 +436,7 @@ bool MainWindow::exportBeeTo(const QString &path)
 
 void MainWindow::exportScene()
 {
-    view_->cancelCrop();
-    view_->cancelSampleColor();
+    view_->cancelModes();
     const QString path = document_ ? document_->path() : QString();
     const QString startDir =
         path.isEmpty() ? settings::configDir() : QFileInfo(path).absolutePath();
@@ -508,8 +504,7 @@ bool MainWindow::exportSceneTo(const QString &path)
 
 void MainWindow::exportImages()
 {
-    view_->cancelCrop();
-    view_->cancelSampleColor();
+    view_->cancelModes();
     const QString path = document_ ? document_->path() : QString();
     const QString startDir =
         path.isEmpty() ? settings::configDir() : QFileInfo(path).absolutePath();
@@ -644,9 +639,7 @@ void MainWindow::applyHistoryStep(bool undo)
 {
     // The reference cancels active modes (crop, sampling) before an
     // undo or redo touches the items they edit.
-    view_->cancelCrop();
-    view_->cancelSampleColor();
-    view_->commitTextEdit();
+    view_->cancelModes();
     const bool changed = undo ? undoStack_.undo() : undoStack_.redo();
     if (!changed)
         return;
@@ -662,8 +655,7 @@ void MainWindow::afterSelectionAction()
 {
     // Scene-wide edits cancel an active crop, like the reference's
     // cancel_active_modes().
-    view_->cancelCrop();
-    view_->cancelSampleColor();
+    view_->cancelModes();
     if (document_)
         document_->setModified(true);
     view_->refreshSceneRect();
@@ -835,8 +827,7 @@ void MainWindow::newScene()
                            "scene?")))
         return;
 
-    view_->cancelCrop();
-    view_->cancelSampleColor();
+    view_->cancelModes();
     document_ = std::make_shared<doc::Document>(doc::Document::create());
     undoStack_.setDocument(document_.get());
     undoStack_.clear();
@@ -853,8 +844,7 @@ void MainWindow::newScene()
 void MainWindow::selectAll()
 {
     // Active modes first, like the reference's select_all_items().
-    view_->cancelCrop();
-    view_->cancelSampleColor();
+    view_->cancelModes();
     for (QGraphicsItem *item : scene_->items())
         item->setSelected(true);
     updateActions();
@@ -862,16 +852,14 @@ void MainWindow::selectAll()
 
 void MainWindow::deselectAll()
 {
-    view_->cancelCrop();
-    view_->cancelSampleColor();
+    view_->cancelModes();
     scene_->clearSelection();
     updateActions();
 }
 
 void MainWindow::deleteSelection()
 {
-    view_->cancelCrop();
-    view_->cancelSampleColor();
+    view_->cancelModes();
     input_->removeSelection();
     updateActions();
 }
@@ -899,8 +887,7 @@ void MainWindow::pasteAtPointer()
 
 void MainWindow::insertImages()
 {
-    view_->cancelCrop();
-    view_->cancelSampleColor();
+    view_->cancelModes();
 
     QStringList patterns;
     const QList<QByteArray> formats = QImageReader::supportedImageFormats();

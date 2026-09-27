@@ -1035,6 +1035,14 @@ void View::cancelCrop()
     finishCropSession(false);
 }
 
+void View::cancelModes()
+{
+    cancelCrop();
+    cancelSampleColor();
+    commitTextEdit();
+    exitMoveWindow();
+}
+
 void View::startTextEdit(SceneItem *item)
 {
     if (!item || !item->isText())
