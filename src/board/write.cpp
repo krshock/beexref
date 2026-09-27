@@ -429,6 +429,22 @@ Result<qint64> scalar(Connection &db, const QString &sql)
     return statement.value().columnInt64(0);
 }
 
+// One scalar from a query with one bound id.
+Result<qint64> scalarForId(Connection &db, const QString &sql, qint64 id)
+{
+    auto statement = db.prepare(sql);
+    if (!statement)
+        return statement.error();
+    if (Status status = statement.value().bind(1, id); !status)
+        return status.error();
+    auto row = statement.value().step();
+    if (!row)
+        return row.error();
+    if (!row.value())
+        return Error{0, QStringLiteral("Verification query returned no row"), db.path()};
+    return statement.value().columnInt64(0);
+}
+
 // Deletes one item row; its blob and floors follow through the foreign
 // keys, which the caller has enabled.
 Status deleteItem(Connection &db, qint64 id)
@@ -487,6 +503,71 @@ Status updateItem(Connection &db, const Record &record)
         return Error{0,
                      QStringLiteral("Cannot update item %1: the row is missing")
                          .arg(record.saveId),
+                     db.path()};
+    }
+    return Status::ok();
+}
+
+// What an update should leave behind, for the post-write check.
+struct UpdateCounts
+{
+    qint64 itemsBefore = 0;
+    qint64 blobsBefore = 0;
+    qint64 itemsAdded = 0;
+    qint64 itemsRemoved = 0;
+    qint64 blobsAdded = 0;
+    qint64 blobsRemoved = 0;
+};
+
+// Checks the file an update is about to commit: the row counts must be
+// exactly what the change set promised, no floor may be orphaned, and the
+// header must still be the one the reader expects. A mismatch fails the
+// transaction, so the file keeps its previous content.
+Status verifyUpdated(Connection &db, const UpdateCounts &counts)
+{
+    const auto items = scalar(db, QStringLiteral("SELECT count(*) FROM items"));
+    if (!items)
+        return items.error();
+    const qint64 expectedItems = counts.itemsBefore + counts.itemsAdded - counts.itemsRemoved;
+    if (items.value() != expectedItems) {
+        return Error{0,
+                     QStringLiteral("Update verification failed: %1 item rows, expected %2")
+                         .arg(items.value())
+                         .arg(expectedItems),
+                     db.path()};
+    }
+
+    const auto blobs = scalar(db, QStringLiteral("SELECT count(*) FROM sqlar"));
+    if (!blobs)
+        return blobs.error();
+    const qint64 expectedBlobs = counts.blobsBefore + counts.blobsAdded - counts.blobsRemoved;
+    if (blobs.value() != expectedBlobs) {
+        return Error{0,
+                     QStringLiteral("Update verification failed: %1 image blobs, expected %2")
+                         .arg(blobs.value())
+                         .arg(expectedBlobs),
+                     db.path()};
+    }
+
+    const auto orphanFloors =
+        scalar(db, QStringLiteral("SELECT count(*) FROM lod WHERE item_id NOT IN (SELECT id FROM "
+                                  "items)"));
+    if (!orphanFloors)
+        return orphanFloors.error();
+    if (orphanFloors.value() != 0) {
+        return Error{0,
+                     QStringLiteral("Update verification failed: %1 orphaned floor rows")
+                         .arg(orphanFloors.value()),
+                     db.path()};
+    }
+
+    const auto version = scalar(db, QStringLiteral("PRAGMA user_version"));
+    if (!version)
+        return version.error();
+    if (version.value() != schema::kUserVersion) {
+        return Error{0,
+                     QStringLiteral("Update verification failed: user_version %1")
+                         .arg(version.value()),
                      db.path()};
     }
     return Status::ok();
@@ -663,6 +744,20 @@ Status update(const QString &path, const QVector<Record> &changed, const QVector
     if (Status status = connection.exec(QStringLiteral("PRAGMA foreign_keys=ON")); !status)
         return status;
 
+    // What the file holds before the transaction, for the post-write
+    // check that runs just before the commit.
+    UpdateCounts counts;
+    {
+        const auto items = scalar(connection, QStringLiteral("SELECT count(*) FROM items"));
+        if (!items)
+            return items.error();
+        counts.itemsBefore = items.value();
+        const auto blobs = scalar(connection, QStringLiteral("SELECT count(*) FROM sqlar"));
+        if (!blobs)
+            return blobs.error();
+        counts.blobsBefore = blobs.value();
+    }
+
     auto transaction = Transaction::begin(connection);
     if (!transaction)
         return transaction.error();
@@ -675,8 +770,14 @@ Status update(const QString &path, const QVector<Record> &changed, const QVector
     };
 
     for (qint64 id : removedIds) {
+        const auto blobs =
+            scalarForId(connection, QStringLiteral("SELECT count(*) FROM sqlar WHERE item_id=?"), id);
+        if (!blobs)
+            return blobs.error();
+        counts.blobsRemoved += blobs.value();
         if (Status status = deleteItem(connection, id); !status)
             return status;
+        counts.itemsRemoved += 1;
         report(++done);
     }
 
@@ -692,6 +793,7 @@ Status update(const QString &path, const QVector<Record> &changed, const QVector
             assignedIds->append(id);
         if (Status status = insertItem(connection, record, id, false); !status)
             return status;
+        counts.itemsAdded += 1;
 
         // Only pixmaps carry a blob; text and other types are just rows.
         if (record.type == QLatin1String("pixmap")) {
@@ -706,6 +808,7 @@ Status update(const QString &path, const QVector<Record> &changed, const QVector
             } else {
                 if (Status status = insertBlob(connection, record, id, pixmap); !status)
                     return status;
+                counts.blobsAdded += 1;
                 if (storeThumbnails) {
                     if (Status status = writeThumbnail(connection, id, record, pixmap); !status)
                         return status;
@@ -714,6 +817,11 @@ Status update(const QString &path, const QVector<Record> &changed, const QVector
         }
         report(++done);
     }
+
+    // The counts must be exactly what the change set promised; a mismatch
+    // rolls the transaction back and the file keeps its content.
+    if (Status status = verifyUpdated(connection, counts); !status)
+        return status;
 
     return transaction.value().commit();
 }

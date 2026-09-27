@@ -2,6 +2,7 @@
 #include <QColor>
 #include <QImage>
 #include <QJsonArray>
+#include <QJsonDocument>
 #include <QTemporaryDir>
 #include <QtTest>
 
@@ -122,6 +123,7 @@ private slots:
     void refusesInPlaceSaveWhenTheFileChanged();
     void updatesTheFileInPlaceWhenPossible();
     void incrementalSaveCarriesAddsAndDeletes();
+    void incrementalAndFullSavesAgree();
 };
 
 void TestDocument::savesAndReopensEveryField()
@@ -907,6 +909,93 @@ void TestDocument::incrementalSaveCarriesAddsAndDeletes()
     // The blobs are intact: the kept image and the new one.
     QCOMPARE(board.blob(*board.itemById(firstId)).value(), makePng(300, 200, Qt::red));
     QCOMPARE(board.blob(*board.itemById(third->id)).value(), makePng(60, 40, Qt::green));
+}
+
+void TestDocument::incrementalAndFullSavesAgree()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString incrementalPath = dir.filePath(QStringLiteral("incremental.beex"));
+    const QString fullPath = dir.filePath(QStringLiteral("full.beex"));
+
+    // Build the same scene twice -- one edited through an in-place update,
+    // one through a complete rewrite -- and compare the files item by item
+    // afterwards.
+    const auto build = [](const QString &path, bool incremental) {
+        doc::Document document = doc::Document::create();
+        const doc::ItemPtr first = pixmapItem(makePng(300, 200, Qt::red));
+        first->uuid = QStringLiteral("u1");
+        const doc::ItemPtr second = pixmapItem(makePng(120, 90, Qt::blue));
+        second->uuid = QStringLiteral("u2");
+        document.addItem(first);
+        document.addItem(second);
+        if (!document.save(path).isOk())
+            return false;
+        document.setPath(path);
+        document.adoptFileSources();
+
+        // The same edits in both: move one, delete one, add one.
+        first->x = 77;
+        first->scale = 0.5;
+        document.noteItemChanged(first);
+        document.removeItem(second);
+        const doc::ItemPtr third = pixmapItem(makePng(60, 40, Qt::green));
+        third->uuid = QStringLiteral("u3");
+        document.addItem(third);
+
+        if (incremental)
+            return document.save(path).isOk();
+
+        // The full path, with the setting off for this one save.
+        const auto setIncremental = [](const char *value) {
+            settings::File file(settings::iniPath());
+            file.load();
+            file.setValue(QStringLiteral("Save"), QStringLiteral("incremental"),
+                          QString::fromLatin1(value));
+            return file.sync();
+        };
+        if (!setIncremental("false"))
+            return false;
+        const bool ok = document.save(path).isOk();
+        if (!setIncremental("true"))
+            return false;
+        return ok;
+    };
+    QVERIFY(build(incrementalPath, true));
+    QVERIFY(build(fullPath, false));
+
+    // Compare keyed by uuid: ids may differ between the two files.
+    const auto collect = [&dir](const QString &path) {
+        QHash<QString, QPair<doc::ItemPtr, QByteArray>> out;
+        auto opened = doc::Document::open(path, dir.filePath(QStringLiteral("cache")));
+        if (!opened)
+            return out;
+        doc::Document document = opened.take();
+        for (const doc::ItemPtr &item : document.items())
+            out.insert(item->uuid, {item, document.blob(*item).value()});
+        return out;
+    };
+    const auto incremental = collect(incrementalPath);
+    const auto full = collect(fullPath);
+    QCOMPARE(incremental.size(), 2);
+    QCOMPARE(full.size(), incremental.size());
+
+    for (auto it = incremental.cbegin(); it != incremental.cend(); ++it) {
+        QVERIFY2(full.contains(it.key()), qPrintable(it.key()));
+        const doc::ItemPtr &a = it.value().first;
+        const doc::ItemPtr &b = full.value(it.key()).first;
+        QCOMPARE(a->x, b->x);
+        QCOMPARE(a->y, b->y);
+        QCOMPARE(a->scale, b->scale);
+        QCOMPARE(a->rotation, b->rotation);
+        QCOMPARE(a->flip, b->flip);
+        QCOMPARE(a->filename, b->filename);
+        QCOMPARE(QJsonDocument(a->data).toJson(QJsonDocument::Compact),
+                 QJsonDocument(b->data).toJson(QJsonDocument::Compact));
+        QCOMPARE(QJsonDocument(a->meta).toJson(QJsonDocument::Compact),
+                 QJsonDocument(b->meta).toJson(QJsonDocument::Compact));
+        QCOMPARE(it.value().second, full.value(it.key()).second);
+    }
 }
 
 QTEST_GUILESS_MAIN(TestDocument)

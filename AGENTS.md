@@ -145,7 +145,10 @@ changelog, both artifacts, checksums, GitHub release); see
   migrated or newer file, the setting off -- writes a complete new file
   atomically. New row ids start above the highest id ever seen
   (`Document::maxSeenId_`), so a freed id is never reused while undo
-  could restore an item that carries it.
+  could restore an item that carries it. `board::update` verifies its own
+  result before committing -- item and blob counts against the change
+  set, no orphaned floors, header intact -- and a mismatch rolls the
+  transaction back, leaving the file as it was.
 - `beexref-boardcheck [--write-back PATH] <board>...` migrates on a copy,
   decodes every blob, checks dimensions and diffs all tables; use it to verify
   writer/reader changes against the other ports.
