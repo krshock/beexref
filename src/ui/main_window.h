@@ -18,6 +18,7 @@ class QCloseEvent;
 class QMenu;
 class QSplitter;
 class QTimer;
+class QToolButton;
 
 namespace cache {
 class SessionCache;
@@ -110,6 +111,9 @@ private:
     void showContextMenu(const QPoint &globalPos);
     // Refreshes the status bar's RAM/levels/items readout.
     void updateStatusBar();
+    // The board-problem report: counts by kind, the full list in the
+    // scrollable details area.
+    void showDamageReport();
     // Change Opacity...: live preview in the dialog,
     // one undo step on OK, nothing on Cancel.
     void changeOpacity();
@@ -175,6 +179,7 @@ private:
     HudPreview *hudPreview_ = nullptr;
     WelcomeOverlay *welcomeOverlay_ = nullptr;
     QTimer *statusTimer_ = nullptr;
+    QToolButton *damageBadge_ = nullptr;
     doc::UndoStack undoStack_;
     std::shared_ptr<cache::SessionCache> sessionCache_;
     std::shared_ptr<doc::Document> document_;

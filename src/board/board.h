@@ -5,6 +5,7 @@
 
 #include <QByteArray>
 #include <QHash>
+#include <QSet>
 #include <QSize>
 #include <QString>
 #include <QVector>
@@ -80,6 +81,11 @@ public:
     // The encoded blob's format, from the sqlar name's extension. Empty
     // when the item has no blob.
     Result<QString> blobFormat(qint64 itemId);
+    // The item ids that have an encoded blob, in one query, so a load
+    // can spot rows whose image is gone.
+    Result<QSet<qint64>> blobIds();
+    // Floor rows whose item is gone; 0 when the file has no lod table.
+    Result<qint64> orphanedFloorCount();
     Result<QHash<qint64, QSize>> originalSizes();
     Result<QHash<qint64, FloorLevel>> floorLevels();
     Result<QHash<QString, qint64>> counts();

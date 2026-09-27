@@ -12,12 +12,20 @@
 namespace doc {
 namespace {
 
-QJsonObject parseJsonObject(const QString &text)
+// An empty column means "no data"; anything else must be a JSON object,
+// so a load can report what it could not read. The caller starts *ok at
+// true and this only ever clears it, so both columns can share one flag.
+QJsonObject parseJsonObject(const QString &text, bool *ok = nullptr)
 {
     if (text.isEmpty())
         return {};
     const QJsonDocument document = QJsonDocument::fromJson(text.toUtf8());
-    return document.isObject() ? document.object() : QJsonObject();
+    if (!document.isObject()) {
+        if (ok)
+            *ok = false;
+        return {};
+    }
+    return document.object();
 }
 
 // Extra save data: images always carry their
@@ -67,6 +75,7 @@ Document::Document(Document &&other) noexcept
     : path_(std::move(other.path_))
     , tempDir_(std::move(other.tempDir_))
     , items_(std::move(other.items_))
+    , damage_(std::move(other.damage_))
     , modified_(other.modified_)
     , board_(std::move(other.board_))
 {
@@ -81,6 +90,7 @@ Document &Document::operator=(Document &&other) noexcept
     path_ = std::move(other.path_);
     tempDir_ = std::move(other.tempDir_);
     items_ = std::move(other.items_);
+    damage_ = std::move(other.damage_);
     modified_ = other.modified_;
     board_ = std::move(other.board_);
     other.modified_ = false;
@@ -100,7 +110,11 @@ board::Result<Document> Document::open(const QString &path, const QString &tempD
         return rows.error();
     const auto sizes = board->originalSizes(); // best-effort, like the Go port
     const auto floors = board->floorLevels();
+    const auto blobIds = board->blobIds(); // best-effort: skip the check if unreadable
 
+    // What the board could not fully account for. The scene still loads;
+    // the entries drive the report, the status badge and the log.
+    QVector<Damage> damage;
     QVector<ItemPtr> items;
     items.reserve(rows.value().size());
     for (qsizetype i = 0; i < rows.value().size(); ++i) {
@@ -117,12 +131,27 @@ board::Result<Document> Document::open(const QString &path, const QString &tempD
         item->scale = row.scale;
         item->rotation = row.rotation;
         item->flip = row.flip == 1 ? 1.0 : -1.0;
-        item->data = parseJsonObject(row.data);
-        item->meta = parseJsonObject(row.meta);
+        bool jsonOk = true;
+        item->data = parseJsonObject(row.data, &jsonOk);
+        item->meta = parseJsonObject(row.meta, &jsonOk);
+        if (!jsonOk) {
+            damage.append({Damage::Kind::BadJson, row.id,
+                           QStringLiteral("item %1: metadata is not a JSON object").arg(row.id)});
+        }
+        if (!qIsFinite(row.x) || !qIsFinite(row.y) || !qIsFinite(row.scale)
+            || !qIsFinite(row.rotation)) {
+            damage.append({Damage::Kind::BadGeometry, row.id,
+                           QStringLiteral("item %1: non-finite position or scale").arg(row.id)});
+        }
 
         if (item->isPixmap()) {
             item->filename = item->data.value(QStringLiteral("filename")).toString();
             item->source = std::make_shared<BoardSource>(board, item->id);
+            if (blobIds.isOk() && !blobIds.value().contains(row.id)) {
+                damage.append(
+                    {Damage::Kind::MissingBlob, row.id,
+                     QStringLiteral("item %1: no image data in the file").arg(row.id)});
+            }
             // The true encoded format comes from the sqlar name, not the
             // thumbnail: a JPEG original may have a PNG floor.
             if (auto format = board->blobFormat(item->id); format.isOk() && !format.value().isEmpty())
@@ -146,17 +175,56 @@ board::Result<Document> Document::open(const QString &path, const QString &tempD
     if (progress)
         progress(static_cast<int>(rows.value().size()), static_cast<int>(rows.value().size()));
 
+    if (const auto orphans = board->orphanedFloorCount(); orphans.isOk() && orphans.value() > 0) {
+        damage.append({Damage::Kind::OrphanedFloor, 0,
+                       QStringLiteral("%1 thumbnail rows have no item").arg(orphans.value())});
+    }
+
+    for (const Damage &entry : damage) {
+        logging::warn(QStringLiteral("Board opened with a problem"),
+                      {{QStringLiteral("file"), path},
+                       {QStringLiteral("kind"), damageLabel(entry.kind)},
+                       {QStringLiteral("item"), entry.itemId},
+                       {QStringLiteral("detail"), entry.detail}});
+    }
+
     Document document;
     document.path_ = path;
     document.tempDir_ = tempDir;
     document.items_ = std::move(items);
     document.board_ = std::move(board);
+    document.damage_ = std::move(damage);
     return document;
 }
 
 Document Document::create()
 {
     return {};
+}
+
+QString damageLabel(Damage::Kind kind)
+{
+    switch (kind) {
+    case Damage::Kind::MissingBlob:
+        return QStringLiteral("missing image data");
+    case Damage::Kind::BadJson:
+        return QStringLiteral("invalid metadata");
+    case Damage::Kind::BadGeometry:
+        return QStringLiteral("invalid geometry");
+    case Damage::Kind::OrphanedFloor:
+        return QStringLiteral("orphaned thumbnail");
+    }
+    return QStringLiteral("problem");
+}
+
+int Document::activeDamageCount() const
+{
+    int count = 0;
+    for (const Damage &entry : damage_) {
+        if (entry.itemId == 0 || itemById(entry.itemId))
+            ++count;
+    }
+    return count;
 }
 
 void Document::addItem(const ItemPtr &item)

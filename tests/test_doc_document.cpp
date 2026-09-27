@@ -9,6 +9,7 @@
 #include <thread>
 
 #include "board/board.h"
+#include "board/write.h"
 #include "doc/document.h"
 #include "doc/item.h"
 #include "doc/source.h"
@@ -24,6 +25,29 @@ QByteArray makePng(int width, int height, const QColor &color)
     buffer.open(QIODevice::WriteOnly);
     image.save(&buffer, "PNG");
     return bytes;
+}
+
+board::Record pixmapRecord(qint64 saveId, const QByteArray &png, const QString &filename)
+{
+    board::Record record;
+    record.saveId = saveId;
+    record.type = QStringLiteral("pixmap");
+    record.dataJson = QStringLiteral("{\"filename\":\"%1\"}").arg(filename);
+    record.metaJson = QStringLiteral("{}");
+    record.uuid = QStringLiteral("uuid-%1").arg(saveId);
+    record.pixmap = png;
+    record.format = QStringLiteral("png");
+    record.filename = filename;
+    return record;
+}
+
+// Runs one statement on a board file, for crafting damage on disk.
+bool execOnBoard(const QString &path, const QString &sql)
+{
+    auto db = board::Connection::open(path, board::Connection::OpenMode::ReadWrite);
+    if (!db.isOk())
+        return false;
+    return db.value().exec(sql).isOk();
 }
 
 doc::ItemPtr pixmapItem(const QByteArray &png)
@@ -56,6 +80,9 @@ private slots:
     void unsavedItemsGetIdsOnSave();
     void saveWritesTheDataDefaults();
     void saveAdoptsTheFileAsSource();
+    void reportsItemDamageWithoutRefusingToOpen();
+    void reportsOrphanedFloors();
+    void activeDamageCountFollowsDeletedItems();
 };
 
 void TestDocument::savesAndReopensEveryField()
@@ -369,6 +396,92 @@ void TestDocument::saveAdoptsTheFileAsSource()
     QVERIFY(dynamic_cast<const doc::BoardSource *>(item->source.get()) != nullptr);
     // The board now serves the very same bytes.
     QCOMPARE(item->source->bytes(), png);
+}
+
+void TestDocument::reportsItemDamageWithoutRefusingToOpen()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString path = dir.filePath(QStringLiteral("damaged.beex"));
+
+    QVector<board::Record> records;
+    records << pixmapRecord(1, makePng(300, 200, Qt::red), QStringLiteral("a.png"));
+    records << pixmapRecord(2, makePng(300, 200, Qt::blue), QStringLiteral("b.png"));
+    records << pixmapRecord(3, makePng(300, 200, Qt::green), QStringLiteral("c.png"));
+    QVERIFY(board::save(path, records).isOk());
+
+    // Break two things on disk: a missing blob and non-JSON metadata.
+    QVERIFY(execOnBoard(path, QStringLiteral("DELETE FROM sqlar WHERE item_id=1")));
+    QVERIFY(execOnBoard(path, QStringLiteral("UPDATE items SET data='not json' WHERE id=2")));
+
+    auto opened = doc::Document::open(path, dir.filePath(QStringLiteral("cache")));
+    QVERIFY(opened.isOk());
+    const doc::Document &document = opened.value();
+
+    // The scene still loads, and the damage is reported per item.
+    QCOMPARE(document.items().size(), 3);
+    QStringList kinds;
+    QStringList details;
+    for (const doc::Damage &entry : document.damage()) {
+        kinds << doc::damageLabel(entry.kind);
+        details << entry.detail;
+    }
+    QVERIFY2(kinds.contains(QStringLiteral("missing image data")), qPrintable(details.join("; ")));
+    QVERIFY2(kinds.contains(QStringLiteral("invalid metadata")), qPrintable(details.join("; ")));
+    QVERIFY2(details.contains(QStringLiteral("item 1: no image data in the file")),
+             qPrintable(details.join("; ")));
+    QVERIFY(document.activeDamageCount() >= 2);
+}
+
+void TestDocument::reportsOrphanedFloors()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString path = dir.filePath(QStringLiteral("orphan.beex"));
+
+    QVector<board::Record> records;
+    records << pixmapRecord(1, makePng(300, 200, Qt::red), QStringLiteral("a.png"));
+    records << pixmapRecord(2, makePng(300, 200, Qt::blue), QStringLiteral("b.png"));
+    QVERIFY(board::save(path, records).isOk());
+
+    // The item row goes, its floor stays behind.
+    QVERIFY(execOnBoard(path, QStringLiteral("DELETE FROM items WHERE id=2")));
+
+    auto opened = doc::Document::open(path, dir.filePath(QStringLiteral("cache")));
+    QVERIFY(opened.isOk());
+    const doc::Document &document = opened.value();
+    QCOMPARE(document.items().size(), 1);
+
+    QStringList kinds;
+    for (const doc::Damage &entry : document.damage())
+        kinds << doc::damageLabel(entry.kind);
+    QVERIFY2(kinds.contains(QStringLiteral("orphaned thumbnail")), qPrintable(kinds.join("; ")));
+    // Board-level damage counts, and has no item to delete.
+    QCOMPARE(document.activeDamageCount(), 1);
+}
+
+void TestDocument::activeDamageCountFollowsDeletedItems()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString path = dir.filePath(QStringLiteral("count.beex"));
+
+    QVERIFY(board::save(path, {pixmapRecord(1, makePng(300, 200, Qt::red), QStringLiteral("a.png"))})
+                .isOk());
+    QVERIFY(execOnBoard(path, QStringLiteral("DELETE FROM sqlar WHERE item_id=1")));
+
+    auto opened = doc::Document::open(path, dir.filePath(QStringLiteral("cache")));
+    QVERIFY(opened.isOk());
+    doc::Document document = opened.take();
+    const int before = document.activeDamageCount();
+    QVERIFY(before >= 1);
+
+    // Deleting the broken item drops its damage, so the badge count the
+    // status bar shows goes down with it.
+    const doc::ItemPtr broken = document.itemById(1);
+    QVERIFY(broken);
+    document.removeItem(broken);
+    QCOMPARE(document.activeDamageCount(), before - 1);
 }
 
 QTEST_GUILESS_MAIN(TestDocument)

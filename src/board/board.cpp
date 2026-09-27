@@ -272,6 +272,39 @@ Result<QString> Board::blobFormat(qint64 itemId)
     return QFileInfo(name).suffix().toLower();
 }
 
+Result<QSet<qint64>> Board::blobIds()
+{
+    QSet<qint64> ids;
+    auto statement = db_.prepare(QStringLiteral("SELECT item_id FROM sqlar"));
+    if (!statement)
+        return statement.error();
+    while (true) {
+        auto row = statement.value().step();
+        if (!row)
+            return row.error();
+        if (!row.value())
+            break;
+        ids.insert(statement.value().columnInt64(0));
+    }
+    return ids;
+}
+
+Result<qint64> Board::orphanedFloorCount()
+{
+    if (!columns_.lod)
+        return qint64(0);
+    auto statement = db_.prepare(
+        QStringLiteral("SELECT count(*) FROM lod WHERE item_id NOT IN (SELECT id FROM items)"));
+    if (!statement)
+        return statement.error();
+    auto row = statement.value().step();
+    if (!row)
+        return row.error();
+    if (!row.value())
+        return Error{0, QStringLiteral("Floor count returned no row"), path_};
+    return statement.value().columnInt64(0);
+}
+
 Result<QHash<qint64, QSize>> Board::originalSizes()
 {
     QHash<qint64, QSize> sizes;

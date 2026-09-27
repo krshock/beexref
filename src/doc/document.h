@@ -13,6 +13,26 @@
 
 namespace doc {
 
+// One thing a board could not fully account for when it was opened. The
+// scene still loads; the entry lets the UI say what is missing, and
+// keeps the original file protected on save.
+struct Damage
+{
+    enum class Kind {
+        MissingBlob,   // a pixmap row without its encoded image
+        BadJson,       // data/meta that is not a JSON object
+        BadGeometry,   // non-finite position, scale or rotation
+        OrphanedFloor, // a floor row whose item is gone (board-level)
+    };
+
+    Kind kind = Kind::MissingBlob;
+    qint64 itemId = 0; // 0 for board-level entries
+    QString detail;    // one short line for the report and the log
+};
+
+// User-facing label for a kind, shared by the log and the report.
+QString damageLabel(Damage::Kind kind);
+
 // One open board: its items, the read-only board connection, and the
 // migrated temp copy that must be removed on close.
 //
@@ -54,6 +74,14 @@ public:
 
     QVector<ItemPtr> &items() { return items_; }
     const QVector<ItemPtr> &items() const { return items_; }
+
+    // Everything the board could not fully account for at load; empty
+    // for a healthy board. The scene loads with these either way.
+    const QVector<Damage> &damage() const { return damage_; }
+    // Damage entries that still refer to an item in the document
+    // (board-level entries always count), so deleting a broken item
+    // lowers the count the status bar shows.
+    int activeDamageCount() const;
 
     // Items whose state changed since the UI last synced; commands call
     // noteItemChanged(), so a canvas refresh only reapplies the items
@@ -100,6 +128,7 @@ private:
     QString path_;
     QString tempDir_;
     QVector<ItemPtr> items_;
+    QVector<Damage> damage_;
     QSet<const Item *> dirty_;
     bool modified_ = false;
     std::shared_ptr<board::Board> board_;

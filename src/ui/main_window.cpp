@@ -50,9 +50,11 @@
 #include <QMenuBar>
 #include <QMessageBox>
 #include <QMimeData>
+#include <QMap>
 #include <QProgressDialog>
 #include <QStatusBar>
 #include <QTimer>
+#include <QToolButton>
 #include <QToolTip>
 
 namespace ui {
@@ -260,6 +262,19 @@ MainWindow::MainWindow(bool cacheDisabled, QWidget *parent)
     statusTimer_ = new QTimer(this);
     connect(statusTimer_, &QTimer::timeout, this, &MainWindow::updateStatusBar);
     statusTimer_->start(2000);
+
+    // The health badge: hidden while the scene has no problems, and a
+    // shortcut back to the report when it has. Its count follows the
+    // problems that still refer to an item, so deleting a broken item
+    // lowers it. Created before the first readout, which touches it.
+    damageBadge_ = new QToolButton(this);
+    damageBadge_->setObjectName(QStringLiteral("damageBadge"));
+    damageBadge_->setAutoRaise(true);
+    damageBadge_->setToolButtonStyle(Qt::ToolButtonTextOnly);
+    damageBadge_->setCursor(Qt::PointingHandCursor);
+    connect(damageBadge_, &QToolButton::clicked, this, &MainWindow::showDamageReport);
+    statusBar()->addPermanentWidget(damageBadge_);
+    damageBadge_->hide();
     updateStatusBar();
 
     connect(view_, &View::colorSampled, this, &MainWindow::copySampledColor);
@@ -344,6 +359,11 @@ bool MainWindow::openBoard(const QString &path)
     rebuildRecentMenu();
     updateActions();
     updateTitle();
+    updateStatusBar();
+    // A board with problems still opens; say what is missing once, and
+    // keep the badge as the way back to the report.
+    if (document_ && !document_->damage().isEmpty())
+        showDamageReport();
     logging::info(QStringLiteral("Board opened"),
                   {{QStringLiteral("file"), path},
                    {QStringLiteral("items"), document_->items().size()}});
@@ -1421,6 +1441,53 @@ void MainWindow::updateStatusBar()
                                  .arg(QString::number(ramMB, 'f', 0),
                                       QString::number(stats.levelMB, 'f', 0),
                                       QString::number(stats.items)));
+
+    const int problems = document_ ? document_->activeDamageCount() : 0;
+    if (problems > 0) {
+        damageBadge_->setText(QStringLiteral("recovered · %1").arg(problems));
+        damageBadge_->setToolTip(QStringLiteral("This board was opened with %1 problems; the "
+                                                "file has not been modified. Click for the "
+                                                "list.")
+                                     .arg(problems));
+        damageBadge_->show();
+    } else {
+        damageBadge_->hide();
+    }
+}
+
+void MainWindow::showDamageReport()
+{
+    if (!document_)
+        return;
+    const QVector<doc::Damage> &damage = document_->damage();
+    if (damage.isEmpty())
+        return;
+
+    // Counts by kind first, so the dialog never grows with the number of
+    // problems; the full list lives in the scrollable details area (and
+    // in the log).
+    QMap<QString, int> counts;
+    for (const doc::Damage &entry : damage)
+        ++counts[doc::damageLabel(entry.kind)];
+    QStringList kinds;
+    for (auto it = counts.cbegin(); it != counts.cend(); ++it)
+        kinds << QStringLiteral("%1 %2").arg(it.value()).arg(it.key());
+
+    QStringList details;
+    details.reserve(damage.size());
+    for (const doc::Damage &entry : damage)
+        details << entry.detail;
+
+    QMessageBox box(this);
+    box.setIcon(QMessageBox::Warning);
+    box.setWindowTitle(QStringLiteral("Board opened with problems"));
+    box.setText(QStringLiteral("This board was opened with %1 problems: %2.")
+                    .arg(damage.size())
+                    .arg(kinds.join(QStringLiteral(", "))));
+    box.setInformativeText(QStringLiteral("The file has not been modified. The full list is in "
+                                          "the details and the log."));
+    box.setDetailedText(details.join(QLatin1Char('\n')));
+    box.exec();
 }
 
 } // namespace ui

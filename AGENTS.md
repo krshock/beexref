@@ -119,6 +119,11 @@ changelog, both artifacts, checksums, GitHub release); see
   the complete temp file and reports its path. On Windows the replace is
   retried for about 1.5 s on sharing/lock/access errors first, for
   antivirus, the indexer and sync clients.
+- A board with item-level problems still opens: `Document::damage()` lists
+  them (missing blobs, non-JSON metadata, non-finite geometry, orphaned
+  floors), the open dialog summarises by kind with the full list in the
+  scrollable details area, and the status bar keeps a `recovered · N`
+  badge counting the entries whose item is still in the scene.
 - `beexref-boardcheck [--write-back PATH] <board>...` migrates on a copy,
   decodes every blob, checks dimensions and diffs all tables; use it to verify
   writer/reader changes against the other ports.

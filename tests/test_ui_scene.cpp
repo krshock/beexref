@@ -17,6 +17,7 @@
 #include <QFrame>
 #include <QRegion>
 #include <QListWidget>
+#include <QMessageBox>
 #include <QPushButton>
 #include <QMouseEvent>
 #include <QScrollBar>
@@ -32,6 +33,7 @@
 #include <QTableWidget>
 #include <QTemporaryDir>
 #include <QTextEdit>
+#include <QToolButton>
 #include <QtTest>
 #include <QWheelEvent>
 
@@ -40,6 +42,7 @@
 #include "doc/document.h"
 #include "board/schema.h"
 #include "board/sqlite.h"
+#include "board/write.h"
 #include "doc/item.h"
 #include "doc/source.h"
 #include "doc/undo.h"
@@ -245,6 +248,7 @@ private slots:
     void unknownItemTypeRendersAsUnsupported();
     void syncDocumentAppliesOnlyNotedChanges();
     void menuLayoutCoversEveryAction();
+    void damagedBoardShowsTheBadgeAndReport();
     void infoDialogsShowTheExpectedContent();
     void metadataPanelEditsAndCommits();
     void hudPreviewShowsTheStyledPanel();
@@ -3583,6 +3587,58 @@ void TestUiScene::welcomeOverlayListsRecentFiles()
                       files->visualItemRect(files->item(0)).center());
     QCOMPARE(spy.count(), 1);
     QCOMPARE(spy.first().first().toString(), recent);
+
+    settings::setSettingsDir(QString());
+}
+
+void TestUiScene::damagedBoardShowsTheBadgeAndReport()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    settings::setSettingsDir(dir.path());
+
+    // A one-image board whose blob is removed on disk.
+    const QString path = dir.filePath(QStringLiteral("damaged.beex"));
+    board::Record record;
+    record.saveId = 1;
+    record.type = QStringLiteral("pixmap");
+    record.dataJson = QStringLiteral("{\"filename\":\"a.png\"}");
+    record.metaJson = QStringLiteral("{}");
+    record.uuid = QStringLiteral("uuid-1");
+    record.pixmap = makePng(300, 200, Qt::red);
+    record.format = QStringLiteral("png");
+    QVERIFY(board::save(path, {record}).isOk());
+    {
+        auto db = board::Connection::open(path, board::Connection::OpenMode::ReadWrite);
+        QVERIFY(db.isOk());
+        QVERIFY(db.value().exec(QStringLiteral("DELETE FROM sqlar WHERE item_id=1")).isOk());
+    }
+
+    ui::MainWindow window;
+
+    // The report is modal; a zero timer closes it from inside and records
+    // the summary, which leads with counts rather than a list.
+    QString summary;
+    bool sawDialog = false;
+    QTimer::singleShot(0, [&]() {
+        auto *box = qobject_cast<QMessageBox *>(QApplication::activeModalWidget());
+        if (!box)
+            return;
+        sawDialog = true;
+        summary = box->text();
+        box->accept();
+    });
+
+    QVERIFY(window.openBoard(path));
+    QVERIFY(sawDialog);
+    QVERIFY2(summary.contains(QStringLiteral("problems")), qPrintable(summary));
+    QVERIFY2(summary.contains(QStringLiteral("missing image data")), qPrintable(summary));
+
+    // The badge stays as the way back to the report.
+    auto *badge = window.findChild<QToolButton *>(QStringLiteral("damageBadge"));
+    QVERIFY(badge);
+    QVERIFY(!badge->isHidden());
+    QCOMPARE(badge->text(), QStringLiteral("recovered · 1"));
 
     settings::setSettingsDir(QString());
 }
