@@ -13,7 +13,7 @@ namespace ui {
 class ColorSwatch;
 class View;
 
-// The reference's Sample Color mode: a crosshair and a swatch follow the
+// The Sample Color mode: a crosshair and a swatch follow the
 // pointer; a press reports the colour under it and ends the mode.
 class ColorSamplerTool : public Tool
 {

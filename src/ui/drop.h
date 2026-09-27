@@ -9,7 +9,7 @@ class QMimeData;
 
 namespace ui {
 
-// Drop classification, ported from the reference's drop package: an
+// Drop classification: an
 // ordered list of extractors (standard formats, Chromium custom
 // payload, WebKitGTK custom payload). Extractors read mime data only.
 enum class DropKind {
@@ -32,7 +32,7 @@ inline constexpr char kWebKitEmptyMessage[] =
     "Drop contains no image data - try the image on its own page or another browser";
 
 // Parses a raw text/uri-list payload, skipping comments and blank
-// lines. The reference falls back to this because some sources
+// lines. The app falls back to this because some sources
 // (WebKitGTK on X11) deliver the data while Qt's parser comes up empty.
 QList<QUrl> parseUriList(const QByteArray &data);
 

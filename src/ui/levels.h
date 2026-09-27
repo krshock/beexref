@@ -6,7 +6,7 @@
 
 namespace ui {
 
-// LOD configuration, mirroring the reference's lodSettings.
+// LOD configuration, mirroring the LOD settings.
 struct LodSettings
 {
     QString method = QStringLiteral("fixed"); // single | fixed | ram_budget
@@ -26,13 +26,13 @@ struct LodSettings
     int cacheSettlePercent = 30;
 };
 
-// Fills unset fields with the reference defaults.
+// Fills unset fields with the defaults.
 LodSettings normalized(const LodSettings &settings);
 
 // One LOD method, as data: the Items/lod_method settings value, whether
 // it builds the fraction ladder, and whether its budget comes from
 // Items/lod_ram_budget_mb. An id that is not registered behaves like
-// "single", as in the reference.
+// "single".
 struct LevelMethod
 {
     QString id;
@@ -59,8 +59,7 @@ struct Level
 };
 
 // The wanted level covers the item's on-screen size with a little
-// headroom, and the visibility test extends the viewport on each side,
-// as the reference manager does.
+// headroom, and the visibility test extends the viewport on each side.
 // The consumption band of a request: the level loader services bands in
 // this order (highest first) and FIFO inside a band. Bands are the
 // loader's contract; which hint put a request there is the manager's

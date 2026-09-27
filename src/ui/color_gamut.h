@@ -15,7 +15,7 @@ class QSlider;
 
 namespace ui {
 
-// The reference's gamut plot: a black disc with one dot per
+// The gamut plot: a black disc with one dot per
 // hue/saturation bucket whose count reaches the threshold. The wheel is
 // rendered once per change and only scaled when painting.
 class GamutPlot : public QWidget
@@ -36,7 +36,7 @@ protected:
     QSize minimumSizeHint() const override { return QSize(200, 200); }
 
 private:
-    // The reference's wheel radius in pixels.
+    // The wheel radius in pixels.
     static constexpr int kRadius = 250;
 
     // One bucket's dot, drawn once the count reaches the threshold.
@@ -59,8 +59,7 @@ private:
 };
 
 // Decodes the item's source (or the given fallback level when there is
-// none) and counts its gamut off the GUI thread, like the reference's
-// painter thread.
+// none) and counts its gamut off the GUI thread.
 class GamutThread : public QThread
 {
     Q_OBJECT
@@ -83,7 +82,7 @@ private:
 };
 
 // The Images menu's "Show Color Gamut": the wheel plus a threshold
-// slider, as the reference's GamutDialog.
+// slider, as in the gamut dialog.
 class GamutDialog : public QDialog
 {
     Q_OBJECT

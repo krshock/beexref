@@ -89,8 +89,7 @@ protected:
 
 private:
     void openFileDialog();
-    // Save (Ctrl+S) and Save As (Ctrl+Shift+S), mirroring the
-    // reference's on_action_save / on_action_save_as.
+    // Save (Ctrl+S) and Save As (Ctrl+Shift+S).
     void saveDocument();
     void saveDocumentAs();
     // File ▸ Export ▸ Export BeeRef File (.bee): the legacy upstream
@@ -111,7 +110,7 @@ private:
     void showContextMenu(const QPoint &globalPos);
     // Refreshes the status bar's RAM/levels/items readout.
     void updateStatusBar();
-    // The reference's Change Opacity...: live preview in the dialog,
+    // Change Opacity...: live preview in the dialog,
     // one undo step on OK, nothing on Cancel.
     void changeOpacity();
     // Builds the action registry and the menus of actions/menu_structure.
@@ -119,7 +118,7 @@ private:
     void buildMenus();
     // Enables and checks every action for the current state.
     void updateActions();
-    // Copies a sampled colour and says so (the reference's HUD toast).
+    // Copies a sampled colour and says so (HUD toast).
     void copySampledColor(const QColor &color);
     // Opens the gamut wheel for the single selected image.
     void showColorGamut();
@@ -154,13 +153,13 @@ private:
     void lowerSelectionToBottom();
     void pasteAtPointer();
     // Asks before dropping unsaved changes, honouring
-    // Save/confirm_close_unsaved like the reference.
+    // Save/confirm_close_unsaved.
     bool confirmDiscardChanges(const QString &message);
     // Items and Arrange menu handlers (Items/* settings are read at use
-    // time, like the reference's valueOrDefault calls).
+    // time).
     void normalizeSelection(int mode); // 0 height, 1 width, 2 size
     void arrangeSelection(int mode);   // 0 horizontal, 1 vertical, 2 square
-    // The reference's arrange_default: the Items/arrange_default
+    // Arrange default: the Items/arrange_default
     // setting picks between the three arrangements above.
     void arrangeSelectionDefault();
 

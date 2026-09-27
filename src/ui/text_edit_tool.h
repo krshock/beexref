@@ -13,7 +13,7 @@ namespace ui {
 class SceneItem;
 class View;
 
-// The reference's in-place text editing: a QTextEdit overlay over the
+// In-place text editing: a QTextEdit overlay over the
 // text item, with the item hiding its own text while the editor is open.
 // Enter or a click elsewhere commits as one undo step, Esc cancels,
 // Shift+Enter inserts a newline. The editor is a widget, so the canvas

@@ -83,7 +83,7 @@ bool MoveWindowTool::mousePress(QMouseEvent *event)
     Q_UNUSED(event);
     if (!active_)
         return false;
-    // Any press ends the mode, like the reference's movewin handling.
+    // Any press ends the mode.
     exit();
     return true;
 }
@@ -93,8 +93,7 @@ bool MoveWindowTool::mouseRelease(QMouseEvent *event)
     Q_UNUSED(event);
     if (!active_)
         return false;
-    // A drag ends when its button comes up, like the reference's
-    // movewin handling.
+    // A drag ends when its button comes up.
     exit();
     return true;
 }

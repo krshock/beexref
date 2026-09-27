@@ -11,7 +11,7 @@ class QWidget;
 
 namespace ui {
 
-// Presentation of one settings field: the reference's per-field widget
+// Presentation of one settings field: the per-field widget
 // classes (titles, help texts, options), driven from one table.
 struct FieldUi
 {
@@ -40,7 +40,7 @@ struct FieldUi
 };
 
 // One group box: reads and writes its field, and marks the title when
-// the value differs from the default, like the reference.
+// the value differs from the default.
 class SettingsGroup : public QGroupBox
 {
     Q_OBJECT
@@ -67,7 +67,7 @@ private:
     bool ignore_ = false;
 };
 
-// The reference's SettingsDialog: Miscellaneous, RAM and Images & Items
+// The settings dialog: Miscellaneous, RAM and Images & Items
 // tabs over the FIELDS table. Changes are written and reported
 // immediately; Restore Defaults asks first.
 class SettingsDialog : public QDialog
@@ -78,7 +78,7 @@ public:
     explicit SettingsDialog(QWidget *parent = nullptr);
 
     // Restores every field to its default value (no confirmation; the
-    // button asks first, the reference's event bus does the refresh).
+    // button asks first, the settings event bus does the refresh).
     void restoreDefaults();
 
 signals:

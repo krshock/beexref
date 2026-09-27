@@ -7,7 +7,7 @@ class QUrl;
 
 namespace util {
 
-// Human-readable size, matching the reference's format_size: 1024
+// Human-readable size (1024-based):
 // base, whole bytes below 1 KB, one decimal above.
 QString formatSize(qint64 bytes);
 

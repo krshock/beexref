@@ -39,7 +39,7 @@ QHash<GamutKey, int> gamutHistogram(const QImage &image)
             const int green = color.green();
             const int blue = color.blue();
             // Only consider pixels that are not close to transparent,
-            // white or black, like the reference.
+            // white or black.
             if (std::min({red, green, blue}) >= 250 || std::max({red, green, blue}) <= 5)
                 continue;
 

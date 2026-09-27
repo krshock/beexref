@@ -196,7 +196,7 @@ void View::recalculateSceneRect()
     refreshSelectionOverlay();
     // The scrollable area is the items' bounding box expanded by one
     // viewport on each side, so the canvas always offers room to pan
-    // (the reference's "impression of an infinite canvas"). Clamping
+    // (the "impression of an infinite canvas"). Clamping
     // the scene rect to the items instead makes panning impossible
     // when everything fits.
     if (!boardScene_)
@@ -319,7 +319,7 @@ void View::fitRect(const QRectF &rect)
     fitInView(rect, Qt::KeepAspectRatio);
     recalculateSceneRect();
     // Fitting a second time is more reliable: a changed scene rect can
-    // mess up the first fitting, as the reference notes.
+    // mess up the first fitting, as the app notes.
     fitInView(rect, Qt::KeepAspectRatio);
     updateViewState();
     lod_->evaluateNow();
@@ -406,7 +406,7 @@ void View::mouseDoubleClickEvent(QMouseEvent *event)
         return;
     }
 
-    // The reference cancels active modes first: a text item enters edit
+    // The app cancels active modes first: a text item enters edit
     // mode, anything else is selected and fitted.
     cancelCrop();
     if (SceneItem *item = itemAtPoint(event->position().toPoint())) {
@@ -447,7 +447,7 @@ void View::wheelEvent(QWheelEvent *event)
 
     // The configured wheel bindings decide what the wheel does; the
     // defaults are zoom (bare), pan_horizontal (Shift, which scrolls the
-    // vertical bar, as the reference names it) and pan_vertical
+    // vertical bar, as the app names it) and pan_vertical
     // (Shift+Ctrl). Inverted bindings flip the delta.
     const controls::Bindings::Match binding = bindings_.wheelAction(event->modifiers());
     int step = delta;
@@ -476,14 +476,14 @@ void View::mousePressEvent(QMouseEvent *event)
     lod_->evaluateNow();
 
     // The active tool owns the press: move-window ends, colour sampling
-    // samples and ends. The reference checks its main controls and
+    // samples and ends. The app checks its main controls and
     // active modes before the mouse bindings.
     if (tools_->mousePress(event)) {
         event->accept();
         return;
     }
 
-    // The reference checks the configured mouse bindings before the
+    // The app checks the configured mouse bindings before the
     // item interactions: pan, drag-zoom and move-window.
     const controls::Bindings::Match binding =
         bindings_.mouseAction(event->button(), event->modifiers());
@@ -644,7 +644,7 @@ void View::mouseMoveEvent(QMouseEvent *event)
         // The overlay moves with the item, so repaint where it was.
         // The scrollable rect is deliberately only recomputed when the
         // gesture ends: changing the scene rect makes Qt repaint the
-        // whole viewport, and the reference's per-change refresh would
+        // whole viewport, and the per-change refresh would
         // do that on every event.
         refreshSelectionOverlay();
         event->accept();
@@ -661,7 +661,7 @@ void View::mouseReleaseEvent(QMouseEvent *event)
     restoreSmoothing();
 
     // The active tool owns the release: a move-window drag ends here,
-    // like the reference's main controls.
+    // like the main controls.
     if (tools_->mouseRelease(event)) {
         event->accept();
         return;
@@ -765,7 +765,7 @@ bool View::beginRotateGesture(const QPointF &scenePos)
     gestureAnchor_ = gestureBounds_.center();
     gesturePress_ = scenePos;
     gestureStartAngle_ = selection::rotationAngle(gestureAnchor_, scenePos);
-    // The reference snaps against the selection owner's rotation, which
+    // The app snaps against the selection owner's rotation, which
     // is the item itself for a single selection and zero otherwise.
     gestureSnapBase_ = items.size() == 1 ? items.first()->item()->rotation : 0.0;
     gestureEntries_.clear();
@@ -1020,7 +1020,7 @@ QColor View::sampledColor() const
 void View::keyPressEvent(QKeyEvent *event)
 {
     // Any key ends the active tool (move-window, colour sampling), like
-    // the reference's main controls.
+    // the main controls.
     if (tools_->keyPress(event)) {
         event->accept();
         return;

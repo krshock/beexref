@@ -25,7 +25,7 @@ Decoded decodeOriented(const QByteArray &bytes)
         return decoded;
 
     QImageReader reader(&buffer);
-    // Capture the stored size before autoTransform: the reference keeps
+    // Capture the stored size before autoTransform: the app keeps
     // the original bytes only when orientation did not change it.
     decoded.rawSize = reader.size();
     decoded.format = QString::fromLatin1(reader.format());

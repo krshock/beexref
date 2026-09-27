@@ -6,7 +6,7 @@ namespace ui {
 
 class View;
 
-// The reference's runtime HUD style preview (Ctrl+Shift+H, no menu
+// The runtime HUD style preview (Ctrl+Shift+H, no menu
 // entry): a glass panel at the top right of the canvas with sample
 // buttons and the semantic colour tokens.
 class HudPreview : public hud::HudPanel

@@ -56,7 +56,7 @@ public:
     Connection &operator=(Connection &&other) noexcept;
 
     // Opens path; URIs ("file:...?mode=ro") are honored. Sets
-    // busy_timeout=5000, as the Python reference does.
+    // busy_timeout=5000.
     static Result<Connection> open(const QString &path, OpenMode mode);
 
     bool isOpen() const;

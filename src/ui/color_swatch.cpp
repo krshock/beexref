@@ -34,7 +34,7 @@ void ColorSwatch::paintEvent(QPaintEvent *event)
     Q_UNUSED(event);
     QPainter painter(this);
     // Black frame outside, white frame inside, then the sampled colour
-    // (transparent when there is none, like the reference's NONE_COLOR).
+    // (transparent when there is none, like the no-colour sentinel).
     painter.fillRect(rect(), QColor(0, 0, 0));
     painter.fillRect(rect().adjusted(kBorder, kBorder, -kBorder, -kBorder), QColor(255, 255, 255));
     const QRect inner = rect().adjusted(2 * kBorder, 2 * kBorder, -2 * kBorder, -2 * kBorder);
@@ -42,9 +42,8 @@ void ColorSwatch::paintEvent(QPaintEvent *event)
         painter.fillRect(inner, color_);
         return;
     }
-    // No sampled colour: the patch is a hole, like the reference's
-    // NONE_COLOR (a plain transparent fill would leave the white
-    // border showing).
+    // No sampled colour: the patch is a hole (a plain transparent fill
+    // would leave the white border showing).
     painter.setCompositionMode(QPainter::CompositionMode_Source);
     painter.fillRect(inner, Qt::transparent);
 }

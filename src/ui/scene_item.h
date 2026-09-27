@@ -52,7 +52,7 @@ public:
     bool textEditing() const { return textEditing_; }
     void setTextEditing(bool editing);
 
-    // Crop mode (the reference's CropEditor): the item shows the whole
+    // Crop mode (the crop editor): the item shows the whole
     // image with the editable rectangle on top; the model is untouched
     // until commitCrop().
     bool cropMode() const { return cropMode_; }
@@ -67,8 +67,7 @@ public:
 
     // The colour of the displayed pixel under a scene position, or an
     // invalid colour when there is none (outside the item, no level
-    // loaded, or a fully transparent pixel), like the reference's
-    // sample_color_at.
+    // loaded, or a fully transparent pixel).
     QColor sampleColorAt(const QPointF &scenePos) const;
 
     const QImage &level() const { return level_; }

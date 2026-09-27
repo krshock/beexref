@@ -49,7 +49,7 @@ QString exportFilename(const QString &filename, const QString &format, qint64 sa
 }
 
 // Decodes data scaled to size, halving repeatedly first so the
-// bilinear step never exceeds a 2x ratio, as the reference does.
+// bilinear step never exceeds a 2x ratio.
 QImage decodeScaled(const QByteArray &data, const QSize &size)
 {
     QBuffer buffer;
@@ -75,7 +75,7 @@ QImage decodeScaled(const QByteArray &data, const QSize &size)
     return image;
 }
 
-// Matches the reference's encode_thumbnail: the smaller of WebP
+// Thumbnail rule: the smaller of WebP
 // (quality 80) and PNG, or nothing when the image is small enough, is
 // unreadable, or the thumbnail would not be smaller than the original.
 std::optional<Thumbnail> encodeThumbnail(const QByteArray &imageData)

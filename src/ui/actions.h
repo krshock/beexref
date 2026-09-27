@@ -12,7 +12,7 @@ class QMenu;
 
 namespace ui {
 
-// The reference's action groups: which state enables an action.
+// The action groups: which state enables an action.
 enum class ActionGroup {
     Always,
     ItemsInScene,
@@ -32,9 +32,9 @@ struct ActionState
     bool canRedo = false;
 };
 
-// The reference's action list: one registry per window, with the action
+// The action list: one registry per window, with the action
 // ids of actions/actions.py, so menus, shortcuts (configurable later,
-// like the reference's KeyboardSettings) and state groups all come from
+// like the keyboard settings editor) and state groups all come from
 // one place.
 class ActionRegistry : public QObject
 {
@@ -57,10 +57,10 @@ public:
     QStringList shortcuts(const QString &id) const;
     void setShortcuts(const QString &id, const QStringList &shortcuts);
     // Sets the action's shortcuts and records them as the defaults
-    // (the reference has actions with two, e.g. Help = F1, Ctrl+H).
+    // (the app has actions with two, e.g. Help = F1, Ctrl+H).
     void setDefaultShortcuts(const QString &id, const QStringList &shortcuts);
 
-    // Appends one registered action to a menu, in the reference's order.
+    // Appends one registered action to a menu, in registration order.
     void append(QMenu *menu, const QString &id);
     void appendSeparator(QMenu *menu);
 

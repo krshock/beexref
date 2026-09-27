@@ -17,8 +17,7 @@ ColorSamplerTool::ColorSamplerTool(View *view)
 
 void ColorSamplerTool::start()
 {
-    // Only one tool runs at a time, like the reference's
-    // cancel_active_modes().
+    // Only one tool runs at a time.
     view_->cancelModes();
     active_ = true;
     view_->viewport()->setCursor(Qt::CrossCursor);
@@ -60,7 +59,7 @@ bool ColorSamplerTool::mousePress(QMouseEvent *event)
                 view_->reportColorSampled(color);
         }
     }
-    // Any button leaves the mode, like the reference.
+    // Any button leaves the mode.
     cancel();
     return true;
 }
@@ -89,8 +88,7 @@ void ColorSamplerTool::updateSwatch(const QPoint &viewportPos)
     QColor color;
     if (SceneItem *item = view_->itemAtPoint(viewportPos))
         color = item->sampleColorAt(view_->mapToScene(viewportPos));
-    // Without a colour the swatch stays visible but transparent, like
-    // the reference's NONE_COLOR.
+    // Without a colour the swatch stays visible but transparent.
     swatch_->setColor(color);
     swatch_->moveNear(viewportPos);
     swatch_->show();

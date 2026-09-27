@@ -21,14 +21,14 @@ QString filenameOf(const doc::Item &item)
     return item.data.value(QStringLiteral("filename")).toString();
 }
 
-// The item's scene bounding box, which is what the reference arranges
+// The item's scene bounding box, which is what the app arranges
 // by (rotation and crops included).
 QRectF boundsOf(const SceneItem *view)
 {
     return view->sceneBoundingRect();
 }
 
-// The reference's item.center: the centre of the visible rectangle, in
+// The item centre: the centre of the visible rectangle, in
 // scene coordinates. Used as the anchor for normalizing scales.
 QPointF centerOf(const SceneItem *view)
 {
@@ -111,7 +111,7 @@ void normalize(const Scene &scene, doc::UndoStack &stack, Normalize mode)
         values.append(normalizeValue(boundsOf(view), mode));
 
     // A degenerate item (a zero-size crop, say) has no meaningful
-    // factor; the reference divides by zero here, we simply do nothing.
+    // factor; the app divides by zero here, we simply do nothing.
     if (std::any_of(values.cbegin(), values.cend(), [](double value) { return value <= 0.0; }))
         return;
 

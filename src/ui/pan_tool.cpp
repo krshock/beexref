@@ -31,7 +31,7 @@ bool PanTool::mouseMove(QMouseEvent *event)
     if (!active_)
         return false;
     const QPoint position = event->position().toPoint();
-    // Content follows the cursor: the reference pans by
+    // Content follows the cursor: the app pans by
     // (start - current), which is the negated scrollbar delta.
     view_->panStep(start_ - position);
     start_ = position;
@@ -43,8 +43,7 @@ bool PanTool::mouseRelease(QMouseEvent *event)
     Q_UNUSED(event);
     if (!active_)
         return false;
-    // A release ends the pan, whatever button it is, like the
-    // reference's PAN_MODE handling.
+    // A release ends the pan, whatever button it is.
     cancel();
     return true;
 }

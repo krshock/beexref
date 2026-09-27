@@ -8,12 +8,12 @@
 
 namespace ui::colors {
 
-// The reference's hex format: #rrggbb, plus the alpha byte when the
+// The hex format: #rrggbb, plus the alpha byte when the
 // colour is not opaque (#rrggbbaa).
 QString hex(const QColor &color);
 
 // Row/column stride for the gamut histogram: about a thousand samples
-// per side, like the reference.
+// per side.
 int gamutSampleStep(int width, int height);
 
 // One hue/saturation bucket of the gamut. Hue follows Qt: 0..359, and
@@ -35,8 +35,7 @@ inline uint qHash(const GamutKey &key, uint seed = 0)
 }
 
 // Counts hue/saturation pairs, ignoring pixels that are close to
-// transparent, white or black, exactly like the reference's
-// color_gamut().
+// transparent, white or black.
 QHash<GamutKey, int> gamutHistogram(const QImage &image);
 
 // Where a bucket's dot goes on a colour wheel of the given radius,

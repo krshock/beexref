@@ -5,7 +5,7 @@
 
 namespace ui {
 
-// The reference's cursor-following colour preview: a square filled with
+// The cursor-following colour preview: a square filled with
 // the colour under the pointer (transparent when there is none), offset
 // from the cursor. It never takes mouse events.
 class ColorSwatch : public QWidget
@@ -13,7 +13,7 @@ class ColorSwatch : public QWidget
     Q_OBJECT
 
 public:
-    // The reference's size and offset from the pointer, plus the two
+    // The size and offset from the pointer, plus the two
     // one-pixel frames (white inside, black outside) that make the
     // patch readable on any background.
     static constexpr int kSize = 50;

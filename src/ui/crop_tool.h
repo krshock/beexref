@@ -14,7 +14,7 @@ namespace ui {
 class SceneItem;
 class View;
 
-// The reference's CropEditor, driven by the view: the single selected
+// The crop editor, driven by the view: the single selected
 // image shows its whole bitmap with an editable rectangle on top; the
 // model is untouched until confirm(). Return confirms and Esc cancels,
 // clicking inside the rectangle confirms and outside cancels.

@@ -18,11 +18,11 @@
 namespace ui {
 namespace {
 
-// The reference's margin and JPEG quality (fileio/export.py).
+// The margin and JPEG quality.
 constexpr double kMarginFraction = 0.03;
 constexpr int kImageQuality = 90;
 
-// The reference's _grayscale_image(): a Grayscale8 image filled with
+// The grayscale image: a Grayscale8 image filled with
 // the canvas colour, with the original composited on top.
 QImage grayscaleOf(const QImage &image)
 {
@@ -42,10 +42,10 @@ struct EncodedImage
 
 // The bytes for one item's SVG <image>. Without edits the item's own
 // encoded buffer is reused verbatim; with grayscale/crop the full
-// resolution image is decoded and re-encoded, as the reference does.
-// Deviation: the reference picks the re-encode format through
-// get_imgformat() (the image_storage_format setting); this port keeps
-// the item's original format, matching how blobs are stored here.
+// resolution image is decoded and re-encoded.
+// Deviation: the re-encode format would normally follow the
+// image_storage_format setting; this port keeps the item's original
+// format, matching how blobs are stored here.
 EncodedImage encodedForItem(const doc::ItemPtr &item, bool applyGrayscale, bool applyCrop)
 {
     EncodedImage out;
@@ -98,7 +98,7 @@ QString transformsFor(const doc::ItemPtr &item, const QPointF &anchor)
     QStringList transforms;
     if (item->flip == -1) {
         // transform-origin is not portable, so the origin is fixed by
-        // hand around the flip (as the reference comments).
+        // hand around the flip.
         transforms << QStringLiteral("translate(%1 %2)").arg(anchor.x()).arg(anchor.y());
         transforms << QStringLiteral("scale(%1 1)").arg(item->flip);
         transforms << QStringLiteral("translate(-%1 -%2)").arg(anchor.x()).arg(anchor.y());
@@ -189,7 +189,7 @@ QByteArray renderSceneToSvg(QGraphicsScene &scene, const SceneExportFrame &frame
             xml.writeAttribute(QStringLiteral("xlink:href"),
                                QStringLiteral("data:image/%1;base64,%2")
                                    .arg(format, QString::fromLatin1(encoded.bytes.toBase64())));
-            // The reference sizes the element to the full image width,
+            // The app sizes the element to the full image width,
             // even though the bytes are cropped; kept for fidelity.
             xml.writeAttribute(QStringLiteral("width"),
                                QString::number(item->imageBounds().width() * model->scale));

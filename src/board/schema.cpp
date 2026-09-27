@@ -5,8 +5,7 @@
 namespace board::schema {
 namespace {
 
-// The three schema scripts are verbatim copies of the Python
-// reference's fileio/schema.py.
+// The three schema scripts define the board schema.
 constexpr const char *kItemsTable = R"(
     CREATE TABLE IF NOT EXISTS items (
         id INTEGER PRIMARY KEY,
@@ -38,8 +37,7 @@ constexpr const char *kSqlarTable = R"(
     )
 )";
 
-// Upstream BeeRef's legacy items table: no fork-specific meta or uuid
-// columns, as fileio/legacy.py in the Python reference.
+// Upstream BeeRef's legacy items table: no meta or uuid columns.
 constexpr const char *kBeeItemsTable = R"(
     CREATE TABLE IF NOT EXISTS items (
         id INTEGER PRIMARY KEY,
@@ -222,7 +220,7 @@ Status migrateToCurrent(Connection &db)
 
     if (from == 0) {
         // Uninitialized database: create the schema instead of
-        // migrating, as the Python reference does.
+        // migrating.
         if (Status status = createTables(db); !status)
             return status;
     } else {

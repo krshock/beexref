@@ -16,7 +16,7 @@ class QMimeData;
 
 namespace ui {
 
-// The reference's empty-scene overlay: one widget with two states, so an
+// The empty-scene overlay: one widget with two states, so an
 // empty board in an open document can never be mistaken for the start
 // screen.
 //

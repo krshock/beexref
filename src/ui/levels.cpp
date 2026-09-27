@@ -95,7 +95,7 @@ QVector<Level> buildLevels(const LodSettings &settings, const QSize &original,
 
     const LodSettings config = normalized(settings);
     // Anything that is not a registered fraction-ladder method is the
-    // single-level method, as in the reference.
+    // single-level method.
     const LevelMethod *method = levelMethod(config.method);
     if (!method || !method->usesFractions) {
         levels.append({1.0, original});

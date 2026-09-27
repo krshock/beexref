@@ -10,7 +10,7 @@ namespace ui {
 
 class View;
 
-// The reference's ZOOM_MODE: a bound button drag zooms by its vertical
+// The zoom mode: a bound button drag zooms by its vertical
 // travel, twenty times the wheel step per pixel, anchored where the drag
 // started.
 class DragZoomTool : public Tool

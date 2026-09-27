@@ -15,21 +15,21 @@
 namespace ui::hud {
 namespace {
 
-// The reference's toast stack constants.
+// The toast stack constants.
 constexpr int kTopMargin = 10;
 constexpr int kSpacing = 8;
 constexpr int kMaxVisible = 5;
 constexpr int kSlideInOffset = 20;
 constexpr int kAnimationMs = 150;
 
-// The reference's panel geometry (hud/widgets.py).
+// The panel geometry.
 constexpr int kShadowBlur = 6;
 constexpr int kShadowOffset = 1;
 constexpr int kShadowSteps = 4;
 constexpr double kShadowPenWidth = 2.0;
 constexpr int kBorderRadius = 8;
 
-// The reference's HUD stylesheet (hud/style.py), applied per widget so
+// The HUD stylesheet, applied per widget so
 // it never leaks into the rest of the application.
 QString hudStylesheet()
 {
@@ -105,8 +105,7 @@ public:
     }
 };
 
-// The toasts of one host, stacked from the top and centred, like the
-// reference's ToastManager.
+// The toasts of one host, stacked from the top and centred.
 class Stack : public QObject
 {
 public:
@@ -252,7 +251,7 @@ QString HudPanel::title() const
 
 void HudPanel::setTitleDirty(bool dirty)
 {
-    // The reference marks a dirty draft with a bullet.
+    // The app marks a dirty draft with a bullet.
     if (titleLabel_)
         titleLabel_->setText(dirty ? title_ + QStringLiteral(" •") : title_);
 }
@@ -263,7 +262,7 @@ void HudPanel::paintEvent(QPaintEvent *event)
     if (!shadow_ || !body_)
         return;
     // Soft shadow: concentric translucent rings around the glass body,
-    // fading outward, like the reference.
+    // fading outward.
     QPainter painter(this);
     painter.setRenderHint(QPainter::Antialiasing);
     const QRectF rect(body_->geometry());

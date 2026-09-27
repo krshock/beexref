@@ -12,7 +12,7 @@ namespace ui {
 
 class View;
 
-// The reference's movewin mode: while active the window follows the
+// The move-window mode: while active the window follows the
 // global cursor on a timer, so it keeps moving when the pointer leaves
 // the window. Any press or key ends it; a drag also ends when its button
 // comes up, and an armed mode (menu/keyboard) ends when the window loses

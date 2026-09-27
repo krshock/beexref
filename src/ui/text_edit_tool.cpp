@@ -89,7 +89,7 @@ bool TextEditTool::filters(QObject *watched, QEvent *event)
             return true;
         }
         // Enter commits, Shift+Enter falls through to the editor's
-        // newline, like the reference's text item.
+        // newline, like text items.
         if ((key->key() == Qt::Key_Return || key->key() == Qt::Key_Enter)
             && !key->modifiers().testFlag(Qt::ShiftModifier)) {
             commit();

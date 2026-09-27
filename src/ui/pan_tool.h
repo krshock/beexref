@@ -10,7 +10,7 @@ namespace ui {
 
 class View;
 
-// The reference's PAN_MODE: a bound button drag scrolls the view. The
+// The pan mode: a bound button drag scrolls the view. The
 // view starts it when the mouse binding matches and dispatches the moves
 // and the release through the controller.
 class PanTool : public Tool

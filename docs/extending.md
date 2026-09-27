@@ -9,18 +9,16 @@ The rules that apply to every change here:
 - The `.beex` format is frozen: new item data goes into the existing
   `data`/`meta` JSON columns, never into new tables or columns without
   the other ports.
-- Behaviour follows the Python fork (`../beeref/beerefx/`), the private
-  behaviour source for this port, including its quirks; deliberate
-  deviations are called out in comments and commit messages. Upstream
-  BeeRef (the public original) only has the `.bee` format and none of
-  the fork's features, so public wording describes the extras as this
-  port's own.
+- Match the existing behaviour, quirks included; deliberate deviations
+  are called out in comments and commit messages. Upstream BeeRef only
+  has the `.bee` format and none of this port's extras, so public
+  wording describes the extras as this port's own.
 - Every change runs `ctest --preset linux-debug` (the whole suite) and
   the offscreen UI smoke before it is committed.
 
 ## A tool (an interactive canvas mode)
 
-Tools are the fork's "active modes": crop, colour sampling, text
+Tools are the app's "active modes": crop, colour sampling, text
 editing, move-window, pan and drag-zoom.
 
 1. Implement `ui::Tool` (`src/ui/tool.h`): `id()`, `active()`,
@@ -113,7 +111,7 @@ the suffix lookup and the size-dialog decision all follow from it:
  }},
 ```
 
-`asksSize` selects the fork's pixmap size dialog for raster
+`asksSize` selects the export size dialog for raster
 formats. An unknown suffix falls back to the first entry, whose writer
 lets `QImage` pick the encoding from the file name.
 
@@ -126,7 +124,7 @@ end-to-end export of the new suffix.
 `Items/lod_method`: the settings value, whether the method builds the
 fraction ladder, and whether its decoded-bytes budget comes from
 `Items/lod_ram_budget_mb`. An id that is not registered keeps the
-fork's single-level behaviour.
+single-level behaviour.
 
 1. Add a `LevelMethod` entry in `levelMethods()`.
 2. Add the matching radio option (value, label, tooltip) to the
@@ -149,9 +147,9 @@ integerField(QStringLiteral("Items/my_limit"), QStringLiteral("My Limit:"),
 
 `radioField`, `checkboxField` and `makeField` cover the other kinds.
 Read the value where it is used, not at startup, with
-`settings::valueOrDefault(file, key)` after `file.load()` — the
-fork reads at use time and so does the port. Defaults live in the
-field table and in `src/settings.cpp`.
+`settings::valueOrDefault(file, key)` after `file.load()` — settings are
+read at use time. Defaults live in the field table and in
+`src/settings.cpp`.
 
 Tests must never touch the real `~/.config/BeeXRef`: call
 `testenv::isolate()` or point `settings::setSettingsDir()` at a
@@ -191,9 +189,9 @@ rename) and read through `src/board/sqlite.cpp`; `.bee` is the legacy
 upstream interchange shape, import-only, and its schema lives in
 `src/board/schema.cpp`. There is no format registry: a new board format
 would hook into `board::Board::open()`/`doc::Document::open()` and
-`doc::Document::save()`. The shapes are defined by the Python fork's
-`fileio/legacy.py`, `fileio/sql.py` and
-`fileio/export.py`; keep byte-compatibility and verify with
+`doc::Document::save()`. The shapes are defined by `fileio/legacy.py`,
+`fileio/sql.py` and `fileio/export.py` (in the `beerefx` checkout); keep
+byte-compatibility and verify with
 `beexref-boardcheck [--write-back PATH] <board>...`, which migrates on a
 copy, decodes every blob, checks dimensions and diffs all tables.
 

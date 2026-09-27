@@ -13,7 +13,7 @@ namespace ui {
 
 class View;
 
-// One interactive mode of the canvas (the reference's active modes).
+// One interactive mode of the canvas (the active modes).
 // Tools live as long as the view and carry their own per-session state.
 // The view forwards mouse and key events to the active tool; returning
 // true means the event was consumed. A tool ends itself through cancel(),

@@ -9,7 +9,7 @@ class QRadioButton;
 
 namespace ui {
 
-// The reference's ExportImagesFileExistsDialog: pick what to do when an
+// The export-conflict dialog: pick what to do when an
 // exported file already exists. Defaults to Skip.
 class ExportConflictDialog : public QDialog
 {

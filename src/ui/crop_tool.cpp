@@ -22,8 +22,7 @@ void CropTool::start()
 {
     if (item_)
         return;
-    // Only one tool runs at a time, like the reference's
-    // cancel_active_modes().
+    // Only one tool runs at a time.
     view_->cancelModes();
     SceneItem *target = nullptr;
     if (Scene *scene = view_->boardScene()) {
@@ -105,8 +104,7 @@ bool CropTool::mousePress(QMouseEvent *event)
         pressItem_ = itemPos;
         dragStartRect_ = item_->cropRect();
     } else if (item_->cropRect().contains(itemPos)) {
-        // Clicking inside confirms, outside cancels, as the reference's
-        // crop editor does.
+        // Clicking inside confirms, outside cancels.
         confirm();
     } else {
         cancel();

@@ -18,7 +18,7 @@ QString nameOf(const QString &key)
     return key.section(QLatin1Char('/'), 1);
 }
 
-// The reference stores lists joined with ", " and splits them back.
+// The app stores lists joined with ", " and splits them back.
 QStringList splitList(const QString &value)
 {
     QStringList values;
@@ -86,7 +86,7 @@ QStringList modifierNames()
 
 QStringList buttonNames()
 {
-    // The reference's map has no right button; kept for compatibility.
+    // The map has no right button; kept for compatibility.
     return {kNotConfigured, QStringLiteral("Left"), QStringLiteral("Middle")};
 }
 

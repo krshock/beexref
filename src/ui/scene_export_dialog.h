@@ -7,7 +7,7 @@ class QSpinBox;
 
 namespace ui {
 
-// The reference's SceneToPixmapExporterDialog: a width/height pair whose
+// The export size dialog: a width/height pair whose
 // aspect ratio is locked to the default export size, clamped to
 // [10, 100000].
 class SceneExportDialog : public QDialog

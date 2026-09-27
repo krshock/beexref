@@ -21,8 +21,8 @@ struct SceneExportFormat
     QString id;           // "png"
     QStringList suffixes; // {"png"}
     QString name;         // "PNG", the filter's label
-    // Raster formats ask for a pixel size first (the reference's
-    // SceneToPixmapExporterDialog); vector formats export directly.
+    // Raster formats ask for a pixel size first; vector formats
+    // export directly.
     bool asksSize = true;
     // Writes the scene to path: an empty string on success, otherwise
     // the message to show. `size` is the dialog's choice for raster
@@ -32,7 +32,7 @@ struct SceneExportFormat
 };
 
 // The registered formats in dialog order; the first is the default for
-// an unknown or missing suffix (the reference's pixmap exporter).
+// an unknown or missing suffix (the pixmap exporter).
 const QVector<SceneExportFormat> &sceneExportFormats();
 // The format owning a file suffix (case-insensitive), or nullptr.
 const SceneExportFormat *sceneExportFormatForSuffix(const QString &suffix);

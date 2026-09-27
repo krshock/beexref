@@ -6,7 +6,7 @@
 
 namespace ui::crop {
 
-// The crop UI's handle size in device pixels, as the reference defines
+// The crop UI's handle size in device pixels, as the app defines
 // it; all hit areas keep their screen size at any zoom.
 inline constexpr double kHandleSize = 15.0;
 
@@ -28,7 +28,7 @@ enum class Part {
 QRectF handleRect(const QRectF &rect, Part part, double scale);
 QRectF edgeRect(const QRectF &rect, Part part, double scale);
 
-// Handles win over edges, like the reference's hit testing order.
+// Handles win over edges, as in hit testing.
 Part hitTest(const QRectF &rect, double scale, const QPointF &pos);
 
 // Clamps a dragged point so the rectangle cannot invert and stays

@@ -38,13 +38,13 @@ struct WheelBinding
     bool inverted = false;
 };
 
-// The binding tables of the reference, with their default assignments.
+// The binding tables, with their default assignments.
 const QVector<MouseBinding> &defaultMouseBindings();
 const QVector<WheelBinding> &defaultWheelBindings();
 
 // KeyboardSettings.ini: the bindings and the per-action shortcut
 // overrides. A value equal to its default is removed from the file, as
-// the reference's set_list/set_value do.
+// the settings helpers do.
 class Store
 {
 public:

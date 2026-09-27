@@ -380,7 +380,7 @@ void SceneItem::paintContent(QPainter *painter)
     // Stated unconditionally: painter state leaks between items in a
     // paint pass. Smoothing is off during interactions (repaints skip
     // the filter) and when zoomed in past 2x, so pixel sprites stay
-    // crisp, as in the reference.
+    // crisp.
     const bool smooth = rendering::smoothPixmaps() && !rendering::smoothingSuspended()
         && std::abs(painter->combinedTransform().m11()) < 2.0;
     painter->setRenderHint(QPainter::SmoothPixmapTransform, smooth);
@@ -468,9 +468,9 @@ void SceneItem::paintCropMode(QPainter *painter)
         painter->drawRect(image);
     }
 
-    // Darken everything outside the editable rectangle: the reference
-    // fills the image shape plus the crop rectangle with the odd-even
-    // rule, which leaves exactly that ring.
+    // Darken everything outside the editable rectangle: the image shape
+    // plus the crop rectangle are filled with the odd-even rule, which
+    // leaves exactly that ring.
     QPainterPath path;
     path.setFillRule(Qt::OddEvenFill);
     path.addRect(image);

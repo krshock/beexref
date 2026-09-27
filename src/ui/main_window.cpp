@@ -58,7 +58,7 @@
 namespace ui {
 namespace {
 
-// LOD settings from the INI, with the FIELDS defaults.
+// LOD settings from the INI, with the settings defaults.
 LodSettings loadLodSettings()
 {
     settings::File file(settings::iniPath());
@@ -101,7 +101,7 @@ void copyMenuActions(const QMenu *from, QMenu *to)
     }
 }
 
-// The reference's get_file_extension_from_format(): the first extension
+// The selected filter's extension: the first extension
 // of the selected filter, e.g. 'JPEG (*.jpg *.jpeg)' yields 'jpg'.
 QString extensionFromFilter(const QString &filter)
 {
@@ -124,7 +124,7 @@ QString extensionFromFilter(const QString &filter)
 MainWindow::MainWindow(bool cacheDisabled, QWidget *parent)
     : QMainWindow(parent)
 {
-    // The reference sets BeeAssets().logo on the main window; child
+    // The logo is set on the main window; child
     // dialogs inherit it, so every window carries the app icon.
     setWindowIcon(QIcon(QStringLiteral(":/assets/logo.png")));
 
@@ -237,8 +237,7 @@ MainWindow::MainWindow(bool cacheDisabled, QWidget *parent)
     undoStack_.setDocument(document_.get());
     scene_->setDocument(document_);
 
-    // The action registry and the menus of the reference's
-    // actions/actions.py and actions/menu_structure.py.
+    // The action registry and the menus.
     actions_ = new ActionRegistry(this);
     buildActions();
     buildMenus();
@@ -249,7 +248,7 @@ MainWindow::MainWindow(bool cacheDisabled, QWidget *parent)
         addAction(actions_->action(id));
     applyShortcuts();
 
-    // The reference's right-click menu on the canvas and on the welcome
+    // The right-click menu on the canvas and on the welcome
     // view: the whole main menu, so the actions stay reachable when the
     // menu bar is hidden.
     connect(view_, &View::contextMenuRequested, this, &MainWindow::showContextMenu);
@@ -292,12 +291,12 @@ MainWindow::MainWindow(bool cacheDisabled, QWidget *parent)
     updateTitle();
 
     // The title shows live RAM usage and, for saved boards, the file
-    // size, as the reference does.
+    // size.
     auto *titleTimer = new QTimer(this);
     connect(titleTimer, &QTimer::timeout, this, &MainWindow::updateTitle);
     titleTimer->start(2000);
 
-    // Decode allocation limit, as the reference applies on startup (the
+    // Decode allocation limit, as the app applies on startup (the
     // environment variable wins, matching the Python app).
     applyAllocationLimit();
 }
@@ -336,7 +335,7 @@ bool MainWindow::openBoard(const QString &path)
     view_->lodManager()->logAudit(QStringLiteral("open"));
     metadataPanel_->closePanel();
 
-    // Record it for Open Recent, like the reference's loading callback.
+    // Record it for Open Recent.
     {
         settings::File file(settings::iniPath());
         file.load();
@@ -365,7 +364,7 @@ void MainWindow::saveDocument()
     view_->cancelModes();
     const QString path = document_ ? document_->path() : QString();
     // A legacy .bee file is import-only; a document without a file must
-    // be saved as one (the reference's on_action_save).
+    // be saved as one.
     if (path.isEmpty() || path.endsWith(QStringLiteral(".bee"), Qt::CaseInsensitive))
         saveDocumentAs();
     else
@@ -447,8 +446,8 @@ void MainWindow::exportScene()
     if (dialog.exec() != QDialog::Accepted || dialog.selectedFiles().isEmpty())
         return;
     QString filename = dialog.selectedFiles().first();
-    // Without a suffix the selected filter decides (the reference's
-    // get_file_extension_from_format); only then does the pixmap default
+    // Without a suffix the selected filter decides; only then does the
+    // pixmap default
     // (PNG, in exportSceneTo) apply.
     if (QFileInfo(filename).suffix().isEmpty())
         filename += QLatin1Char('.') + extensionFromFilter(dialog.selectedNameFilter());
@@ -463,13 +462,13 @@ bool MainWindow::exportSceneTo(const QString &path)
     QString filename = path;
     QString ext = QFileInfo(filename).suffix().toLower();
     if (ext.isEmpty()) {
-        // The reference's default is the pixmap exporter.
+        // The default is the pixmap exporter.
         ext = sceneExportFormats().first().id;
         filename += QLatin1Char('.') + ext;
     }
 
     // Selection outlines and handles would be rendered into the output,
-    // so the scene is deselected first (as the reference does).
+    // so the scene is deselected first (as the app does).
     scene_->clearSelection();
 
     const SceneExportFrame frame = sceneExportFrame(*scene_);
@@ -635,7 +634,7 @@ void MainWindow::startMemoryAudit(int seconds)
 
 void MainWindow::applyHistoryStep(bool undo)
 {
-    // The reference cancels active modes (crop, sampling) before an
+    // The app cancels active modes (crop, sampling) before an
     // undo or redo touches the items they edit.
     view_->cancelModes();
     const bool changed = undo ? undoStack_.undo() : undoStack_.redo();
@@ -651,8 +650,7 @@ void MainWindow::applyHistoryStep(bool undo)
 
 void MainWindow::afterSelectionAction()
 {
-    // Scene-wide edits cancel an active crop, like the reference's
-    // cancel_active_modes().
+    // Scene-wide edits cancel an active crop.
     view_->cancelModes();
     if (document_)
         document_->setModified(true);
@@ -743,7 +741,7 @@ QString MainWindow::actionLabel(const QString &id) const
     if (!action)
         return id;
 
-    // The reference shows the menu path joined with the action text.
+    // The app shows the menu path joined with the action text.
     QStringList path;
     QList<QMenu *> menus = menuBar()->findChildren<QMenu *>();
     for (QMenu *menu : menus) {
@@ -780,8 +778,7 @@ void MainWindow::applySettingChanged(const QString &key)
         return;
     }
     if (key.startsWith(QLatin1String("Items/lod_"))) {
-        // LOD settings take effect at once, like the reference's
-        // lod_changed event.
+        // LOD settings take effect at once.
         view_->setLodSettings(loadLodSettings());
         view_->lodManager()->evaluateNow();
         return;
@@ -830,7 +827,7 @@ void MainWindow::newScene()
     undoStack_.setDocument(document_.get());
     undoStack_.clear();
     scene_->setDocument(document_);
-    // The reference resets the view transform for a new scene.
+    // The app resets the view transform for a new scene.
     view_->setTransform(QTransform());
     view_->refreshSceneRect();
     view_->lodManager()->evaluateNow();
@@ -841,7 +838,7 @@ void MainWindow::newScene()
 
 void MainWindow::selectAll()
 {
-    // Active modes first, like the reference's select_all_items().
+    // Active modes first.
     view_->cancelModes();
     for (QGraphicsItem *item : scene_->items())
         item->setSelected(true);
@@ -964,7 +961,7 @@ void MainWindow::copySampledColor(const QColor &color)
     QApplication::clipboard()->setText(hex);
     // A later paste should not restore the items copied before.
     input_->clearInternalClipboard();
-    // The reference's notification toast.
+    // The notification toast.
     hud::toast(view_, QStringLiteral("Copied color to clipboard: %1").arg(hex));
     logging::info(QStringLiteral("Sampled color"), {{QStringLiteral("color"), hex}});
 }
@@ -1002,7 +999,7 @@ void MainWindow::arrangeSelection(int mode)
     else if (mode == 2)
         arrangeMode = layout::Arrange::Square;
 
-    // Settings are read at use time, like the reference.
+    // Settings are read at use time.
     settings::File file(settings::iniPath());
     file.load();
     bool ok = false;
@@ -1132,7 +1129,7 @@ void MainWindow::buildActions()
     actions_->add(QStringLiteral("insert_images"), QStringLiteral("&Images..."),
                   QKeySequence(QStringLiteral("Ctrl+I")), G::Always,
                   [this](bool) { insertImages(); });
-    // The reference's insert_text: a text item at the pointer, ready to
+    // Insert text: a text item at the pointer, ready to
     // edit (Ctrl+T).
     actions_->add(QStringLiteral("insert_text"), QStringLiteral("&Text"),
                   QKeySequence(QStringLiteral("Ctrl+T")), G::Always, [this](bool) {
@@ -1212,7 +1209,7 @@ void MainWindow::buildActions()
                   {}, G::Selection, [this](bool) { arrangeSelection(1); });
     actions_->add(QStringLiteral("arrange_square"), QStringLiteral("&Square (by filename)"), {},
                   G::Selection, [this](bool) { arrangeSelection(2); });
-    // Not in the reference's menus: it runs this after imports, which do
+    // Not in the menus: it runs this after imports, which do
     // not exist yet. "optimal" in Items/arrange_default maps to square.
     actions_->add(QStringLiteral("arrange_default"), QStringLiteral("Arrange &Default"), {},
                   G::Selection, [this](bool) { arrangeSelectionDefault(); });
@@ -1235,10 +1232,9 @@ void MainWindow::buildActions()
                   QKeySequence(QStringLiteral("S")), G::ItemsInScene,
                   [this](bool) { view_->startSampleColor(); });
 
-    // View: window and rendering toggles. The reference's defaults are
-    // session-only; Show Menu Bar starts checked here because the
-    // reference's unchecked default would leave the menu unreachable
-    // once hidden.
+    // View: window and rendering toggles. The toggles are session-only;
+    // Show Menu Bar starts checked here because an unchecked default
+    // would leave the menu unreachable once hidden.
     actions_->add(QStringLiteral("fullscreen"), QStringLiteral("&Fullscreen"),
                   QKeySequence(Qt::Key_F11), G::Always,
                   [this](bool checked) {
@@ -1266,8 +1262,8 @@ void MainWindow::buildActions()
     QAction *menubarAction = actions_->add(
         QStringLiteral("show_menubar"), QStringLiteral("Show &Menu Bar"), {}, G::Always,
         [this](bool checked) { menuBar()->setVisible(checked); }, true);
-    // Deliberate deviation: the reference defaults this off, which would
-    // leave its own toggle unreachable once hidden.
+    // Deliberate deviation: the menu bar toggle defaults on, so it stays
+    // reachable once hidden.
     menubarAction->setChecked(true);
     QAction *statusAction = actions_->add(
         QStringLiteral("show_status"), QStringLiteral("Show &Status Bar"), {}, G::Always,
@@ -1284,7 +1280,7 @@ void MainWindow::buildActions()
                 show();
         },
         true);
-    // The window starts with its title bar, like the reference's default.
+    // The window starts with its title bar.
     titlebarAction->setChecked(true);
     view_->setMoveHandleVisible(!titlebarAction->isChecked());
     QAction *smoothAction = actions_->add(
@@ -1325,7 +1321,7 @@ void MainWindow::buildActions()
     // Help.
     actions_->add(QStringLiteral("help"), QStringLiteral("&Help"), QKeySequence(Qt::Key_F1),
                   G::Always, [this](bool) { openHelp(); });
-    // The reference binds Help twice.
+    // The app binds Help twice.
     actions_->setDefaultShortcuts(QStringLiteral("help"),
                                   {QStringLiteral("F1"), QStringLiteral("Ctrl+H")});
     actions_->add(QStringLiteral("about"), QStringLiteral("&About"), {}, G::Always,

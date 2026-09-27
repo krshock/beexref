@@ -12,7 +12,7 @@
 namespace ui {
 namespace {
 
-// One semantic token swatch of the reference's preview.
+// One semantic token swatch of the preview.
 QFrame *swatch(const QColor &color, const QString &tooltip, QWidget *parent)
 {
     auto *frame = new QFrame(parent);

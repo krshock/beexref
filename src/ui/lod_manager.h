@@ -26,7 +26,7 @@ class LevelLoader;
 class Scene;
 class SceneItem;
 
-// LOD scheduler and memory policy, ported from the reference manager:
+// LOD scheduler and memory policy:
 //   * evaluations are debounced to one per event-loop turn;
 //   * each item has one level ladder (fractions above the saved floor)
 //     and at most one decode in flight, guarded by a generation;

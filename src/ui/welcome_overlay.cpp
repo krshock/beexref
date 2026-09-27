@@ -23,7 +23,7 @@
 namespace ui {
 namespace {
 
-// The reference's layout constants.
+// The layout constants.
 constexpr int kCardWidth = 460;
 constexpr int kLogoSizeStart = 64;
 constexpr int kLogoSizeEmpty = 40;
@@ -186,7 +186,7 @@ void WelcomeOverlay::setMode(Mode mode)
 
 void WelcomeOverlay::setBoardName(const QString &name)
 {
-    // The reference elides a long name in the middle.
+    // The app elides a long name in the middle.
     QFont font = titleLabel_->font();
     font.setPointSize(20);
     font.setWeight(QFont::DemiBold);
@@ -240,8 +240,7 @@ void WelcomeOverlay::hideOverlay()
 
 void WelcomeOverlay::updateVisibility()
 {
-    // Hide or shrink optional content when the window is small, like
-    // the reference.
+    // Hide or shrink optional content when the window is small.
     const int height = this->height();
     const int width = this->width();
     const bool small = height < kSmallHeight;

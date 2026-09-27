@@ -79,7 +79,7 @@ public:
     // cacheKey names the level in the caches; empty disables caching.
     // coalesceKey identifies the item: a newer request for the same key
     // supersedes a queued one, so a zoom burst decodes only the latest
-    // fraction, as the reference worker does.
+    // fraction.
     //
     // The band decides the queue order: a request in a higher band runs
     // before lower-band work, FIFO within a band. A superseded request

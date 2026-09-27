@@ -9,7 +9,7 @@ inline constexpr char AppNameFull[] = "BeeXRef Reference Image Viewer";
 // commit vX.Y.Z. Shown by --version, the About dialog and the startup
 // log.
 inline constexpr char Version[] = BEEXREF_VERSION;
-// The reference's about box text.
+// The about box text.
 inline constexpr char Copyright[] = "Copyright \u00A9 2021-2024 Rebecca Breu";
 // The fork's own copyright: this port's changes.
 inline constexpr char ForkCopyright[] = "Copyright \u00A9 2026 krshock";
@@ -28,11 +28,11 @@ inline constexpr char UserAgent[] =
     "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
 
 // Appended to a settings group's title while its value differs from the
-// default, as in the reference.
+// default.
 inline constexpr char kChangedSymbol[] = "\u270E";
 
 // Z-order step: raising an item puts it above the current maximum by
-// this much, as in the reference ports.
+// this much, as in the other ports.
 inline constexpr double kZStep = 0.001;
 
 // Floor level size: the longest side of the coarsest level, used both

@@ -22,7 +22,7 @@
 namespace ui {
 namespace {
 
-// Inserted items go above everything, as the reference does.
+// Inserted items go above everything.
 constexpr double kZStep = constants::kZStep;
 
 // Shown when a paste finds nothing it can insert.
@@ -106,7 +106,7 @@ void InputController::insertMimeData(const QMimeData &data, const QPointF &scene
                                      double viewScale)
 {
     // Registered routes first; the built-in classification below is the
-    // fallback, so a drop the reference understands behaves exactly as
+    // fallback, so a drop the app understands behaves exactly as
     // before.
     for (const InsertHandler &handler : std::as_const(insertHandlers_)) {
         if (!handlerClaims(handler, data))
@@ -130,7 +130,7 @@ void InputController::insertMimeData(const QMimeData &data, const QPointF &scene
     case DropKind::None:
         break;
     }
-    // The reference rejects plain-text drops (a paste of text becomes a
+    // The app rejects plain-text drops (a paste of text becomes a
     // note, a drop of text does not).
     emit message(result.message.isEmpty() ? QString::fromLatin1(kNoDropMessage) : result.message);
 }
@@ -221,8 +221,7 @@ void InputController::insertItems(QVector<doc::ItemPtr> items, const QPointF &sc
     undoStack_->push(std::make_unique<doc::AddItemsCommand>(items, text));
     undoStack_->endMacro();
     scene_->syncDocument();
-    // The views exist now, so the group can be placed like the
-    // reference's InsertItems(position).
+    // The views exist now, so the group can be placed at the drop point.
     arrangeInserted(items, scenePos);
     if (const auto &document = scene_->document())
         document->setModified(true);
@@ -237,7 +236,7 @@ void InputController::insertItems(QVector<doc::ItemPtr> items, const QPointF &sc
 
 void InputController::arrangeInserted(const QVector<doc::ItemPtr> &items, const QPointF &scenePos)
 {
-    // The reference's InsertItems: the items keep their relative
+    // Insert placement: the items keep their relative
     // positions (a pasted group stays arranged as it was copied) and
     // the whole group is shifted so its bounding-rect centre lands on
     // the insertion point. Single items are simply centred on it.
@@ -329,7 +328,7 @@ void InputController::removeSelection()
     auto command = std::make_unique<doc::RemoveItemsCommand>(
         items, [this](const doc::ItemPtr &item) { spillToCache(item); },
         QStringLiteral("Delete"),
-        // The reference's DeleteItems deselects before removing and
+        // Delete deselects before removing and
         // selects the restored items again on undo; the scene is brought
         // in line here because the views for restored items do not exist
         // until it syncs.

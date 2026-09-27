@@ -11,7 +11,7 @@ class QVBoxLayout;
 namespace ui::hud {
 
 // Shows a short-lived notification at the top of the host, stacked with
-// any others: the reference's toast stack (top margin 10, spacing 8, up
+// any others: the toast stack (top margin 10, spacing 8, up
 // to five visible, three seconds each), sliding in and fading out.
 void toast(QWidget *host, const QString &text, int timeoutMs = 3000);
 
@@ -26,7 +26,7 @@ enum class Anchor {
 // the anchor and the margin; the element never leaves the host.
 QPoint anchoredPos(const QWidget *host, const QSize &size, Anchor anchor, int margin);
 
-// The reference's HUDWidget: a translucent glass panel with a painted
+// The HUD panel: a translucent glass panel with a painted
 // soft shadow. Content goes into body()/bodyLayout().
 class HudPanel : public QWidget
 {
@@ -53,7 +53,7 @@ private:
     bool shadow_ = true;
 };
 
-// The reference's fade helpers: animate a widget's opacity in or out.
+// The fade helpers: animate a widget's opacity in or out.
 void fadeIn(QWidget *widget, int durationMs = 150);
 void fadeOut(QWidget *widget, int durationMs = 150);
 

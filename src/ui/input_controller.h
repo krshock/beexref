@@ -31,7 +31,7 @@ inline constexpr char kItemsMime[] = "beexref/items";
 // A payload route for drops and pastes, registered with
 // addInsertHandler(): the built-in classification (files, URLs, raw
 // images) is the fallback, so an extension claims its own mime formats
-// without touching the reference's port. Handlers are tried in
+// without touching the port. Handlers are tried in
 // registration order; the first with one of its formats present wins.
 struct InsertHandler
 {
@@ -78,7 +78,7 @@ public:
     void paste(const QPointF &scenePos, double viewScale = 1.0);
 
     bool hasInternalClipboard() const { return !internalClipboard_.isEmpty(); }
-    // Deletes the selection as one undo step (the reference's Delete).
+    // Deletes the selection as one undo step.
     void removeSelection();
     // Forget the copied items, so a paste does not restore them; the
     // reference clears its internal clipboard when a colour is copied.

@@ -15,7 +15,7 @@ namespace layout {
 enum class Normalize {
     Height,
     Width,
-    Size, // equal area, like the reference's "Size"
+    Size, // equal area ("Size")
 };
 
 enum class Arrange {
@@ -24,7 +24,7 @@ enum class Arrange {
     Square,
 };
 
-// The reference's sort_by_filename: items with a filename first (in
+// Sort by filename: items with a filename first (in
 // filename order), then items with a save id (in id order), then the
 // rest in insertion order.
 QVector<SceneItem *> orderedSelection(const Scene &scene);

@@ -44,8 +44,8 @@ public:
     // Records the file the document was last written to (or opened from).
     void setPath(const QString &path) { path_ = path; }
     // Points saved images at the board as their LOD source and releases
-    // the encoded buffers that now live in the file (the reference's
-    // adopt_lod). Reopens the board on the current path first, because
+    // the encoded buffers that now live in the file. Reopens the board
+    // on the current path first, because
     // the save replaced the file and an old connection would read stale
     // bytes.
     void adoptFileSources();
@@ -79,7 +79,7 @@ public:
     // board's payloads in memory.
     // Writing assigns every item its row id in the saved file. On a
     // "create new" save (Save As) the ids are cleared first, so a new
-    // file starts with fresh ids, like the reference.
+    // file starts with fresh ids.
     //
     // After a successful save, adoptFileSources() points the images at
     // the file and frees their in-RAM encoded buffers.

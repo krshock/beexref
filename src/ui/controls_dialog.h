@@ -16,7 +16,7 @@ class QTableWidget;
 
 namespace ui {
 
-// The reference's "Keyboard & Mouse Controls" dialog: a search box and a
+// The "Keyboard & Mouse Controls" dialog: a search box and a
 // table per tab (keyboard shortcuts, mouse buttons, mouse wheel), edits
 // written to KeyboardSettings.ini immediately, conflicts resolved by
 // clearing the other binding, and Restore Defaults.
@@ -26,7 +26,7 @@ class ControlsDialog : public QDialog
 
 public:
     // labelFor returns the "Menu: Action" label of an action id, like
-    // the reference's menu path.
+    // the menu path.
     ControlsDialog(QWidget *parent, ActionRegistry *actions,
                    std::function<QString(const QString &id)> labelFor);
 

@@ -18,7 +18,7 @@ QJsonObject parseJsonObject(const QString &text)
     return document.isObject() ? document.object() : QJsonObject();
 }
 
-// The reference's get_extra_save_data: images always carry their
+// Extra save data: images always carry their
 // filename, opacity, grayscale flag and crop, even at their defaults, so
 // a freshly created item serializes like the Python and Go ports.
 QJsonObject savedData(const Item &item)
@@ -222,8 +222,7 @@ board::Status Document::save(const QString &path, bool storeThumbnails,
                       const board::Progress &progress, bool createNew) const
 {
     if (createNew) {
-        // A new file gets fresh row ids, like the reference's
-        // clear_save_ids().
+        // A new file gets fresh row ids.
         for (const ItemPtr &item : items_)
             item->id = 0;
     }

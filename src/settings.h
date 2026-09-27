@@ -55,7 +55,7 @@ private:
     QMap<QString, QMap<QString, QString>> sections_;
 };
 
-// One configurable setting, mirroring the reference's FIELDS table.
+// One configurable setting, mirroring the settings table.
 struct FieldSpec
 {
     QString key; // "Section/key"
@@ -66,7 +66,7 @@ struct FieldSpec
 
 const QVector<FieldSpec> &fields();
 
-// Typed value with the reference's semantics: a missing value or a
+// Typed value: a missing value or a
 // failed cast/validation yields the default.
 QVariant valueOrDefault(const File &file, const QString &key);
 

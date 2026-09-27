@@ -40,8 +40,7 @@ void GamutPlot::setGamut(const QHash<colors::GamutKey, int> &gamut)
     for (auto it = gamut.cbegin(); it != gamut.cend(); ++it) {
         Dot dot;
         dot.position = colors::gamutDotPosition(it.key(), kRadius);
-        // Achromatic buckets (hue -1, saturation 0) become white, as in
-        // the reference.
+        // Achromatic buckets (hue -1, saturation 0) become white.
         dot.color.setHsv(qMax(0, it.key().hue), it.key().saturation, 255);
         dot.count = it.value();
         dots_.append(dot);

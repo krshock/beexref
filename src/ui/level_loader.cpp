@@ -38,7 +38,7 @@ QImage decodeLevel(const doc::SourcePtr &source, const QSize &targetSize, const 
         return {};
 
     QImageReader reader(&buffer);
-    // Stored bytes are upright: the reference bakes orientation when an
+    // Stored bytes are upright: the app bakes orientation when an
     // image enters the app, not when a level is decoded.
     reader.setAutoTransform(false);
     if (targetSize.isValid() && !targetSize.isEmpty())
@@ -56,7 +56,7 @@ QImage decodeLevel(const doc::SourcePtr &source, const QSize &targetSize, const 
     }
 
     // Progressive halving keeps every bilinear step within a 2x ratio,
-    // matching the reference's smooth downscale.
+    // matching the smooth downscale.
     int width = image.width();
     int height = image.height();
     while (width / 2 >= targetSize.width() && height / 2 >= targetSize.height()) {

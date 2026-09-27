@@ -6,7 +6,7 @@
 
 namespace ui::selection {
 
-// Handle geometry in device pixels, as the reference defines it: the
+// Handle geometry in device pixels, as the app defines it: the
 // interactable areas keep their screen size at any zoom.
 inline constexpr double kLineWidth = 2.0;
 inline constexpr double kHandleSize = 15.0; // drawn dot
@@ -39,7 +39,7 @@ QPointF corner(const QRectF &bounds, int index);
 // The anchor a corner scales around: the opposite corner.
 QPointF scaleAnchor(const QRectF &bounds, int index);
 
-// The scale cursor for a corner, following the reference's mapping for
+// The scale cursor for a corner, following the mapping for
 // rotated and flipped items.
 Qt::CursorShape scaleCursor(int index, double rotation, bool flipped);
 
@@ -52,7 +52,7 @@ double scaleFactor(const QRectF &bounds, const QPointF &pressScene, const QPoint
 // differences of this.
 double rotationAngle(const QPointF &anchorScene, const QPointF &scenePos);
 
-// Rounds an angle to the given step (the reference snaps with
+// Rounds an angle to the given step (the app snaps with
 // Ctrl or Shift).
 double snapAngle(double angle, double step = 15.0);
 

@@ -47,7 +47,7 @@ public:
             auto *box = new QCheckBox(name, this);
             box->setObjectName(name);
             box->setChecked(selected.contains(name));
-            // "No Modifier" stands alone, as the reference enforces.
+            // "No Modifier" stands alone, as the app enforces.
             connect(box, &QCheckBox::checkStateChanged, this, [this, name](Qt::CheckState state) {
                 if (name != QLatin1String("No Modifier"))
                     return;
@@ -353,8 +353,7 @@ void ControlsDialog::applyShortcut(int row, int column, const QString &value)
     const QStringList defaults = actions_->defaultShortcuts(id);
     QStringList values = store_.actionShortcuts(id, defaults);
 
-    // The shortcut columns start at column 2, like the reference's
-    // index.column() - 2.
+    // The shortcut columns start at column 2.
     const int slot = column - 2;
     while (values.size() <= slot)
         values.append(QString());
@@ -365,8 +364,7 @@ void ControlsDialog::applyShortcut(int row, int column, const QString &value)
     store_.setActionShortcuts(id, values, defaults);
     actions_->setShortcuts(id, values);
 
-    // A shortcut belongs to one action: take it from the other one, like
-    // the reference.
+    // A shortcut belongs to one action: take it from the other one.
     if (!value.isEmpty()) {
         for (const QString &otherId : actionIds_) {
             if (otherId == id)

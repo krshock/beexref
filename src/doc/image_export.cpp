@@ -23,17 +23,17 @@ QString exportFilename(const QString &filename, const QString &format, qint64 sa
         const bool remote =
             url.scheme() == QLatin1String("http") || url.scheme() == QLatin1String("https");
         if (remote) {
-            // Boards from the Python reference store the full URL as the
-            // item's filename; its os.path.splitext(basename()) keeps the
-            // query string and can leave characters no filesystem
-            // accepts. filenameFromUrl() is the same rule used when the
-            // item was imported, so the export name matches the item.
+            // Legacy boards store the full URL as the item's filename; the
+            // basename keeps its query string and can leave characters no
+            // filesystem accepts. filenameFromUrl() is the same rule used
+            // when the item was imported, so the export name matches the
+            // item.
             stem = QFileInfo(util::filenameFromUrl(url)).completeBaseName();
             // Leave room for the "NNNN-" prefix and the ".format" suffix.
             const int budget = kMaxNameBytes - 5 - 1 - format.toUtf8().size();
             stem = util::truncateUtf8(stem, qMax(0, budget));
         } else {
-            // Local names are used as they are, like the reference.
+            // Local names are used as they are.
             stem = QFileInfo(filename).completeBaseName();
         }
     }
@@ -52,7 +52,7 @@ ImageExportSummary exportImages(
 {
     ImageExportSummary summary;
 
-    // Only pixmaps are exported; the reference walks items_by_type().
+    // Only pixmap items are exported.
     QVector<ItemPtr> pixmaps;
     qint64 maxSaveId = 0;
     for (const ItemPtr &item : items) {

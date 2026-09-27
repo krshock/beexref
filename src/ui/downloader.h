@@ -9,9 +9,9 @@ class QNetworkAccessManager;
 
 namespace ui {
 
-// Fetches remote images with the browser user agent the reference uses,
+// Fetches remote images with the browser user agent the app uses,
 // so sites that block default download clients work. pinterest.com page
-// URLs resolve to their first <img> source, as the reference does.
+// URLs resolve to their first <img> source.
 class Downloader : public QObject
 {
     Q_OBJECT

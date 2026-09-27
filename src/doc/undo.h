@@ -26,7 +26,7 @@ public:
 };
 
 // Undo stack with macro support and a clean marker; QUndoStack
-// semantics as used by the reference: push executes the command and
+// semantics: push executes the command and
 // drops the redo branch.
 class UndoStack
 {
@@ -53,7 +53,7 @@ public:
     bool inMacro() const { return macro_; }
 
     // Notified after every stack change (push, macro end, undo, redo,
-    // clear), so the UI can refresh; the reference's QUndoStack emits
+    // clear), so the UI can refresh; QUndoStack emits
     // indexChanged for this.
     void addChangedCallback(std::function<void()> callback)
     {
@@ -112,8 +112,8 @@ class RemoveItemsCommand final : public Command
 public:
     using Spill = std::function<void(const ItemPtr &)>;
     // Called after the document changed, so the UI can bring the scene
-    // in line: the reference's DeleteItems deselects before removing and
-    // reselects the restored items on undo.
+    // in line: delete deselects before removing and reselects the
+    // restored items on undo.
     using Notify = std::function<void(const QVector<ItemPtr> &items, bool removed)>;
 
     explicit RemoveItemsCommand(QVector<ItemPtr> items, Spill spill = {},

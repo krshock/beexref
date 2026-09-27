@@ -29,7 +29,7 @@ bool DragZoomTool::mouseMove(QMouseEvent *event)
     if (!active_)
         return false;
     const QPoint position = event->position().toPoint();
-    // The reference zooms by the vertical drag, twenty times the wheel
+    // The app zooms by the vertical drag, twenty times the wheel
     // step per pixel, anchored where the drag started.
     int delta = last_.y() - position.y();
     if (inverted_)

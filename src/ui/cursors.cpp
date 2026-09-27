@@ -6,7 +6,7 @@
 namespace ui::cursors {
 namespace {
 
-// Hotspot in device pixels, as the reference uses for these assets.
+// Hotspot in device pixels, as the app uses for these assets.
 constexpr int kHotspot = 20;
 
 QCursor cursorFrom(const QString &resource, const QCursor &fallback)

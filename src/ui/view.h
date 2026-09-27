@@ -60,8 +60,8 @@ public:
     // changes them.
     void setBindings(const controls::Bindings &bindings) { bindings_ = bindings; }
 
-    // Move-window mode (the reference's movewin): while active the
-    // window follows the pointer; any press, release or key ends it.
+    // Move-window mode: while active the window follows the pointer; any
+    // press, release or key ends it.
     // Entered with Ctrl+M or the bound mouse combination.
     void toggleMoveWindow();
     void enterMoveWindow();
@@ -74,14 +74,14 @@ public:
     // Shows the corner move handle; the window shows it only while its
     // title bar is disabled, since then nothing else can drag it.
     void setMoveHandleVisible(bool visible);
-    // Refreshes the scrollable area after the items changed shape, as
-    // the reference does on every scene change.
+    // Refreshes the scrollable area after the items changed shape, on
+    // every scene change.
     void refreshSceneRect() { recalculateSceneRect(); }
 
-    // Enters crop mode on the single selected image, as the reference's
-    // Crop action does; a second crop cannot start while one is active.
+    // Enters crop mode on the single selected image; a second crop
+    // cannot start while one is active.
     void cropSelection();
-    // Leaves crop mode without applying anything; the reference cancels
+    // Leaves crop mode without applying anything; the app cancels
     // active modes before undo/redo and before a scene is replaced.
     void cancelCrop();
     bool cropActive() const;
@@ -94,7 +94,7 @@ public:
     void cancelTextEdit();
     bool textEditing() const;
 
-    // The reference's cancel_active_modes(): ends every mode that owns
+    // Cancel modes: ends every mode that owns
     // the interaction (crop, colour sampling, text editing, move
     // window). Undo, IO and scene actions call it before touching the
     // items; a new mode must be added here once, not at every call site.
@@ -107,7 +107,7 @@ public:
 
     // Sample colour mode: a crosshair and a swatch follow the pointer;
     // the next click reports the colour under it and leaves the mode
-    // (the reference's Sample Color action).
+    // (Sample Color action).
     void startSampleColor();
     void cancelSampleColor();
     bool samplingColor() const;
@@ -144,7 +144,7 @@ public:
     // and the LOD queue (the pan tool and the wheel panning).
     void panStep(const QPoint &delta);
     // The on-screen scale of an item: the view transform times the
-    // item's own scale (the reference's fixed_length_for_viewport
+    // item's own scale (fixed length for the viewport
     // denominator). A null item gives the plain view scale.
     double scaleFor(const SceneItem *item) const;
 
@@ -210,7 +210,7 @@ private:
     void beginInteraction();
     void restoreSmoothing();
     double zoomExtent(bool maximum) const;
-    // Fits the view to a scene rectangle: the reference's fit_rect
+    // Fits the view to a scene rectangle: the fit rect
     // without its toggle-back behaviour, which is not ported.
     void fitRect(const QRectF &rect);
 

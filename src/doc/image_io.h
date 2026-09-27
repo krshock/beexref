@@ -21,7 +21,7 @@ struct LoadedImage
 // Decodes bytes and applies EXIF orientation. The original bytes are
 // kept when they decode to the same pixel size; otherwise the oriented
 // image is stored as lossless PNG, so nothing is lost to re-encoding.
-// This is the reference's encoded_image_data rule.
+// The encoded-image rule.
 LoadedImage loadImageData(const QByteArray &bytes, const QString &source = {});
 
 LoadedImage loadImageFile(const QString &path);

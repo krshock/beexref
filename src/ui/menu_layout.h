@@ -25,7 +25,7 @@ struct MenuDef
     QVector<MenuEntry> entries;
 };
 
-// The menus of the reference's actions/menu_structure as data: putting a
+// The menu structure as data: putting a
 // command in a menu means registering it in MainWindow::buildActions()
 // and naming its id here, so the two cannot drift apart. The context
 // menu is copied from the built menu bar, so it follows this table too.

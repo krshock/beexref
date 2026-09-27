@@ -164,8 +164,7 @@ void flip(const Scene &scene, doc::UndoStack &stack, bool vertical)
 void resetScale(const Scene &scene, doc::UndoStack &stack)
 {
     const QVector<SceneItem *> items = actionItems(scene);
-    // One history entry for the whole selection, like the reference's
-    // single ResetScale command.
+    // One history entry for the whole selection.
     stack.beginMacro(QStringLiteral("Reset scale"));
     for (SceneItem *view : items) {
         const QPointF anchor = itemAnchor(view);
@@ -300,13 +299,12 @@ void resetCrop(const Scene &scene, doc::UndoStack &stack)
 void resetTransforms(const Scene &scene, doc::UndoStack &stack)
 {
     const QVector<SceneItem *> items = actionItems(scene);
-    // One history entry for the whole selection, like the reference's
-    // single ResetTransforms command.
+    // One history entry for the whole selection.
     stack.beginMacro(QStringLiteral("Reset transformations"));
     for (SceneItem *view : items) {
         const doc::ChangeItemCommand::State before =
             doc::ChangeItemCommand::State::capture(*view->item());
-        // The reference resets the crop first and anchors the other
+        // The app resets the crop first and anchors the other
         // transforms at the centre that leaves.
         if (view->isPixmap()) {
             const QSize original = view->item()->originalSize();
