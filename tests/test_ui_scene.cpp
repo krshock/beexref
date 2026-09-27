@@ -239,6 +239,7 @@ private slots:
     void doubleClickOnTextEditsIt();
     void moveHandleShowsOverTheWelcomeOverlay();
     void dragZoomFollowsTheBinding();
+    void unknownItemTypeRendersAsUnsupported();
     void infoDialogsShowTheExpectedContent();
     void metadataPanelEditsAndCommits();
     void hudPreviewShowsTheStyledPanel();
@@ -3049,6 +3050,28 @@ void TestUiScene::dragZoomFollowsTheBinding()
              qPrintable(QStringLiteral("scale %1 -> %2")
                             .arg(before)
                             .arg(view->transform().m11())));
+}
+
+void TestUiScene::unknownItemTypeRendersAsUnsupported()
+{
+    auto document = std::make_shared<doc::Document>(doc::Document::create());
+    const doc::ItemPtr unknown = doc::createItem(QStringLiteral("future"));
+    unknown->data.insert(QStringLiteral("payload"), 1);
+    document->addItem(unknown);
+
+    ui::Scene scene;
+    scene.setDocument(document);
+    SceneItem *view = scene.itemViews().first();
+    QVERIFY(view);
+
+    // The item is kept and painted as an unsupported item (the error
+    // frame's width), not as a pixmap placeholder.
+    QCOMPARE(view->boundingRect().width(), 220.0);
+
+    // The scene exporters skip it: no image element for a type they
+    // cannot render.
+    const QByteArray svg = ui::renderSceneToSvg(scene, ui::sceneExportFrame(scene));
+    QVERIFY(!svg.contains("<image"));
 }
 
 void TestUiScene::infoDialogsShowTheExpectedContent()

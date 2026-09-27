@@ -133,6 +133,16 @@ public:
     // with it, above everything.
     void paintContent(QPainter *painter);
 
+    // The per-type handlers, dispatched through item_types::forType();
+    // public because the traits table takes their addresses. A new type
+    // adds its handlers here (or beside them) and one table entry.
+    QRectF boundsPixmap() const;
+    QRectF boundsText() const;
+    QRectF boundsError() const;
+    void paintPixmap(QPainter *painter);
+    void paintTextItem(QPainter *painter);
+    void paintErrorItem(QPainter *painter);
+
 private:
     QSize imageSize() const;
     QRectF computedDisplayBounds() const;

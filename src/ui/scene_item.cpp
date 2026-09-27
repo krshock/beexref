@@ -1,5 +1,7 @@
 #include "scene_item.h"
 
+#include "item_types.h"
+
 #include "crop_tools.h"
 #include "grayscale.h"
 #include "rendering.h"
@@ -55,7 +57,7 @@ QRectF SceneItem::imageBounds() const
 
 QColor SceneItem::sampleColorAt(const QPointF &scenePos) const
 {
-    if (!isPixmap() || level_.isNull())
+    if (!item_types::forType(item_->type).samples || level_.isNull())
         return {};
     const QPointF local = mapFromScene(scenePos);
     if (!displayBounds().contains(local))
@@ -80,26 +82,47 @@ QColor SceneItem::sampleColorAt(const QPointF &scenePos) const
 
 QString SceneItem::errorText() const
 {
-    return item_->text().isEmpty() ? QStringLiteral("Cannot load image") : item_->text();
+    if (!item_->text().isEmpty())
+        return item_->text();
+    // A failed pixmap and an error item both mean the image is gone.
+    if (item_->isPixmap() || item_->isError())
+        return QStringLiteral("Cannot load image");
+    // A type this build does not know: keep the item and its data (a
+    // save round-trips it) but say so instead of pretending it is a
+    // broken image.
+    return QStringLiteral("Unsupported item type: %1").arg(item_->type);
 }
 
 QRectF SceneItem::computedDisplayBounds() const
 {
-    if (isPixmap() && !failed_ && item_->hasCrop())
+    if (item_types::forType(item_->type).crops && !failed_ && item_->hasCrop())
         return item_->crop();
     return imageBounds();
 }
 
 QRectF SceneItem::boundingRect() const
 {
-    if (isPixmap() && !failed_)
-        return cropMode_ ? imageBounds() : displayBounds_;
-    if (isText()) {
-        const QFontMetricsF metrics(font_);
-        const QRectF bounds = metrics.boundingRect(QRectF(0, 0, kTextWrapWidth, 10000),
-                                                   Qt::TextWordWrap, item_->text());
-        return QRectF(0, 0, qMax(bounds.width(), 40.0), qMax(bounds.height(), 20.0));
-    }
+    const item_types::Traits &traits = item_types::forType(item_->type);
+    return traits.bounds ? (this->*traits.bounds)() : QRectF();
+}
+
+QRectF SceneItem::boundsPixmap() const
+{
+    if (failed_)
+        return boundsError();
+    return cropMode_ ? imageBounds() : displayBounds_;
+}
+
+QRectF SceneItem::boundsText() const
+{
+    const QFontMetricsF metrics(font_);
+    const QRectF bounds = metrics.boundingRect(QRectF(0, 0, kTextWrapWidth, 10000),
+                                               Qt::TextWordWrap, item_->text());
+    return QRectF(0, 0, qMax(bounds.width(), 40.0), qMax(bounds.height(), 20.0));
+}
+
+QRectF SceneItem::boundsError() const
+{
     const QFontMetricsF metrics(font_);
     const QRectF text =
         metrics.boundingRect(QRectF(0, 0, kErrorWidth - 12, 10000), Qt::TextWordWrap, errorText());
@@ -362,38 +385,54 @@ void SceneItem::paintContent(QPainter *painter)
         && std::abs(painter->combinedTransform().m11()) < 2.0;
     painter->setRenderHint(QPainter::SmoothPixmapTransform, smooth);
 
-    if (isPixmap() && !failed_) {
-        if (cropMode_) {
-            paintCropMode(painter);
-            return;
-        }
-        const QRectF bounds = imageBounds();
-        if (level_.isNull()) {
-            painter->setPen(QPen(theme::placeholder, 0, Qt::DashLine));
-            painter->setBrush(Qt::NoBrush);
-            painter->drawRect(bounds);
-        } else {
-            const QRectF crop = item_->hasCrop() ? item_->crop() : bounds;
-            const double fraction = levelFraction_ > 0 ? levelFraction_ : 1.0;
-            const QRectF source(crop.x() * fraction, crop.y() * fraction,
-                                crop.width() * fraction, crop.height() * fraction);
-            painter->drawImage(crop, displayLevel(), source);
-        }
-    } else if (isText()) {
-        if (!textEditing_) {
-            painter->setPen(theme::text);
-            painter->drawText(boundingRect(), Qt::TextWordWrap, item_->text());
-        }
-    } else {
-        const QRectF bounds = boundingRect();
-        QColor background = theme::error;
-        background.setAlpha(40);
-        painter->setPen(QPen(theme::error, 1));
-        painter->setBrush(background);
-        painter->drawRoundedRect(bounds, 4, 4);
-        painter->setPen(theme::text);
-        painter->drawText(bounds.adjusted(6, 4, -6, -4), Qt::TextWordWrap, errorText());
+    // A failed decode paints like an error item, whatever the type.
+    if (failed_) {
+        paintErrorItem(painter);
+        return;
     }
+    const item_types::Traits &traits = item_types::forType(item_->type);
+    if (traits.crops && cropMode_) {
+        paintCropMode(painter);
+        return;
+    }
+    if (traits.paint)
+        (this->*traits.paint)(painter);
+}
+
+void SceneItem::paintPixmap(QPainter *painter)
+{
+    const QRectF bounds = imageBounds();
+    if (level_.isNull()) {
+        painter->setPen(QPen(theme::placeholder, 0, Qt::DashLine));
+        painter->setBrush(Qt::NoBrush);
+        painter->drawRect(bounds);
+        return;
+    }
+    const QRectF crop = item_->hasCrop() ? item_->crop() : bounds;
+    const double fraction = levelFraction_ > 0 ? levelFraction_ : 1.0;
+    const QRectF source(crop.x() * fraction, crop.y() * fraction, crop.width() * fraction,
+                        crop.height() * fraction);
+    painter->drawImage(crop, displayLevel(), source);
+}
+
+void SceneItem::paintTextItem(QPainter *painter)
+{
+    if (textEditing_)
+        return;
+    painter->setPen(theme::text);
+    painter->drawText(boundingRect(), Qt::TextWordWrap, item_->text());
+}
+
+void SceneItem::paintErrorItem(QPainter *painter)
+{
+    const QRectF bounds = boundingRect();
+    QColor background = theme::error;
+    background.setAlpha(40);
+    painter->setPen(QPen(theme::error, 1));
+    painter->setBrush(background);
+    painter->drawRoundedRect(bounds, 4, 4);
+    painter->setPen(theme::text);
+    painter->drawText(bounds.adjusted(6, 4, -6, -4), Qt::TextWordWrap, errorText());
 }
 
 void SceneItem::paint(QPainter *painter, const QStyleOptionGraphicsItem *option, QWidget *)

@@ -14,6 +14,7 @@ private slots:
     void opacityGrayscaleCrop();
     void uuidIsStable();
     void createCopyKeepsStateAndSharesSource();
+    void knownTypesAndFactory();
 };
 
 void TestItem::defaults()
@@ -110,6 +111,23 @@ void TestItem::createCopyKeepsStateAndSharesSource()
     QCOMPARE(copy->meta, item.meta);
     QCOMPARE(copy->originalSize(), QSize(300, 200));
     QCOMPARE(copy->source, item.source);
+}
+
+void TestItem::knownTypesAndFactory()
+{
+    QVERIFY(doc::isKnownType(QStringLiteral("pixmap")));
+    QVERIFY(doc::isKnownType(QStringLiteral("text")));
+    QVERIFY(doc::isKnownType(QStringLiteral("error")));
+    QVERIFY(!doc::isKnownType(QStringLiteral("future")));
+
+    // Unknown types are still created: a board from a newer build loads
+    // and round-trips.
+    const doc::ItemPtr item = doc::createItem(QStringLiteral("future"));
+    QVERIFY(item);
+    QCOMPARE(item->type, QStringLiteral("future"));
+    QVERIFY(!item->isPixmap());
+    QVERIFY(!item->isText());
+    QVERIFY(!item->isError());
 }
 
 QTEST_GUILESS_MAIN(TestItem)

@@ -1,5 +1,7 @@
 #include "scene_export.h"
 
+#include "item_types.h"
+
 #include "scene.h"
 #include "scene_item.h"
 #include "theme.h"
@@ -164,13 +166,16 @@ QByteArray renderSceneToSvg(QGraphicsScene &scene, const SceneExportFrame &frame
         if (!item)
             continue;
         const doc::ItemPtr model = item->item();
-        if (model->isError())
+        // Error and unknown types have no SVG representation; the traits
+        // table says which types do.
+        const item_types::Traits &traits = item_types::forType(model->type);
+        if (model->isError() || !traits.svgElement)
             continue;
 
         const QPointF pos = item->pos() - offset;
         QPointF elementPos = pos;
 
-        const bool isText = model->isText();
+        const bool isText = QLatin1String(traits.svgElement) == QLatin1String("text");
         if (isText) {
             xml.writeStartElement(QStringLiteral("text"));
             xml.writeAttribute(QStringLiteral("style"), textStyle(item->font(), model->scale));

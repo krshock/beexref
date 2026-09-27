@@ -85,6 +85,13 @@ public:
 
 using ItemPtr = std::shared_ptr<Item>;
 
+// Creates an item of the given type. Unknown types are still created: a
+// board from a newer build loads and round-trips, and the UI shows it as
+// an unsupported item instead of dropping it.
+ItemPtr createItem(const QString &type);
+// Whether this build knows the type; the exporters skip unknown items.
+bool isKnownType(const QString &type);
+
 // New stable item identity: 32 lowercase hex characters, the same form
 // the Python and Go ports use.
 QString newUuid();

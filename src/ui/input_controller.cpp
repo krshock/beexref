@@ -121,7 +121,7 @@ doc::ItemPtr InputController::insertText(const QString &text, const QPointF &sce
 {
     if (text.isEmpty())
         return {};
-    auto item = std::make_shared<doc::Item>(doc::kTypeText);
+    auto item = doc::createItem(doc::kTypeText);
     item->setText(text);
     if (viewScale > 0)
         item->scale = 1.0 / viewScale;
@@ -134,7 +134,7 @@ void InputController::insertLoaded(const doc::LoadedImage &loaded, const QPointF
     if (!loaded.isValid())
         return;
 
-    auto item = std::make_shared<doc::Item>(doc::kTypePixmap);
+    auto item = doc::createItem(doc::kTypePixmap);
     item->source = std::make_shared<doc::BytesSource>(loaded.encoded);
     item->format = loaded.format;
     item->setOriginalSize(loaded.image.size());

@@ -97,6 +97,8 @@ qt_add_library(beexref_core STATIC
     src/ui/hud.cpp
     src/ui/info_dialogs.cpp
     src/ui/info_dialogs.h
+    src/ui/item_types.cpp
+    src/ui/item_types.h
     src/ui/hud.h
     src/ui/hud_preview.cpp
     src/ui/hud_preview.h

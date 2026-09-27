@@ -123,4 +123,15 @@ QString newUuid()
     return uuid;
 }
 
+ItemPtr createItem(const QString &type)
+{
+    return std::make_shared<Item>(type);
+}
+
+bool isKnownType(const QString &type)
+{
+    return type == QLatin1String(kTypePixmap) || type == QLatin1String(kTypeText)
+        || type == QLatin1String(kTypeError);
+}
+
 } // namespace doc
