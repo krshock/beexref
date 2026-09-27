@@ -416,7 +416,7 @@ Error friendlyWriteError(const Error &error)
 }
 
 // One scalar from a query that must return exactly one row.
-Result<qint64> countRows(Connection &db, const QString &sql)
+Result<qint64> scalar(Connection &db, const QString &sql)
 {
     auto statement = db.prepare(sql);
     if (!statement)
@@ -429,13 +429,76 @@ Result<qint64> countRows(Connection &db, const QString &sql)
     return statement.value().columnInt64(0);
 }
 
+// Deletes one item row; its blob and floors follow through the foreign
+// keys, which the caller has enabled.
+Status deleteItem(Connection &db, qint64 id)
+{
+    auto statement = db.prepare(QStringLiteral("DELETE FROM items WHERE id=?"));
+    if (!statement)
+        return statement.error();
+    if (Status status = statement.value().bind(1, id); !status)
+        return status.error();
+    if (Status status = statement.value().exec(); !status)
+        return status;
+    if (db.changes() != 1) {
+        return Error{0,
+                     QStringLiteral("Cannot delete item %1: the row is missing").arg(id),
+                     db.path()};
+    }
+    return Status::ok();
+}
+
+// Updates one existing row. The encoded blob never changes (sources are
+// immutable), so only the row is written; a row that is gone is an error
+// rather than a silent skip.
+Status updateItem(Connection &db, const Record &record)
+{
+    auto statement = db.prepare(QStringLiteral(
+        "UPDATE items SET type=?, x=?, y=?, z=?, scale=?, rotation=?, flip=?, data=?, "
+        "meta=?, uuid=? WHERE id=?"));
+    if (!statement)
+        return statement.error();
+    Statement &stmt = statement.value();
+    if (Status status = stmt.bind(1, record.type); !status)
+        return status;
+    if (Status status = stmt.bind(2, record.x); !status)
+        return status;
+    if (Status status = stmt.bind(3, record.y); !status)
+        return status;
+    if (Status status = stmt.bind(4, record.z); !status)
+        return status;
+    if (Status status = stmt.bind(5, record.scale); !status)
+        return status;
+    if (Status status = stmt.bind(6, record.rotation); !status)
+        return status;
+    if (Status status = stmt.bind(7, record.flip); !status)
+        return status;
+    if (Status status = stmt.bind(8, record.dataJson); !status)
+        return status;
+    if (Status status = stmt.bind(9, record.metaJson); !status)
+        return status;
+    if (Status status = stmt.bind(10, record.uuid); !status)
+        return status;
+    if (Status status = stmt.bind(11, record.saveId); !status)
+        return status;
+    if (Status status = stmt.exec(); !status)
+        return status;
+    if (db.changes() != 1) {
+        return Error{0,
+                     QStringLiteral("Cannot update item %1: the row is missing")
+                         .arg(record.saveId),
+                     db.path()};
+    }
+    return Status::ok();
+}
+
 } // namespace
 
 Status verifyWritten(Connection &db, const QVector<Record> &records, Format format)
 {
     const bool legacy = format == Format::Bee;
 
-    const auto itemRows = countRows(db, QStringLiteral("SELECT count(*) FROM items"));
+    const auto itemRows = scalar(db, QStringLiteral("SELECT count(*) FROM items"));
     if (!itemRows)
         return itemRows.error();
     if (itemRows.value() != records.size()) {
@@ -451,7 +514,7 @@ Status verifyWritten(Connection &db, const QVector<Record> &records, Format form
         if (record.type == QLatin1String("pixmap") && !record.placeholder)
             ++expectedBlobs;
     }
-    const auto blobRows = countRows(db, QStringLiteral("SELECT count(*) FROM sqlar"));
+    const auto blobRows = scalar(db, QStringLiteral("SELECT count(*) FROM sqlar"));
     if (!blobRows)
         return blobRows.error();
     if (blobRows.value() != expectedBlobs) {
@@ -463,7 +526,7 @@ Status verifyWritten(Connection &db, const QVector<Record> &records, Format form
     }
 
     if (!legacy) {
-        const auto orphanFloors = countRows(
+        const auto orphanFloors = scalar(
             db,
             QStringLiteral("SELECT count(*) FROM lod WHERE item_id NOT IN (SELECT id FROM items)"));
         if (!orphanFloors)
@@ -477,7 +540,7 @@ Status verifyWritten(Connection &db, const QVector<Record> &records, Format form
     }
 
     const int expectedVersion = legacy ? schema::kBeeUserVersion : schema::kUserVersion;
-    const auto version = countRows(db, QStringLiteral("PRAGMA user_version"));
+    const auto version = scalar(db, QStringLiteral("PRAGMA user_version"));
     if (!version)
         return version.error();
     if (version.value() != expectedVersion) {
@@ -489,7 +552,7 @@ Status verifyWritten(Connection &db, const QVector<Record> &records, Format form
     }
 
     const int expectedApp = legacy ? schema::kBeeApplicationId : schema::kApplicationId;
-    const auto appId = countRows(db, QStringLiteral("PRAGMA application_id"));
+    const auto appId = scalar(db, QStringLiteral("PRAGMA application_id"));
     if (!appId)
         return appId.error();
     if (appId.value() != expectedApp) {
@@ -555,6 +618,101 @@ Status save(const QString &path, const QVector<Record> &records, bool storeThumb
                      path};
     }
     return Status::ok();
+}
+
+Status update(const QString &path, const QVector<Record> &changed, const QVector<Record> &added,
+              const QVector<qint64> &removedIds, qint64 firstId, bool storeThumbnails,
+              const Progress &progress, QVector<qint64> *assignedIds)
+{
+    if (changed.isEmpty() && added.isEmpty() && removedIds.isEmpty())
+        return Status::ok();
+
+    auto db = Connection::open(path, Connection::OpenMode::ReadWrite);
+    if (!db)
+        return db.error();
+    Connection &connection = db.value();
+
+    // Only a file that already is the current native shape may be
+    // updated; anything else goes through save() (temp file + rename).
+    const auto version = scalar(connection, QStringLiteral("PRAGMA user_version"));
+    if (!version)
+        return version.error();
+    if (version.value() != schema::kUserVersion) {
+        return Error{0,
+                     QStringLiteral("Cannot update in place: file version %1 is not current (%2)")
+                         .arg(version.value())
+                         .arg(schema::kUserVersion),
+                     path};
+    }
+
+    // Where new ids start. Derived from every table that carries one,
+    // before any delete, so a freed id is not handed out again in the
+    // same update.
+    qint64 nextId = firstId;
+    if (nextId <= 0) {
+        const auto maxId = scalar(
+            connection,
+            QStringLiteral("SELECT COALESCE(MAX(m), 0) FROM (SELECT MAX(id) AS m FROM items "
+                           "UNION ALL SELECT MAX(item_id) AS m FROM sqlar "
+                           "UNION ALL SELECT MAX(item_id) AS m FROM lod)"));
+        if (!maxId)
+            return maxId.error();
+        nextId = maxId.value() + 1;
+    }
+
+    if (Status status = connection.exec(QStringLiteral("PRAGMA foreign_keys=ON")); !status)
+        return status;
+
+    auto transaction = Transaction::begin(connection);
+    if (!transaction)
+        return transaction.error();
+
+    const int total = removedIds.size() + changed.size() + added.size();
+    int done = 0;
+    const auto report = [&progress, total](int count) {
+        if (progress)
+            progress(count, total);
+    };
+
+    for (qint64 id : removedIds) {
+        if (Status status = deleteItem(connection, id); !status)
+            return status;
+        report(++done);
+    }
+
+    for (const Record &record : changed) {
+        if (Status status = updateItem(connection, record); !status)
+            return status;
+        report(++done);
+    }
+
+    for (const Record &record : added) {
+        const qint64 id = record.saveId > 0 ? record.saveId : nextId++;
+        if (assignedIds)
+            assignedIds->append(id);
+        if (Status status = insertItem(connection, record, id, false); !status)
+            return status;
+
+        QByteArray pixmap = record.pixmap;
+        if (pixmap.isEmpty() && record.pixmapSource)
+            pixmap = record.pixmapSource();
+        if (pixmap.isEmpty()) {
+            // A placeholder is an explicit, known-gone image; anything
+            // else must not be written without its bytes.
+            if (!record.placeholder)
+                return Error{0, missingImagesMessage({id}), {}};
+        } else {
+            if (Status status = insertBlob(connection, record, id, pixmap); !status)
+                return status;
+            if (storeThumbnails) {
+                if (Status status = writeThumbnail(connection, id, record, pixmap); !status)
+                    return status;
+            }
+        }
+        report(++done);
+    }
+
+    return transaction.value().commit();
 }
 
 } // namespace board

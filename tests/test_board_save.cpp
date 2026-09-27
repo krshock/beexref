@@ -73,6 +73,10 @@ private slots:
     void failsWhenImageBytesAreMissing();
     void verificationCatchesAnIncompleteFile();
     void keepsTheTempWhenRenameFails();
+    void updatesAnExistingBoardInPlace();
+    void updateRefusesNonCurrentFiles();
+    void updateRollsBackOnFailure();
+    void updateWritesPlaceholderRows();
 };
 
 void TestBoardSave::savesAndReloads()
@@ -459,6 +463,136 @@ void TestBoardSave::keepsTheTempWhenRenameFails()
     QCOMPARE(kept.size(), 1);
     QVERIFY(QFileInfo(dir.filePath(kept.first())).size() > 0);
     QVERIFY(QFile::remove(dir.filePath(kept.first())));
+}
+
+void TestBoardSave::updatesAnExistingBoardInPlace()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString path = dir.filePath(QStringLiteral("board.beex"));
+
+    const QByteArray red = makePng(300, 200, Qt::red);
+    const QByteArray blue = makePng(300, 200, Qt::blue);
+    QVERIFY(board::save(path, {pixmapRecord(1, red, QStringLiteral("a.png")),
+                               pixmapRecord(2, blue, QStringLiteral("b.png"))})
+                .isOk());
+
+    // Move item 1 (no bytes needed: the blob is immutable), delete item
+    // 2, add a new image. The new id is explicit, so the freed id 2 is
+    // never handed out again.
+    board::Record moved = pixmapRecord(1, QByteArray(), QStringLiteral("a.png"));
+    moved.x = 100;
+    moved.y = 50;
+    moved.scale = 2.0;
+    const QByteArray green = makePng(120, 90, Qt::green);
+    QVector<qint64> assigned;
+    const auto status =
+        board::update(path, {moved}, {pixmapRecord(0, green, QStringLiteral("c.png"))}, {2}, 100,
+                      true, {}, &assigned);
+    QVERIFY2(status.isOk(), qPrintable(status.error().toString()));
+    QCOMPARE(assigned.size(), 1);
+    QCOMPARE(assigned.first(), qint64(100));
+
+    auto board = board::Board::open(path, dir.filePath(QStringLiteral("cache")));
+    QVERIFY(board.isOk());
+    auto items = board.value().items();
+    QVERIFY(items.isOk());
+    QCOMPARE(items.value().size(), 2);
+
+    // The moved item kept its row and its bytes.
+    bool sawMoved = false;
+    for (const board::ItemRow &row : items.value()) {
+        if (row.id != 1)
+            continue;
+        sawMoved = true;
+        QCOMPARE(row.x, 100.0);
+        QCOMPARE(row.y, 50.0);
+        QCOMPARE(row.scale, 2.0);
+    }
+    QVERIFY(sawMoved);
+    QCOMPARE(board.value().blob(1).value(), red);
+
+    // The new item is there with its bytes and a floor.
+    QCOMPARE(board.value().blob(100).value(), green);
+    QVERIFY(board.value().floorLevels().value().contains(100));
+
+    // The deleted item's row and blob are gone: two blobs remain (item 1
+    // and the new one), and the deleted id has no image.
+    QCOMPARE(board.value().counts().value().value(QStringLiteral("sqlar")), qint64(2));
+    QVERIFY(!board.value().blob(2).isOk());
+}
+
+void TestBoardSave::updateRefusesNonCurrentFiles()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString path = dir.filePath(QStringLiteral("legacy.bee"));
+    QVERIFY(board::save(path, {pixmapRecord(1, makePng(120, 90, Qt::red), QStringLiteral("a.png"))},
+                        false, {}, nullptr, board::Format::Bee)
+                .isOk());
+    const QByteArray before = fileBytes(path);
+
+    board::Record changed = pixmapRecord(1, QByteArray(), QStringLiteral("a.png"));
+    changed.x = 5;
+    const auto status = board::update(path, {changed}, {}, {});
+    QVERIFY(!status.isOk());
+    QVERIFY2(status.error().message.contains(QStringLiteral("not current")),
+             qPrintable(status.error().toString()));
+    QCOMPARE(fileBytes(path), before);
+}
+
+void TestBoardSave::updateRollsBackOnFailure()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString path = dir.filePath(QStringLiteral("board.beex"));
+    QVERIFY(board::save(path, {pixmapRecord(1, makePng(120, 90, Qt::red), QStringLiteral("a.png"))})
+                .isOk());
+
+    // A changed record whose row does not exist fails the update, and the
+    // whole change set rolls back: the added image is not written either.
+    board::Record missing = pixmapRecord(99, QByteArray(), QStringLiteral("gone.png"));
+    const auto status =
+        board::update(path, {missing},
+                      {pixmapRecord(0, makePng(60, 40, Qt::blue), QStringLiteral("b.png"))}, {});
+    QVERIFY(!status.isOk());
+    QVERIFY2(status.error().message.contains(QStringLiteral("row is missing")),
+             qPrintable(status.error().toString()));
+
+    // The file is unchanged and still opens with its one item.
+    auto board = board::Board::open(path, dir.filePath(QStringLiteral("cache")));
+    QVERIFY(board.isOk());
+    QCOMPARE(board.value().items().value().size(), 1);
+    QCOMPARE(board.value().blob(1).value(), makePng(120, 90, Qt::red));
+}
+
+void TestBoardSave::updateWritesPlaceholderRows()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString path = dir.filePath(QStringLiteral("board.beex"));
+    QVERIFY(board::save(path, {pixmapRecord(1, makePng(120, 90, Qt::red), QStringLiteral("a.png"))})
+                .isOk());
+
+    // An added placeholder is an explicit, known-gone image: the row is
+    // written and no blob.
+    board::Record placeholder = pixmapRecord(0, QByteArray(), QStringLiteral("gone.png"));
+    placeholder.placeholder = true;
+    const auto status = board::update(path, {}, {placeholder}, {});
+    QVERIFY2(status.isOk(), qPrintable(status.error().toString()));
+
+    auto board = board::Board::open(path, dir.filePath(QStringLiteral("cache")));
+    QVERIFY(board.isOk());
+    QCOMPARE(board.value().items().value().size(), 2);
+    QCOMPARE(board.value().counts().value().value(QStringLiteral("sqlar")), qint64(1));
+
+    // Without the placeholder flag the same record fails: an image row is
+    // never written without its image.
+    board::Record broken = pixmapRecord(0, QByteArray(), QStringLiteral("broken.png"));
+    const auto failed = board::update(path, {}, {broken}, {});
+    QVERIFY(!failed.isOk());
+    QVERIFY2(failed.error().message.contains(QStringLiteral("could not be read")),
+             qPrintable(failed.error().toString()));
 }
 
 QTEST_GUILESS_MAIN(TestBoardSave)

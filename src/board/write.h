@@ -76,4 +76,23 @@ Status save(const QString &path, const QVector<Record> &records,
 // before it replaces the target.
 Status verifyWritten(Connection &db, const QVector<Record> &records, Format format);
 
+// Applies a change set to an existing native board in place, in one
+// transaction: removed ids are deleted (blobs and floors follow through
+// the foreign keys), changed records update their row (the encoded blob
+// is immutable and stays), and added records are inserted with their
+// blobs and floors. The target must already be at the current version;
+// the caller falls back to save() otherwise. SQLite's journal makes the
+// transaction atomic, but unlike save() there is no temp-file rename
+// behind it.
+//
+// firstId is where new row ids start; pass the caller's highest-ever id
+// plus one. Zero derives one from the file, which can reuse an id that
+// was deleted in an earlier save -- two items sharing an id would
+// collide, so callers that keep an undo history should pass a value.
+// assignedIds, when given, receives the row id of every added record in
+// order.
+Status update(const QString &path, const QVector<Record> &changed, const QVector<Record> &added,
+              const QVector<qint64> &removedIds, qint64 firstId = 0, bool storeThumbnails = true,
+              const Progress &progress = {}, QVector<qint64> *assignedIds = nullptr);
+
 } // namespace board
