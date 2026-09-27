@@ -151,7 +151,9 @@ python3 -m pip install --user aqtinstall
 
 `qtbase` carries Core/Gui/Widgets/Network/Test, the base install already
 includes Svg, and `qtimageformats` carries the WebP/TIFF image plugins
-that boards need. Qt lands in `~/Qt/6.8.3/gcc_64`.
+that boards need. Qt lands in `<outputdir>/6.8.3/gcc_64` (aqt's default
+output directory is `~/Qt`); export `QT_DIR` as that directory for the
+build below.
 
 **aqtinstall on 20.04.** Ubuntu 20.04 has Python 3.8, and aqtinstall
 dropped 3.8 after 3.1.18 — a version that cannot finish Qt 6.8.3: it
@@ -179,7 +181,7 @@ the VM only needs the runtime dependencies above.
 Check that the platform plugin's dependencies resolve:
 
 ```
-ldd ~/Qt/6.8.3/gcc_64/plugins/platforms/libqxcb.so | grep "not found"
+ldd "$QT_DIR/plugins/platforms/libqxcb.so" | grep "not found"
 ```
 
 No output is the expected result; `libxcb-cursor` from above is the
@@ -187,30 +189,38 @@ usual missing one.
 
 ### AppImage tools
 
+`tools/release/linux-appimage.sh --host --fetch-tools` downloads the
+pinned tools into `.tools/`; the versions and checksums live in
+`tools/release/Dockerfile.appimage`. To fetch them by hand:
+
 ```
 mkdir -p ~/appimage-tools && cd ~/appimage-tools
-wget https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
-wget https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/continuous/linuxdeploy-plugin-qt-x86_64.AppImage
-wget https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage
+wget https://github.com/linuxdeploy/linuxdeploy/releases/download/1-alpha-20251107-1/linuxdeploy-x86_64.AppImage
+wget https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/1-alpha-20250213-1/linuxdeploy-plugin-qt-x86_64.AppImage
+wget https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
 chmod +x *.AppImage
 ```
 
 ## Build
 
-The committed presets are for the development machine (Qt 6.11.2,
-ccache, `-fuse-ld=mold`); `mold` is not in 20.04, so configure
-explicitly:
+The presets take Qt from `QT_DIR` (they set `CMAKE_PREFIX_PATH` from
+it), and `mold` — which is not in 20.04 — is only used when it is
+installed, so configure with the 20.04 toolchain and the release Qt
+exported:
 
 ```
 cd beexrefcpp
+export QT_DIR="$HOME/Qt/6.8.3/gcc_64"
 cmake -B build -G Ninja \
     -DCMAKE_BUILD_TYPE=Release \
     -DBUILD_TESTING=OFF \
     -DCMAKE_C_COMPILER=gcc-10 \
-    -DCMAKE_CXX_COMPILER=g++-10 \
-    -DCMAKE_PREFIX_PATH="$HOME/Qt/6.8.3/gcc_64"
+    -DCMAKE_CXX_COMPILER=g++-10
 cmake --build build -j"$(nproc)"
 ```
+
+(`-DCMAKE_PREFIX_PATH="$QT_DIR"` on the command line does the same when
+you would rather not export anything.)
 
 Keep the build directory on the VM's own disk, not on a VirtualBox
 shared folder: compiling is much faster there, and CMake's compiler
@@ -273,8 +283,8 @@ fills it: it copies the executable and its non-system libraries, while
 through `qmake`, so put the VM's Qt on `PATH` (or set `QMAKE`):
 
 ```
-export PATH="$HOME/appimage-tools:$HOME/Qt/6.8.3/gcc_64/bin:$PATH"
-export QMAKE="$HOME/Qt/6.8.3/gcc_64/bin/qmake"
+export PATH="$HOME/appimage-tools:$QT_DIR/bin:$PATH"
+export QMAKE="$QT_DIR/bin/qmake"
 export ARCH=x86_64
 
 linuxdeploy-x86_64.AppImage --appdir AppDir --plugin qt \
@@ -313,7 +323,7 @@ and that Save/Export produce files the other ports open.
 
 - **`Could not load the Qt platform plugin "xcb"`** — `libxcb-cursor0`
   is missing. Install it as shown above, then check with
-  `ldd ~/Qt/6.8.3/gcc_64/plugins/platforms/libqxcb.so | grep "not found"`.
+  `ldd "$QT_DIR/plugins/platforms/libqxcb.so" | grep "not found"`.
 
 - **`The install of the beexref target requires changing an RPATH ...
   ELF-based or XCOFF-based platform`** — CMake did not detect the

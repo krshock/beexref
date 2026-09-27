@@ -2,6 +2,6 @@ build/
 compile_commands.json
 .cache/
 *.user
-aqtinstall.log
+.tools/
 dist/
 appimage/

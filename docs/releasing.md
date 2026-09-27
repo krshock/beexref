@@ -32,18 +32,22 @@ Linux AppImage (glibc 2.31 floor, Ubuntu 20.04 base):
 
 ```
 tools/release/linux-appimage.sh            # in a pinned Ubuntu 20.04 container
-tools/release/linux-appimage.sh --host     # on a prepared 20.04 machine
-tools/release/linux-appimage.sh --with-wayland   # bundle the Wayland plugin
-tools/release/linux-appimage.sh --host --fetch-tools  # download the pinned tools
+QT_DIR=$HOME/Qt/6.8.3/gcc_64 tools/release/linux-appimage.sh --host
+tools/release/linux-appimage.sh --with-wayland   # bundle the Wayland plugins
+QT_DIR=... tools/release/linux-appimage.sh --host --fetch-tools  # pinned tools
 ```
 
-The container path needs `docker` or `podman`; `--host` expects Qt 6.8.3
-at `$QT_DIR` (default `~/Qt/6.8.3/gcc_64`) and the AppImage tools at
-`$APPIMAGE_TOOLS` (default `~/appimage-tools`), and honours `CC`/`CXX`
-(default `gcc-10`/`g++-10`). Tool versions and their checksums live in
-`tools/release/Dockerfile.appimage`, so both paths use the same ones.
-The script builds, runs the test suite offscreen, stages through
-`cmake --install`, runs `linuxdeploy --plugin qt`, writes
+The container path needs `docker` or `podman` and carries its own pinned
+Qt and tools; nothing to set. `--host` needs `QT_DIR` pointing at the
+release Qt (the aqt install directory, e.g. `$HOME/Qt/6.8.3/gcc_64`) —
+the script refuses another Qt series, so a dev `QT_DIR` (6.11.x) cannot
+silently produce a release artifact — and the AppImage tools at
+`$APPIMAGE_TOOLS` (default `<repo>/.tools`, filled by `--fetch-tools`).
+It honours `CC`/`CXX` (default `gcc-10`/`g++-10`). Tool and Qt versions
+and their checksums live in `tools/release/Dockerfile.appimage`, so both
+paths use the same ones. The script builds, runs the test suite
+offscreen, deploys with `linuxdeploy --plugin qt` (plus the offscreen
+plugin, and the Wayland plugins with `--with-wayland`), writes
 `dist/BeeXRef-<version>-x86_64.AppImage` and verifies it.
 
 Windows zip (from an MSYS2 UCRT64 shell, see `docs/building-windows.md`):

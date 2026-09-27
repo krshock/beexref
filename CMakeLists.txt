@@ -27,6 +27,22 @@ find_package(Qt6 6.8 REQUIRED COMPONENTS Core Gui Widgets Svg Network Test)
 find_package(Threads REQUIRED)
 qt_standard_project_setup()
 
+# Qt comes from QT_DIR (the aqt install directory), which the presets
+# pass as CMAKE_PREFIX_PATH; nothing machine-specific lives in the
+# presets, so a fresh checkout builds with QT_DIR set or
+# -DCMAKE_PREFIX_PATH=<prefix> on the command line.
+
+# mold is a link-time speedup, not a requirement: use it when it is
+# installed, so a machine without it still configures. -DBEEXREF_USE_MOLD=OFF
+# disables the detection.
+option(BEEXREF_USE_MOLD "Link with mold when it is installed" ON)
+if(BEEXREF_USE_MOLD AND UNIX AND NOT APPLE)
+    find_program(BEEXREF_MOLD_EXECUTABLE mold)
+    if(BEEXREF_MOLD_EXECUTABLE)
+        add_link_options(-fuse-ld=mold)
+    endif()
+endif()
+
 # Vendored SQLite amalgamation. The flags match the behavior of the
 # sqlite3 builds the Python and Go ports use.
 add_library(beexref_sqlite3 STATIC third_party/sqlite3/sqlite3.c)

@@ -22,9 +22,12 @@ ctest --preset linux-debug
 ```
 
 - Presets live in `CMakePresets.json`. `linux-debug` is **RelWithDebInfo**, not
-  a debug build. Both use ccache and mold (LTO is on for release).
-- Requires Qt >= 6.8. Point `CMAKE_PREFIX_PATH` at your Qt install: edit
-  the `base` preset or pass `-DCMAKE_PREFIX_PATH=...`.
+  a debug build. Both use ccache; mold is used automatically when it is
+  installed (`-DBEEXREF_USE_MOLD=OFF` disables it; LTO is on for release).
+- Requires Qt >= 6.8. Point the presets at your Qt by exporting `QT_DIR`
+  (the aqt install directory, e.g. `$HOME/Qt/6.11.2/gcc_64`), or pass
+  `-DCMAKE_PREFIX_PATH=...` for a one-off. The presets carry no machine
+  paths.
 - Binaries land in `build/linux-{debug,release}/`: `beexref`,
   `beexref-boardcheck`, `beexref-ui-smoke`.
 - Single test binary: `./build/linux-debug/tests/test_<name> <slotName>`

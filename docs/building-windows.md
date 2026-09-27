@@ -186,11 +186,11 @@ Useful when no Windows machine is available. The pieces:
   (`g++-mingw-w64-x86-64-posix`), matching Qt's MinGW 13.1 major.
 - Qt for Windows `win64_mingw` 6.11.2 from `aqtinstall` (or the `.7z`
   packages on `download.qt.io`).
-- The Linux Qt 6.11.2 (`~/Qt/6.11.2/gcc_64`) as `QT_HOST_PATH` for
-  `moc`, `rcc` and `uic`.
+- The Linux Qt 6.11.2 (`$QT_DIR`) as `QT_HOST_PATH` for `moc`, `rcc`
+  and `uic`.
 - A toolchain file setting `CMAKE_SYSTEM_NAME Windows`, the `-posix`
-  compilers, `windres` and the find-root modes; clear the presets'
-  `-fuse-ld=mold` flags, which cannot link PE binaries.
+  compilers, `windres` and the find-root modes; do not enable mold there
+  (it cannot link PE binaries).
 - Tests run through Wine with `CMAKE_CROSSCOMPILING_EMULATOR=wine` and
   `WINEPATH` pointing at the target Qt `bin` and the MinGW runtime;
   `windeployqt.exe` also runs under Wine.

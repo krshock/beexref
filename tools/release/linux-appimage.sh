@@ -4,12 +4,15 @@
 # Default: in the pinned Ubuntu 20.04 container (docker or podman), so
 # the artifact keeps the glibc 2.31 floor documented in
 # docs/linux-appimage.md. --host runs the same steps on a machine that
-# already has Qt 6.8.3 and the AppImage tools (the VM recipe);
-# --with-wayland adds the qtwayland module to the image. CC/CXX override
+# already has the release Qt (QT_DIR must point at it; the script refuses
+# another Qt series) and the AppImage tools (APPIMAGE_TOOLS, default
+# .tools/); --with-wayland bundles the Wayland plugins. CC/CXX override
 # the 20.04 toolchain (gcc-10/g++-10); --fetch-tools downloads the pinned
 # AppImage tools into APPIMAGE_TOOLS first.
 #
 # Usage: linux-appimage.sh [--container|--host] [--with-wayland] [--fetch-tools]
+#   container:  tools/release/linux-appimage.sh
+#   host (VM):  QT_DIR=$HOME/Qt/6.8.3/gcc_64 tools/release/linux-appimage.sh --host
 set -eu
 . "$(dirname "$0")/common.sh"
 
@@ -53,13 +56,14 @@ if [ "$mode" = container ] && [ "$inner" = false ]; then
         "$image" tools/release/linux-appimage.sh --inner
 fi
 
-# Inside the container (--inner) or on a prepared host.
-QT_DIR=${QT_DIR:-$HOME/Qt/6.8.3/gcc_64}
-TOOLS_DIR=${APPIMAGE_TOOLS:-$HOME/appimage-tools}
-[ -d "$QT_DIR" ] || release_die "no Qt at $QT_DIR (set QT_DIR)"
+# Inside the container (--inner) or on a prepared host. The container
+# image sets QT_DIR itself; a host needs it set explicitly (the release
+# Qt, i.e. the aqt install directory) and the tools live in the repo's
+# .tools/ unless APPIMAGE_TOOLS says otherwise.
+TOOLS_DIR=${APPIMAGE_TOOLS:-$root/.tools}
 
-# The tool versions live in the Dockerfile, so the container and the host
-# recipe always fetch the same ones.
+# The tool and Qt versions live in the Dockerfile, so the container and
+# the host recipe always use the same ones.
 dockerfile="$root/tools/release/Dockerfile.appimage"
 tool_version()
 {
@@ -83,6 +87,18 @@ if [ "$fetch_tools" = true ]; then
     echo "linux-appimage: tools in $TOOLS_DIR"
     exit 0
 fi
+
+QT_DIR=${QT_DIR:-}
+[ -n "$QT_DIR" ] || release_die \
+    "set QT_DIR to the release Qt (e.g. QT_DIR=\$HOME/Qt/6.8.3/gcc_64), or use the container"
+[ -d "$QT_DIR" ] || release_die "no Qt at $QT_DIR"
+[ -x "$QT_DIR/bin/qmake" ] || release_die "no qmake in $QT_DIR"
+pinned_qt=$(tool_version QT_VERSION)
+pinned_series=$(printf '%s' "$pinned_qt" | cut -d. -f1,2)
+host_qt=$("$QT_DIR/bin/qmake" -query QT_VERSION)
+host_series=$(printf '%s' "$host_qt" | cut -d. -f1,2)
+[ "$host_series" = "$pinned_series" ] || release_die \
+    "QT_DIR has Qt $host_qt, but releases are pinned to $pinned_qt (use the container, or point QT_DIR at the $pinned_series tree)"
 
 [ -x "$TOOLS_DIR/linuxdeploy-x86_64.AppImage" ] \
     || release_die "no linuxdeploy at $TOOLS_DIR (set APPIMAGE_TOOLS, or --fetch-tools)"
