@@ -8,6 +8,12 @@ The reason to build here instead of a current distribution is the glibc
 floor: a binary built on 22.04 (glibc 2.35) refuses to start on 20.04,
 while one built on 20.04 runs from 20.04 up.
 
+`tools/release/linux-appimage.sh` automates this recipe: it builds in a
+pinned 20.04 container by default, or on this VM with `--host`, and
+writes `dist/BeeXRef-<version>-x86_64.AppImage`. The manual steps below
+are what the script runs; `docs/releasing.md` covers the whole release
+flow.
+
 **Qt version caveat.** The project is developed against Qt 6.11, but
 Qt 6.11's official binaries are built on Ubuntu 24.04 and need
 `GLIBC_2.34` and `GLIBCXX_3.4.29`, which 20.04 does not have. Use

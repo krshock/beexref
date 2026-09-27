@@ -81,7 +81,9 @@ The version is `MAJOR.MINOR.PATCH`, defined once in `CMakeLists.txt`
 `constants::Version`, which `--version`, the About dialog and the
 startup log use. To release: bump the version there, commit, and tag the
 release commit `vX.Y.Z` (annotated), matching the Python reference's
-tags (`v0.3.3`). Do not tag from a dirty tree.
+tags (`v0.3.3`). Do not tag from a dirty tree. The scripts in
+`tools/release/` automate the whole flow (version bump, changelog, both
+artifacts, checksums, GitHub release); see `docs/releasing.md`.
 
 ## Format & tools
 
