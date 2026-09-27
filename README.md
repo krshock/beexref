@@ -5,7 +5,8 @@ canvas that holds hundreds of reference images while you work. Keep your
 references in one place, arrange and inspect them, and leave the board
 floating over your art program.
 
-This is the C++/Qt 6 build.
+This is the C++/Qt 6 build, a multiplatform application that runs on
+Linux and Windows (x64).
 
 ## What you can do
 
@@ -27,17 +28,6 @@ This is the C++/Qt 6 build.
 - **Export** — save the board as an image (PNG, JPEG or SVG), write every
   image out to a folder, or export the legacy `.bee` format.
 
-## Running BeeXRef
-
-Building requires CMake, a C++ compiler and Qt 6.8 or newer:
-
-    cmake --preset linux-release
-    cmake --build --preset linux-release
-    ./build/linux-release/beexref my-board.beex
-
-On Windows, `docs/building-windows.md` covers the MSYS2 build and the
-self-contained package.
-
 ## Board files
 
 Boards are saved as `.beex` files: one file holds your images, their
@@ -47,5 +37,19 @@ the original BeeRef can be opened and imported.
 ## License
 
 BeeXRef is free software under the GPL-3.0 license (see `LICENSE`).
-It is a fork of [BeeRef](https://github.com/rbreu/beeref) by Rebecca
-Breu, maintained by krshock. Developers: see `AGENTS.md`.
+
+## About BeeXRef
+
+BeeXRef is a fork of [BeeRef](https://github.com/rbreu/beeref) by Rebecca Breu
+Its a port from the original python code to C++ plus some new features
+
+Compared to BeeRef it adds:
+- Big memory usage optimizations to allow hundreds if images in
+the same scene
+- You can edit name, author name or notes of any image
+- a new `.beex` board format, with editable per-image metadata: name,
+  author, origin link and notes
+- Original beeref `.bee` file format is supported as import/export only
+- Image smoothing settings
+- board and image exports (PNG/JPEG/SVG, or every image to a folder);
+- "spotlight" brings an image to the front without modifying its z-order (non-destructive)
