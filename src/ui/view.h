@@ -29,6 +29,7 @@ class ColorSamplerTool;
 class LevelLoader;
 class LodManager;
 class MoveHandle;
+class MoveWindowTool;
 class ToolController;
 
 // Canvas view: pan, zoom, fit, rubber-band selection and
@@ -60,7 +61,7 @@ public:
     void toggleMoveWindow();
     void enterMoveWindow();
     void exitMoveWindow();
-    bool movingWindow() const { return movingWindow_; }
+    bool movingWindow() const;
     // The canvas corner's move handle (tests and the smoke harness);
     // pressing it starts the platform window move.
     // Defined in the .cpp, where MoveHandle is a complete type.
@@ -199,9 +200,6 @@ private:
     void applyTransformGesture(const QPointF &scenePos, bool snap);
     void finishTransformGesture();
     void updateHoverCursor(const QPoint &viewportPos);
-    // One move-window step: follows the global cursor, so the window
-    // keeps moving while the pointer is outside it.
-    void moveWindowTick();
     // Puts the move handle in the canvas' top-left corner.
     void positionMoveHandle();
 
@@ -236,14 +234,6 @@ private:
     bool transformStarted_ = false;
     // Drag-zoom (the reference's ZOOM_MODE): a bound button drag zooms.
     bool dragZoom_ = false;
-    bool movingWindow_ = false;
-    // Whether the mode started from a held mouse button (a drag) or
-    // was armed by the action (keyboard/menu), where no button is held.
-    bool moveWindowPressed_ = false;
-    // Whether the window was active when the mode was armed: only then
-    // does losing activation end it.
-    bool moveWindowWasActive_ = false;
-    QPointF moveWindowGlobal_;
     QTimer *moveWindowTimer_ = nullptr;
     MoveHandle *moveHandle_ = nullptr;
     QTextEdit *textEditor_ = nullptr;
@@ -271,6 +261,7 @@ private:
     // session state.
     std::unique_ptr<ToolController> tools_;
     ColorSamplerTool *sampler_ = nullptr;
+    MoveWindowTool *moveWindowTool_ = nullptr;
 
     // Crop session state.
     SceneItem *cropItem_ = nullptr;

@@ -28,8 +28,10 @@ QString ToolController::activeId() const
 
 void ToolController::cancel()
 {
-    if (Tool *tool = active())
-        tool->cancel();
+    for (const auto &tool : tools_) {
+        if (tool->active())
+            tool->cancel();
+    }
 }
 
 bool ToolController::mousePress(QMouseEvent *event)

@@ -4,6 +4,7 @@
 #include "cursors.h"
 #include "lod_manager.h"
 #include "move_handle.h"
+#include "move_window_tool.h"
 #include "rendering.h"
 #include "selection_ops.h"
 #include "theme.h"
@@ -14,7 +15,6 @@
 #include <QApplication>
 #include <QContextMenuEvent>
 #include <QDragEnterEvent>
-#include <QGuiApplication>
 #include <QDragMoveEvent>
 #include <QDropEvent>
 #include <QMimeData>
@@ -23,7 +23,6 @@
 #include <QScrollBar>
 #include <QTextEdit>
 #include <QTimer>
-#include <QCursor>
 #include <QKeyEvent>
 #include <QWindow>
 #include <QWheelEvent>
@@ -48,7 +47,8 @@ View::View(QWidget *parent)
     // mouse events stop at the edge, which used to strand the mode).
     moveWindowTimer_ = new QTimer(this);
     moveWindowTimer_->setInterval(10);
-    connect(moveWindowTimer_, &QTimer::timeout, this, &View::moveWindowTick);
+    moveWindowTool_ = tools_->add<MoveWindowTool>(this, moveWindowTimer_);
+    connect(moveWindowTimer_, &QTimer::timeout, this, [this]() { moveWindowTool_->tick(); });
 
     // The corner move handle: shown only while the window's title bar
     // is disabled (see setMoveHandleVisible). Pressing it starts the
@@ -457,10 +457,10 @@ void View::mousePressEvent(QMouseEvent *event)
     beginInteraction();
     lod_->evaluateNow();
 
-    // While the window is following the pointer, any press ends the
-    // mode, like the reference's movewin handling.
-    if (movingWindow_) {
-        exitMoveWindow();
+    // The active tool owns the press: move-window ends, colour sampling
+    // samples and ends. The reference checks its main controls and
+    // active modes before the mouse bindings.
+    if (tools_->mousePress(event)) {
         event->accept();
         return;
     }
@@ -486,13 +486,6 @@ void View::mousePressEvent(QMouseEvent *event)
         dragZoomInverted_ = binding.inverted;
         dragZoomStart_ = event->position().toPoint();
         dragZoomAnchor_ = dragZoomStart_;
-        event->accept();
-        return;
-    }
-
-    // The active tool (colour sampling, and later the other modes)
-    // consumes the event before the item interactions.
-    if (tools_->mousePress(event)) {
         event->accept();
         return;
     }
@@ -603,7 +596,7 @@ void View::mouseMoveEvent(QMouseEvent *event)
 {
     const QPoint position = event->position().toPoint();
 
-    if (movingWindow_) {
+    if (movingWindow()) {
         // The timer moves the window; keep the cursor and skip the
         // other interactions.
         event->accept();
@@ -710,8 +703,9 @@ void View::mouseReleaseEvent(QMouseEvent *event)
 {
     restoreSmoothing();
 
-    if (movingWindow_) {
-        exitMoveWindow();
+    // The active tool owns the release: a move-window drag ends here,
+    // like the reference's main controls.
+    if (tools_->mouseRelease(event)) {
         event->accept();
         return;
     }
@@ -1037,7 +1031,6 @@ void View::cancelModes()
     cancelCrop();
     tools_->cancel();
     commitTextEdit();
-    exitMoveWindow();
 }
 
 void View::startTextEdit(SceneItem *item)
@@ -1162,10 +1155,7 @@ void View::finishCropSession(bool changed)
 
 void View::toggleMoveWindow()
 {
-    if (movingWindow_)
-        exitMoveWindow();
-    else
-        enterMoveWindow();
+    moveWindowTool_->toggle();
 }
 
 QWidget *View::moveHandle() const
@@ -1195,55 +1185,17 @@ void View::positionMoveHandle()
 
 void View::enterMoveWindow()
 {
-    if (movingWindow_)
-        return;
-    movingWindow_ = true;
-    viewport()->setCursor(Qt::SizeAllCursor);
-    moveWindowGlobal_ = QCursor::pos();
-    // A drag ends when its button comes up; an armed mode (the action
-    // from the keyboard or the menu) has no button and ends on the next
-    // press or Esc instead.
-    moveWindowPressed_ = QGuiApplication::mouseButtons() != Qt::NoButton;
-    moveWindowWasActive_ = window() && window()->isActiveWindow();
-    moveWindowTimer_->start();
+    moveWindowTool_->enter();
 }
 
 void View::exitMoveWindow()
 {
-    if (!movingWindow_)
-        return;
-    movingWindow_ = false;
-    moveWindowPressed_ = false;
-    moveWindowWasActive_ = false;
-    moveWindowTimer_->stop();
-    viewport()->unsetCursor();
+    moveWindowTool_->exit();
 }
 
-void View::moveWindowTick()
+bool View::movingWindow() const
 {
-    if (!movingWindow_)
-        return;
-    // A drag that was released outside the window never reaches
-    // mouseReleaseEvent; the global button state does.
-    if (moveWindowPressed_ && QGuiApplication::mouseButtons() == Qt::NoButton) {
-        exitMoveWindow();
-        return;
-    }
-    // The armed mode should not keep following the cursor once another
-    // application comes to the front (only when the window was active
-    // when it was armed).
-    if (!moveWindowPressed_ && moveWindowWasActive_ && window()
-        && !window()->isActiveWindow()) {
-        exitMoveWindow();
-        return;
-    }
-    const QPointF global = QCursor::pos();
-    const QPointF delta = global - moveWindowGlobal_;
-    if (delta.isNull())
-        return;
-    moveWindowGlobal_ = global;
-    if (QWidget *top = window())
-        top->move(top->pos() + delta.toPoint());
+    return moveWindowTool_ && moveWindowTool_->active();
 }
 
 void View::startSampleColor()
@@ -1293,11 +1245,8 @@ void View::updateCropHoverCursor(const QPoint &viewportPos)
 
 void View::keyPressEvent(QKeyEvent *event)
 {
-    if (movingWindow_) {
-        exitMoveWindow();
-        event->accept();
-        return;
-    }
+    // Any key ends the active tool (move-window, colour sampling), like
+    // the reference's main controls.
     if (tools_->keyPress(event)) {
         event->accept();
         return;
@@ -1349,7 +1298,7 @@ bool View::eventFilter(QObject *watched, QEvent *event)
 
 void View::leaveEvent(QEvent *event)
 {
-    if (drag_ == Drag::None && !panning_ && !samplingColor() && !movingWindow_)
+    if (drag_ == Drag::None && !panning_ && !samplingColor() && !movingWindow())
         viewport()->unsetCursor();
     QGraphicsView::leaveEvent(event);
 }
