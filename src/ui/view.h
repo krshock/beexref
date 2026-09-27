@@ -27,10 +27,12 @@ namespace ui {
 
 class ColorSamplerTool;
 class CropTool;
+class DragZoomTool;
 class LevelLoader;
 class LodManager;
 class MoveHandle;
 class MoveWindowTool;
+class PanTool;
 class TextEditTool;
 class ToolController;
 
@@ -138,6 +140,9 @@ public:
 
     // delta is a wheel angleDelta step; anchor is in viewport pixels.
     void zoomAt(int delta, const QPoint &anchor);
+    // A pan drag step: scrolls by the delta and refreshes the view state
+    // and the LOD queue (the pan tool and the wheel panning).
+    void panStep(const QPoint &delta);
 
 signals:
     // A colour was sampled and the mode ended; the window copies it.
@@ -226,18 +231,11 @@ private:
     doc::UndoStack *undoStack_ = nullptr;
     MimeFilter mimeFilter_;
 
-    bool panning_ = false;
-    QPoint panStart_;
     bool moving_ = false;
     bool moveStarted_ = false;
     bool transformStarted_ = false;
-    // Drag-zoom (the reference's ZOOM_MODE): a bound button drag zooms.
-    bool dragZoom_ = false;
     QTimer *moveWindowTimer_ = nullptr;
     MoveHandle *moveHandle_ = nullptr;
-    bool dragZoomInverted_ = false;
-    QPoint dragZoomStart_;
-    QPoint dragZoomAnchor_;
     controls::Bindings bindings_;
     Drag drag_ = Drag::None;
     // The view transform at press: gesture coordinates are mapped
@@ -260,6 +258,8 @@ private:
     MoveWindowTool *moveWindowTool_ = nullptr;
     TextEditTool *textEditTool_ = nullptr;
     CropTool *cropTool_ = nullptr;
+    PanTool *panTool_ = nullptr;
+    DragZoomTool *dragZoomTool_ = nullptr;
 
     // Scale/rotate gesture state.
     QRectF gestureBounds_;

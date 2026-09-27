@@ -238,6 +238,7 @@ private slots:
     void insertTextActionCreatesAnEditableItem();
     void doubleClickOnTextEditsIt();
     void moveHandleShowsOverTheWelcomeOverlay();
+    void dragZoomFollowsTheBinding();
     void infoDialogsShowTheExpectedContent();
     void metadataPanelEditsAndCommits();
     void hudPreviewShowsTheStyledPanel();
@@ -3015,6 +3016,39 @@ void TestUiScene::moveHandleShowsOverTheWelcomeOverlay()
     QTest::qWait(50);
     QVERIFY(handle->isVisible());
     QCOMPARE(view->childAt(handle->geometry().center()), handle);
+}
+
+void TestUiScene::dragZoomFollowsTheBinding()
+{
+    ui::MainWindow window;
+    window.show();
+    QTest::qWait(50);
+    ui::View *view = window.view();
+
+    // A board item, so the zoom has an extent to work with.
+    QImage image(200, 150, QImage::Format_ARGB32);
+    image.fill(Qt::red);
+    QMimeData mime;
+    mime.setImageData(image);
+    window.input()->insertMimeData(mime, QPointF(0, 0));
+    QTest::qWait(20);
+
+    const double before = view->transform().m11();
+    // The default zoom binding is Ctrl + middle drag; the vertical drag
+    // zooms twenty wheel steps per pixel, like the reference's ZOOM_MODE
+    // (the binding's inverted flag picks the direction).
+    const QPoint start = view->viewport()->rect().center();
+    sendMouse(view->viewport(), QEvent::MouseButtonPress, start, Qt::MiddleButton,
+              Qt::MiddleButton, Qt::ControlModifier);
+    sendMouse(view->viewport(), QEvent::MouseMove, start + QPoint(0, 40), Qt::NoButton,
+              Qt::MiddleButton, Qt::ControlModifier);
+    sendMouse(view->viewport(), QEvent::MouseButtonRelease, start + QPoint(0, 40),
+              Qt::MiddleButton, Qt::NoButton, Qt::ControlModifier);
+
+    QVERIFY2(view->transform().m11() != before,
+             qPrintable(QStringLiteral("scale %1 -> %2")
+                            .arg(before)
+                            .arg(view->transform().m11())));
 }
 
 void TestUiScene::infoDialogsShowTheExpectedContent()

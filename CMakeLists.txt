@@ -110,6 +110,8 @@ qt_add_library(beexref_core STATIC
     src/ui/layout_ops.h
     src/ui/opacity_dialog.cpp
     src/ui/opacity_dialog.h
+    src/ui/pan_tool.cpp
+    src/ui/pan_tool.h
     src/ui/cursors.cpp
     src/ui/cursors.h
     src/ui/selection_ops.cpp
@@ -119,6 +121,8 @@ qt_add_library(beexref_core STATIC
     src/ui/selection_tools.cpp
     src/ui/selection_tools.h
     src/ui/downloader.h
+    src/ui/drag_zoom_tool.cpp
+    src/ui/drag_zoom_tool.h
     src/ui/drop.cpp
     src/ui/drop.h
     src/ui/input_controller.cpp

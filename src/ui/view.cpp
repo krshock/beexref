@@ -3,9 +3,11 @@
 #include "color_sampler_tool.h"
 #include "crop_tool.h"
 #include "cursors.h"
+#include "drag_zoom_tool.h"
 #include "lod_manager.h"
 #include "move_handle.h"
 #include "move_window_tool.h"
+#include "pan_tool.h"
 #include "rendering.h"
 #include "selection_ops.h"
 #include "text_edit_tool.h"
@@ -52,6 +54,8 @@ View::View(QWidget *parent)
     connect(moveWindowTimer_, &QTimer::timeout, this, [this]() { moveWindowTool_->tick(); });
     textEditTool_ = tools_->add<TextEditTool>(this);
     cropTool_ = tools_->add<CropTool>(this);
+    panTool_ = tools_->add<PanTool>(this);
+    dragZoomTool_ = tools_->add<DragZoomTool>(this);
 
     // The corner move handle: shown only while the window's title bar
     // is disabled (see setMoveHandleVisible). Pressing it starts the
@@ -255,6 +259,13 @@ void View::panBy(const QPoint &delta)
         return;
     horizontalScrollBar()->setValue(horizontalScrollBar()->value() + delta.x());
     verticalScrollBar()->setValue(verticalScrollBar()->value() + delta.y());
+}
+
+void View::panStep(const QPoint &delta)
+{
+    panBy(delta);
+    updateViewState();
+    lod_->schedule();
 }
 
 double View::zoomExtent(bool maximum) const
@@ -476,17 +487,12 @@ void View::mousePressEvent(QMouseEvent *event)
         return;
     }
     if (binding.valid && binding.group == QLatin1String("pan")) {
-        panning_ = true;
-        panStart_ = event->position().toPoint();
-        viewport()->setCursor(Qt::ClosedHandCursor);
+        panTool_->start(event->position().toPoint());
         event->accept();
         return;
     }
     if (binding.valid && binding.group == QLatin1String("zoom")) {
-        dragZoom_ = true;
-        dragZoomInverted_ = binding.inverted;
-        dragZoomStart_ = event->position().toPoint();
-        dragZoomAnchor_ = dragZoomStart_;
+        dragZoomTool_->start(event->position().toPoint(), binding.inverted);
         event->accept();
         return;
     }
@@ -585,29 +591,6 @@ void View::mouseMoveEvent(QMouseEvent *event)
         return;
     }
 
-    if (panning_) {
-        // Content follows the cursor: the reference pans by
-        // (start - current), which is the negated scrollbar delta.
-        panBy(panStart_ - position);
-        panStart_ = position;
-        updateViewState();
-        lod_->schedule();
-        event->accept();
-        return;
-    }
-
-    if (dragZoom_) {
-        // The reference zooms by the vertical drag, twenty times the
-        // wheel step per pixel, anchored where the drag started.
-        int delta = dragZoomStart_.y() - position.y();
-        if (dragZoomInverted_)
-            delta *= -1;
-        dragZoomStart_ = position;
-        zoomAt(delta * 20, dragZoomAnchor_);
-        event->accept();
-        return;
-    }
-
     if (tools_->mouseMove(event)) {
         event->accept();
         return;
@@ -674,21 +657,6 @@ void View::mouseReleaseEvent(QMouseEvent *event)
     // The active tool owns the release: a move-window drag ends here,
     // like the reference's main controls.
     if (tools_->mouseRelease(event)) {
-        event->accept();
-        return;
-    }
-
-    // A release ends pan and drag-zoom, whatever button it is, like the
-    // reference's PAN_MODE/ZOOM_MODE handling.
-    if (panning_) {
-        panning_ = false;
-        viewport()->unsetCursor();
-        event->accept();
-        return;
-    }
-
-    if (dragZoom_) {
-        dragZoom_ = false;
         event->accept();
         return;
     }
@@ -1070,7 +1038,7 @@ bool View::eventFilter(QObject *watched, QEvent *event)
 
 void View::leaveEvent(QEvent *event)
 {
-    if (drag_ == Drag::None && !panning_ && !samplingColor() && !movingWindow())
+    if (drag_ == Drag::None && !panTool_->active() && !samplingColor() && !movingWindow())
         viewport()->unsetCursor();
     QGraphicsView::leaveEvent(event);
 }
