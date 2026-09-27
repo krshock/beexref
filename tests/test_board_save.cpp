@@ -2,6 +2,7 @@
 #include <QColor>
 #include <QDir>
 #include <QFile>
+#include <QFileInfo>
 #include <QImage>
 #include <QTemporaryDir>
 #include <QtTest>
@@ -26,7 +27,16 @@ QByteArray makePng(int width, int height, const QColor &color)
 
 QStringList tempFiles(const QString &dir)
 {
-    return QDir(dir).entryList({QStringLiteral(".beex-*.tmp")}, QDir::Files);
+    // The temp names start with a dot, so hidden entries must be listed.
+    return QDir(dir).entryList({QStringLiteral(".beex-*.tmp")}, QDir::Files | QDir::Hidden);
+}
+
+QByteArray fileBytes(const QString &path)
+{
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly))
+        return {};
+    return file.readAll();
 }
 
 board::Record pixmapRecord(qint64 saveId, const QByteArray &png, const QString &filename)
@@ -60,6 +70,9 @@ private slots:
     void failsWhenDirectoryIsMissing();
     void storesUndecodablePixmapWithoutThumbnail();
     void exportsLegacyBeeShape();
+    void failsWhenImageBytesAreMissing();
+    void verificationCatchesAnIncompleteFile();
+    void keepsTheTempWhenRenameFails();
 };
 
 void TestBoardSave::savesAndReloads()
@@ -361,6 +374,91 @@ void TestBoardSave::exportsLegacyBeeShape()
     QVERIFY(blobRow);
     QVERIFY(blobRow.value());
     QCOMPARE(blobs.value().columnInt64(0), qint64(2));
+}
+
+void TestBoardSave::failsWhenImageBytesAreMissing()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString path = dir.filePath(QStringLiteral("board.beex"));
+
+    // A good save first, so the target has content that must survive the
+    // failed one below.
+    QVERIFY(board::save(path, {pixmapRecord(1, makePng(80, 60, Qt::red), QStringLiteral("a.png"))})
+                .isOk());
+    const QByteArray before = fileBytes(path);
+    QVERIFY(!before.isEmpty());
+
+    // A pixmap whose source cannot produce bytes must fail the whole
+    // save: writing the row without the image would silently lose it.
+    board::Record broken = pixmapRecord(1, QByteArray(), QStringLiteral("gone.png"));
+    broken.pixmapSource = []() { return QByteArray(); };
+    QVector<board::Record> records;
+    records << pixmapRecord(2, makePng(40, 30, Qt::blue), QStringLiteral("b.png")) << broken;
+
+    const auto status = board::save(path, records);
+    QVERIFY(!status.isOk());
+    QVERIFY2(status.error().message.contains(QStringLiteral("could not be read")),
+             qPrintable(status.error().toString()));
+    QVERIFY2(status.error().message.contains(QStringLiteral("nothing was written")),
+             qPrintable(status.error().toString()));
+
+    // The target is byte-identical and no temp file is left behind.
+    QCOMPARE(fileBytes(path), before);
+    QVERIFY(tempFiles(dir.path()).isEmpty());
+}
+
+void TestBoardSave::verificationCatchesAnIncompleteFile()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString path = dir.filePath(QStringLiteral("half.beex"));
+
+    // A file with the right schema but no rows at all, checked against
+    // two records: the verification save() runs before the rename must
+    // reject it.
+    auto db = board::Connection::open(path, board::Connection::OpenMode::Create);
+    QVERIFY(db.isOk());
+    QVERIFY(board::schema::createTables(db.value()).isOk());
+    QVERIFY(board::schema::writeHeader(db.value()).isOk());
+
+    const QVector<board::Record> records = {
+        pixmapRecord(1, makePng(40, 30, Qt::red), QStringLiteral("a.png")),
+        pixmapRecord(2, makePng(40, 30, Qt::blue), QStringLiteral("b.png"))};
+    const auto status = board::verifyWritten(db.value(), records, board::Format::Beex);
+    QVERIFY(!status.isOk());
+    QVERIFY2(status.error().message.contains(QStringLiteral("Verification failed")),
+             qPrintable(status.error().toString()));
+
+    // And the same records pass once they really are written.
+    const QString good = dir.filePath(QStringLiteral("good.beex"));
+    QVERIFY(board::save(good, records).isOk());
+    auto goodDb = board::Connection::open(good, board::Connection::OpenMode::ReadOnly);
+    QVERIFY(goodDb.isOk());
+    QVERIFY(board::verifyWritten(goodDb.value(), records, board::Format::Beex).isOk());
+}
+
+void TestBoardSave::keepsTheTempWhenRenameFails()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+
+    // A directory as the target: the temp file is written and verified,
+    // but the rename cannot replace a directory, and the complete new
+    // file must be kept rather than deleted.
+    QVERIFY(QDir(dir.path()).mkpath(QStringLiteral("target")));
+    const QString path = dir.filePath(QStringLiteral("target"));
+
+    const auto status =
+        board::save(path, {pixmapRecord(1, makePng(60, 40, Qt::green), QStringLiteral("g.png"))});
+    QVERIFY(!status.isOk());
+    QVERIFY2(status.error().message.contains(QStringLiteral("new version is kept")),
+             qPrintable(status.error().toString()));
+
+    const QStringList kept = tempFiles(dir.path());
+    QCOMPARE(kept.size(), 1);
+    QVERIFY(QFileInfo(dir.filePath(kept.first())).size() > 0);
+    QVERIFY(QFile::remove(dir.filePath(kept.first())));
 }
 
 QTEST_GUILESS_MAIN(TestBoardSave)

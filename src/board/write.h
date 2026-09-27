@@ -10,6 +10,8 @@
 
 namespace board {
 
+class Connection;
+
 // One item to write. Positive save ids are preserved; new records get
 // fresh ids after the highest existing one. PixmapSource supplies the
 // encoded payload lazily, so a save streams one image at a time
@@ -56,11 +58,18 @@ enum class Format {
 // is written and renamed over the target, so a failure leaves any
 // existing file untouched. With storeThumbnails, a floor level is
 // generated for every pixmap record that carries none (native format
-// only).
+// only). A pixmap whose bytes cannot be produced fails the whole save:
+// an image row is never written without its image.
 // assignedIds, when given, receives the row id of every record in the
 // same order, so the caller can write them back to its items.
 Status save(const QString &path, const QVector<Record> &records,
             bool storeThumbnails = true, const Progress &progress = {},
             QVector<qint64> *assignedIds = nullptr, Format format = Format::Beex);
+
+// Checks that a board just written from records is complete: one item
+// row per record, one blob per pixmap record, no orphaned floors, and
+// the header the reader expects. save() runs this on the temp file
+// before it replaces the target.
+Status verifyWritten(Connection &db, const QVector<Record> &records, Format format);
 
 } // namespace board

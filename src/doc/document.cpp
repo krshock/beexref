@@ -1,5 +1,7 @@
 #include "document.h"
 
+#include "logging.h"
+
 #include <QBuffer>
 #include <QImageReader>
 #include <QJsonArray>
@@ -294,8 +296,14 @@ void Document::adoptFileSources()
     // The save replaced the file; an old connection would keep reading
     // the previous bytes, so reopen the board on the current path.
     auto opened = board::Board::open(path_, tempDir_);
-    if (!opened)
+    if (!opened) {
+        // The save itself succeeded; without the reopen, LOD levels read
+        // from RAM until the next open. Say so instead of swallowing it.
+        logging::warn(QStringLiteral("Saved board could not be reopened for LOD sources"),
+                      {{QStringLiteral("file"), path_},
+                       {QStringLiteral("error"), opened.error().toString()}});
         return;
+    }
     board_ = std::make_shared<board::Board>(opened.take());
 
     for (const ItemPtr &item : items_) {

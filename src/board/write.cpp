@@ -11,6 +11,7 @@
 #include <QImage>
 #include <QImageReader>
 #include <QImageWriter>
+#include <QStringList>
 #include <QTemporaryFile>
 
 #include <algorithm>
@@ -268,6 +269,24 @@ Status writeThumbnail(Connection &db, qint64 id, const Record &record, const QBy
                        thumbnail->originalSize.height(), thumbnail->data);
 }
 
+// "2 images could not be read (ids 12, 47); nothing was written". The id
+// list is capped so a badly broken board cannot flood the dialog.
+QString missingImagesMessage(const QVector<qint64> &ids)
+{
+    constexpr int kMaxShown = 8;
+    QStringList shown;
+    for (int i = 0; i < ids.size() && i < kMaxShown; ++i)
+        shown.append(QString::number(ids.at(i)));
+    QString list = shown.join(QStringLiteral(", "));
+    if (ids.size() > shown.size())
+        list += QStringLiteral(", ...");
+    return QStringLiteral("%1 %2 could not be read (%3 %4); nothing was written")
+        .arg(ids.size())
+        .arg(ids.size() == 1 ? QStringLiteral("image") : QStringLiteral("images"))
+        .arg(ids.size() == 1 ? QStringLiteral("id") : QStringLiteral("ids"))
+        .arg(list);
+}
+
 Status writeAll(Connection &db, const QVector<Record> &records, bool storeThumbnails,
                 const Progress &progress, QVector<qint64> *assignedIds, Format format)
 {
@@ -300,6 +319,8 @@ Status writeAll(Connection &db, const QVector<Record> &records, bool storeThumbn
             nextId = record.saveId + 1;
     }
 
+    QVector<qint64> missingBytes;
+
     for (int i = 0; i < records.size(); ++i) {
         if (progress)
             progress(i, records.size());
@@ -317,8 +338,13 @@ Status writeAll(Connection &db, const QVector<Record> &records, bool storeThumbn
         QByteArray pixmap = record.pixmap;
         if (pixmap.isEmpty() && record.pixmapSource)
             pixmap = record.pixmapSource();
-        if (pixmap.isEmpty())
+        if (pixmap.isEmpty()) {
+            // An image row must never be written without its image:
+            // collect it and fail the whole save, so the caller removes
+            // the temp file and the target keeps its previous content.
+            missingBytes.append(id);
             continue;
+        }
 
         if (Status status = insertBlob(db, record, id, pixmap); !status)
             return status;
@@ -330,6 +356,8 @@ Status writeAll(Connection &db, const QVector<Record> &records, bool storeThumbn
     }
     if (progress)
         progress(records.size(), records.size());
+    if (!missingBytes.isEmpty())
+        return Error{0, missingImagesMessage(missingBytes), {}};
     return transaction.value().commit();
 }
 
@@ -345,7 +373,107 @@ bool renameOverwrite(const QString &from, const QString &to)
 #endif
 }
 
+// SQLite reports a full disk as "database or disk is full" or "disk I/O
+// error"; name the cause in the user's terms.
+Error friendlyWriteError(const Error &error)
+{
+    const QString message = error.message.toLower();
+    if (message.contains(QStringLiteral("disk")) || message.contains(QStringLiteral("full"))
+        || message.contains(QStringLiteral("no space"))) {
+        return Error{error.code,
+                     QStringLiteral("Not enough disk space to write the board (%1)")
+                         .arg(error.message),
+                     error.path};
+    }
+    return error;
+}
+
+// One scalar from a query that must return exactly one row.
+Result<qint64> countRows(Connection &db, const QString &sql)
+{
+    auto statement = db.prepare(sql);
+    if (!statement)
+        return statement.error();
+    auto row = statement.value().step();
+    if (!row)
+        return row.error();
+    if (!row.value())
+        return Error{0, QStringLiteral("Verification query returned no row"), db.path()};
+    return statement.value().columnInt64(0);
+}
+
 } // namespace
+
+Status verifyWritten(Connection &db, const QVector<Record> &records, Format format)
+{
+    const bool legacy = format == Format::Bee;
+
+    const auto itemRows = countRows(db, QStringLiteral("SELECT count(*) FROM items"));
+    if (!itemRows)
+        return itemRows.error();
+    if (itemRows.value() != records.size()) {
+        return Error{0,
+                     QStringLiteral("Verification failed: %1 item rows for %2 records")
+                         .arg(itemRows.value())
+                         .arg(records.size()),
+                     db.path()};
+    }
+
+    qint64 expectedBlobs = 0;
+    for (const Record &record : records) {
+        if (record.type == QLatin1String("pixmap"))
+            ++expectedBlobs;
+    }
+    const auto blobRows = countRows(db, QStringLiteral("SELECT count(*) FROM sqlar"));
+    if (!blobRows)
+        return blobRows.error();
+    if (blobRows.value() != expectedBlobs) {
+        return Error{0,
+                     QStringLiteral("Verification failed: %1 image blobs for %2 images")
+                         .arg(blobRows.value())
+                         .arg(expectedBlobs),
+                     db.path()};
+    }
+
+    if (!legacy) {
+        const auto orphanFloors = countRows(
+            db,
+            QStringLiteral("SELECT count(*) FROM lod WHERE item_id NOT IN (SELECT id FROM items)"));
+        if (!orphanFloors)
+            return orphanFloors.error();
+        if (orphanFloors.value() != 0) {
+            return Error{0,
+                         QStringLiteral("Verification failed: %1 orphaned floor rows")
+                             .arg(orphanFloors.value()),
+                         db.path()};
+        }
+    }
+
+    const int expectedVersion = legacy ? schema::kBeeUserVersion : schema::kUserVersion;
+    const auto version = countRows(db, QStringLiteral("PRAGMA user_version"));
+    if (!version)
+        return version.error();
+    if (version.value() != expectedVersion) {
+        return Error{0,
+                     QStringLiteral("Verification failed: user_version %1, expected %2")
+                         .arg(version.value())
+                         .arg(expectedVersion),
+                     db.path()};
+    }
+
+    const int expectedApp = legacy ? schema::kBeeApplicationId : schema::kApplicationId;
+    const auto appId = countRows(db, QStringLiteral("PRAGMA application_id"));
+    if (!appId)
+        return appId.error();
+    if (appId.value() != expectedApp) {
+        return Error{0,
+                     QStringLiteral("Verification failed: application_id %1, expected %2")
+                         .arg(appId.value())
+                         .arg(expectedApp),
+                     db.path()};
+    }
+    return Status::ok();
+}
 
 Status save(const QString &path, const QVector<Record> &records, bool storeThumbnails,
             const Progress &progress, QVector<qint64> *assignedIds, Format format)
@@ -379,13 +507,25 @@ Status save(const QString &path, const QVector<Record> &records, bool storeThumb
                 writeAll(db.value(), records, storeThumbnails, progress, assignedIds, format);
             !status) {
             QFile::remove(tempPath);
+            return friendlyWriteError(status.error());
+        }
+        // The temp file must match what the records promised before it
+        // replaces the target; a mismatch means the target keeps its
+        // previous content.
+        if (Status status = verifyWritten(db.value(), records, format); !status) {
+            QFile::remove(tempPath);
             return status;
         }
     }
 
     if (!renameOverwrite(tempPath, path)) {
-        QFile::remove(tempPath);
-        return Error{0, QStringLiteral("Cannot replace target file"), path};
+        // The complete new file is kept: the target could not be
+        // replaced, so the temp is the only copy of this save.
+        return Error{0,
+                     QStringLiteral("Cannot replace the target file; the new version is kept "
+                                    "at %1")
+                         .arg(tempPath),
+                     path};
     }
     return Status::ok();
 }

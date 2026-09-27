@@ -112,6 +112,11 @@ changelog, both artifacts, checksums, GitHub release); see
   `user_version 2` / `application_id 2060242126`, thumbnails never
   stored). This port imports and exports it, but never saves in place.
 - Thumbnails are always stored on save (there is no setting to disable it).
+- Saves are atomic and verified: the temp file must match the records
+  (item rows, one blob per image, no orphaned floors, header) before it
+  replaces the target. A pixmap that cannot produce its bytes fails the
+  save instead of writing an image-less row, and a failed rename keeps
+  the complete temp file and reports its path.
 - `beexref-boardcheck [--write-back PATH] <board>...` migrates on a copy,
   decodes every blob, checks dimensions and diffs all tables; use it to verify
   writer/reader changes against the other ports.
