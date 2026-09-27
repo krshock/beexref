@@ -29,6 +29,22 @@ struct LodSettings
 // Fills unset fields with the reference defaults.
 LodSettings normalized(const LodSettings &settings);
 
+// One LOD method, as data: the Items/lod_method settings value, whether
+// it builds the fraction ladder, and whether its budget comes from
+// Items/lod_ram_budget_mb. An id that is not registered behaves like
+// "single", as in the reference.
+struct LevelMethod
+{
+    QString id;
+    bool usesFractions = false;
+    bool budgetFromSettings = false;
+};
+
+// The registered methods, in the settings dialog's order.
+const QVector<LevelMethod> &levelMethods();
+// The registered method for an id, or nullptr.
+const LevelMethod *levelMethod(const QString &id);
+
 // One decode resolution of an image.
 struct Level
 {

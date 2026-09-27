@@ -13,6 +13,7 @@ private slots:
     void floorThumbnailBecomesTheCoarsestLevel();
     void singleMethodAlwaysOffersTheOriginal();
     void budgetOnlyForRamBudget();
+    void methodsAreSettingsValuesWithAFallback();
     void desiredFractionPicksTheCheapestCoveringLevel();
 };
 
@@ -93,6 +94,28 @@ void TestLevels::budgetOnlyForRamBudget()
     settings.method = QStringLiteral("ram_budget");
     settings.budgetMB = 256;
     QCOMPARE(ui::levelBudgetBytes(settings), qint64(256) * 1024 * 1024);
+}
+
+void TestLevels::methodsAreSettingsValuesWithAFallback()
+{
+    // The method ids are the Items/lod_method settings values, so the
+    // registry and the settings dialog's radio options agree.
+    QVERIFY(ui::levelMethod(QStringLiteral("single")));
+    QVERIFY(ui::levelMethod(QStringLiteral("fixed")));
+    const ui::LevelMethod *ramBudget = ui::levelMethod(QStringLiteral("ram_budget"));
+    QVERIFY(ramBudget);
+    QVERIFY(ramBudget->budgetFromSettings);
+    QVERIFY(!ui::levelMethod(QStringLiteral("single"))->usesFractions);
+    QCOMPARE(ui::levelMethod(QStringLiteral("nonsense")), nullptr);
+
+    // An unknown id keeps the reference's single-level fallback.
+    ui::LodSettings settings;
+    settings.method = QStringLiteral("nonsense");
+    settings.fractions = QStringLiteral("1,0.5");
+    const QVector<ui::Level> levels = ui::buildLevels(settings, QSize(400, 200), 0);
+    QCOMPARE(levels.size(), 1);
+    QCOMPARE(levels.first().fraction, 1.0);
+    QCOMPARE(ui::levelBudgetBytes(settings), qint64(0));
 }
 
 void TestLevels::desiredFractionPicksTheCheapestCoveringLevel()

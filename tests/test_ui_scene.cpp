@@ -49,6 +49,7 @@
 #include "ui/input_controller.h"
 #include "ui/lod_manager.h"
 #include "ui/main_window.h"
+#include "ui/export_formats.h"
 #include "ui/menu_layout.h"
 #include "ui/color_gamut.h"
 #include "ui/color_swatch.h"
@@ -221,6 +222,7 @@ private slots:
     void windowExportsLegacyBee();
     void exportsSceneFrameAndPng();
     void exportsSceneSvgTree();
+    void sceneExportFormatsDriveTheSuffixes();
     void windowExportsSceneSvg();
     void windowExportsImagesToDirectory();
     void windowCarriesTheAppIcon();
@@ -2214,6 +2216,31 @@ void TestUiScene::exportsSceneSvgTree()
     QVERIFY(text.contains(QStringLiteral("height=\"200\"")));
     // Elements are ordered by z: the pixmap before the text.
     QVERIFY(text.indexOf(QStringLiteral("<image")) < text.indexOf(QStringLiteral("<text")));
+}
+
+void TestUiScene::sceneExportFormatsDriveTheSuffixes()
+{
+    // The registry is the single source for the dialog filter, the
+    // suffix lookup and the writers.
+    const ui::SceneExportFormat *png = ui::sceneExportFormatForSuffix(QStringLiteral("PNG"));
+    const ui::SceneExportFormat *jpeg = ui::sceneExportFormatForSuffix(QStringLiteral("jpeg"));
+    const ui::SceneExportFormat *svg = ui::sceneExportFormatForSuffix(QStringLiteral("svg"));
+    QVERIFY(png && jpeg && svg);
+    QCOMPARE(png->id, QStringLiteral("png"));
+    QCOMPARE(jpeg->id, QStringLiteral("jpeg"));
+    QCOMPARE(ui::sceneExportFormatForSuffix(QStringLiteral("jpg"))->id, QStringLiteral("jpeg"));
+    QCOMPARE(svg->id, QStringLiteral("svg"));
+    QCOMPARE(ui::sceneExportFormatForSuffix(QStringLiteral("bmp")), nullptr);
+
+    // The filter text matches the one the export dialog always showed.
+    QCOMPARE(ui::sceneExportFilter(),
+             QStringLiteral("Image Files (*.png *.jpg *.jpeg *.svg);;PNG (*.png);;"
+                            "JPEG (*.jpg *.jpeg);;SVG (*.svg)"));
+
+    // The pixmap formats ask for a size; the vector format does not.
+    QCOMPARE(ui::sceneExportFormats().first().id, QStringLiteral("png"));
+    QVERIFY(ui::sceneExportFormats().first().asksSize);
+    QVERIFY(!svg->asksSize);
 }
 
 void TestUiScene::windowExportsSceneSvg()

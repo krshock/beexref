@@ -18,9 +18,9 @@
 #include "opacity_dialog.h"
 #include "rendering.h"
 #include "export_conflict_dialog.h"
+#include "export_formats.h"
 #include "scene_export.h"
 #include "scene_export_dialog.h"
-#include "theme.h"
 #include "doc/image_export.h"
 #include "selection_ops.h"
 #include "welcome_overlay.h"
@@ -442,8 +442,7 @@ void MainWindow::exportScene()
     const QString startDir =
         path.isEmpty() ? settings::configDir() : QFileInfo(path).absolutePath();
     QFileDialog dialog(this, QStringLiteral("Export Scene to Image"), startDir,
-                       QStringLiteral("Image Files (*.png *.jpg *.jpeg *.svg);;PNG (*.png);;"
-                                      "JPEG (*.jpg *.jpeg);;SVG (*.svg)"));
+                       sceneExportFilter());
     dialog.setAcceptMode(QFileDialog::AcceptSave);
     if (dialog.exec() != QDialog::Accepted || dialog.selectedFiles().isEmpty())
         return;
@@ -465,36 +464,34 @@ bool MainWindow::exportSceneTo(const QString &path)
     QString ext = QFileInfo(filename).suffix().toLower();
     if (ext.isEmpty()) {
         // The reference's default is the pixmap exporter.
-        ext = QStringLiteral("png");
-        filename += QStringLiteral(".png");
+        ext = sceneExportFormats().first().id;
+        filename += QLatin1Char('.') + ext;
     }
 
     // Selection outlines and handles would be rendered into the output,
     // so the scene is deselected first (as the reference does).
     scene_->clearSelection();
 
-    SceneExportFrame frame = sceneExportFrame(*scene_);
+    const SceneExportFrame frame = sceneExportFrame(*scene_);
 
-    if (ext == QLatin1String("svg")) {
-        const QByteArray svg = renderSceneToSvg(*scene_, frame);
-        QFile file(filename);
-        if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
-            QMessageBox::warning(this, QStringLiteral("Problem writing file"), file.errorString());
-            return false;
-        }
-        file.write(svg);
-        file.close();
-    } else {
+    // An unknown suffix takes the default (pixmap) exporter, whose
+    // writer lets QImage decide the encoding from the file name.
+    const SceneExportFormat *format = sceneExportFormatForSuffix(ext);
+    if (!format)
+        format = &sceneExportFormats().first();
+
+    QSize size = frame.defaultSize;
+    if (format->asksSize) {
         SceneExportDialog dialog(frame.defaultSize, this);
         if (dialog.exec() != QDialog::Accepted)
             return false;
-        const QImage image =
-            renderSceneToImage(*scene_, frame, dialog.value(), theme::canvas);
-        if (!image.save(filename, nullptr, kSceneExportQuality)) {
-            QMessageBox::warning(this, QStringLiteral("Problem writing file"),
-                                 QStringLiteral("Error writing file"));
-            return false;
-        }
+        size = dialog.value();
+    }
+
+    const QString error = format->write(*scene_, frame, size, filename);
+    if (!error.isEmpty()) {
+        QMessageBox::warning(this, QStringLiteral("Problem writing file"), error);
+        return false;
     }
 
     logging::info(QStringLiteral("Scene exported"),

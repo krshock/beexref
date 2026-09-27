@@ -49,6 +49,25 @@ LodSettings normalized(const LodSettings &settings)
     return result;
 }
 
+const QVector<LevelMethod> &levelMethods()
+{
+    static const QVector<LevelMethod> methods = {
+        {QStringLiteral("single"), false, false},
+        {QStringLiteral("fixed"), true, false},
+        {QStringLiteral("ram_budget"), true, true},
+    };
+    return methods;
+}
+
+const LevelMethod *levelMethod(const QString &id)
+{
+    for (const LevelMethod &method : levelMethods()) {
+        if (method.id == id)
+            return &method;
+    }
+    return nullptr;
+}
+
 QVector<double> parseLevelFractions(const QString &csv)
 {
     QVector<double> fractions;
@@ -75,9 +94,10 @@ QVector<Level> buildLevels(const LodSettings &settings, const QSize &original,
         return levels;
 
     const LodSettings config = normalized(settings);
-    // Anything that is not the fixed family is the single-level method,
-    // as in the reference.
-    if (config.method != QLatin1String("fixed") && config.method != QLatin1String("ram_budget")) {
+    // Anything that is not a registered fraction-ladder method is the
+    // single-level method, as in the reference.
+    const LevelMethod *method = levelMethod(config.method);
+    if (!method || !method->usesFractions) {
         levels.append({1.0, original});
     } else {
         for (double fraction : sortedUsableFractions(config.fractions)) {
@@ -108,7 +128,8 @@ QVector<Level> buildLevels(const LodSettings &settings, const QSize &original,
 qint64 levelBudgetBytes(const LodSettings &settings)
 {
     const LodSettings config = normalized(settings);
-    if (config.method != QLatin1String("ram_budget"))
+    const LevelMethod *method = levelMethod(config.method);
+    if (!method || !method->budgetFromSettings)
         return 0;
     return qint64(config.budgetMB) * 1024 * 1024;
 }
