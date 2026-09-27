@@ -3,3 +3,5 @@ compile_commands.json
 .cache/
 *.user
 aqtinstall.log
+dist/
+appimage/
