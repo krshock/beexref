@@ -36,6 +36,19 @@ struct Damage
 // the row as an explicit placeholder instead of refusing.
 inline constexpr char kPlaceholderKey[] = "placeholder";
 
+// What changed since the last save, for the incremental writer: items
+// with no row in the file yet, existing items whose state changed, and
+// the ids of rows to remove. Empty after an open or a save. It stays
+// dark until the incremental writer consumes it.
+struct Changes
+{
+    QSet<const Item *> added;
+    QSet<const Item *> changed;
+    QSet<qint64> removedIds;
+
+    bool isEmpty() const { return added.isEmpty() && changed.isEmpty() && removedIds.isEmpty(); }
+};
+
 // User-facing label for a kind, shared by the log and the report.
 QString damageLabel(Damage::Kind kind);
 
@@ -104,9 +117,14 @@ public:
     // noteItemChanged(), so a canvas refresh only reapplies the items
     // that actually moved (a board with thousands of items would
     // otherwise reapply every transform on every undo).
-    void noteItemChanged(const ItemPtr &item) { dirty_.insert(item.get()); }
+    void noteItemChanged(const ItemPtr &item);
     const QSet<const Item *> &dirtyItems() const { return dirty_; }
     void clearDirtyItems() { dirty_.clear(); }
+
+    // The save-side change set: new rows, updated rows and removed ids
+    // since the file was last written. A successful save empties it.
+    const Changes &changes() const { return changes_; }
+    void clearChanges();
 
     void addItem(const ItemPtr &item);
     void insertItem(qsizetype index, const ItemPtr &item);
@@ -143,11 +161,17 @@ public:
 private:
     // One writer record per item, in item order.
     QVector<board::Record> buildRecords() const;
+    // Records an item that entered the document (add, insert or undo of
+    // a removal): a row the file already holds is an update, anything
+    // else is an insert, and a pending removal of that id is cancelled.
+    void noteItemAdded(const ItemPtr &item);
 
     QString path_;
     QString tempDir_;
     QVector<ItemPtr> items_;
     QVector<Damage> damage_;
+    Changes changes_;
+    QSet<qint64> savedIds_;
     QSet<const Item *> dirty_;
     bool modified_ = false;
     std::shared_ptr<board::Board> board_;

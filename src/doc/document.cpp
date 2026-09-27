@@ -76,6 +76,8 @@ Document::Document(Document &&other) noexcept
     , tempDir_(std::move(other.tempDir_))
     , items_(std::move(other.items_))
     , damage_(std::move(other.damage_))
+    , changes_(std::move(other.changes_))
+    , savedIds_(std::move(other.savedIds_))
     , modified_(other.modified_)
     , board_(std::move(other.board_))
 {
@@ -91,6 +93,8 @@ Document &Document::operator=(Document &&other) noexcept
     tempDir_ = std::move(other.tempDir_);
     items_ = std::move(other.items_);
     damage_ = std::move(other.damage_);
+    changes_ = std::move(other.changes_);
+    savedIds_ = std::move(other.savedIds_);
     modified_ = other.modified_;
     board_ = std::move(other.board_);
     other.modified_ = false;
@@ -224,6 +228,8 @@ board::Result<Document> Document::open(const QString &path, const QString &tempD
     document.items_ = std::move(items);
     document.board_ = std::move(board);
     document.damage_ = std::move(damage);
+    // The file holds every current item, so there is nothing to save yet.
+    document.clearChanges();
     return document;
 }
 
@@ -274,18 +280,62 @@ int Document::placeholderCount() const
 void Document::addItem(const ItemPtr &item)
 {
     items_.append(item);
+    noteItemAdded(item);
 }
 
 void Document::insertItem(qsizetype index, const ItemPtr &item)
 {
     items_.insert(qBound(qsizetype(0), index, items_.size()), item);
+    noteItemAdded(item);
 }
 
 void Document::removeItem(const ItemPtr &item)
 {
     const qsizetype index = indexOf(item);
-    if (index >= 0)
-        items_.remove(index);
+    if (index < 0)
+        return;
+    items_.remove(index);
+    // An item that never reached the file is not a file change at all;
+    // one the file holds becomes a pending delete.
+    changes_.added.remove(item.get());
+    changes_.changed.remove(item.get());
+    if (item->id > 0 && savedIds_.contains(item->id))
+        changes_.removedIds.insert(item->id);
+}
+
+void Document::noteItemChanged(const ItemPtr &item)
+{
+    if (!item)
+        return;
+    dirty_.insert(item.get());
+    if (item->id > 0 && savedIds_.contains(item->id))
+        changes_.changed.insert(item.get());
+    else
+        changes_.added.insert(item.get());
+}
+
+void Document::noteItemAdded(const ItemPtr &item)
+{
+    if (!item)
+        return;
+    // Restoring a removed item (undo) takes its id back out of the
+    // removal set; a row the file already holds is an update, anything
+    // else an insert.
+    changes_.removedIds.remove(item->id);
+    if (item->id > 0 && savedIds_.contains(item->id))
+        changes_.changed.insert(item.get());
+    else
+        changes_.added.insert(item.get());
+}
+
+void Document::clearChanges()
+{
+    changes_ = {};
+    savedIds_.clear();
+    for (const ItemPtr &item : items_) {
+        if (item->id > 0)
+            savedIds_.insert(item->id);
+    }
 }
 
 qsizetype Document::indexOf(const Item &item) const
@@ -361,8 +411,10 @@ board::Status Document::save(const QString &path, bool storeThumbnails,
             items_.at(i)->id = ids.at(i);
     }
     // The file now matches what the document knows: the placeholders are
-    // explicit rows and everything else is complete.
+    // explicit rows and everything else is complete, so the damage list
+    // and the change set are empty again.
     damage_.clear();
+    clearChanges();
     return status;
 }
 

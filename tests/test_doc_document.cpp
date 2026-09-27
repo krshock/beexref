@@ -95,6 +95,8 @@ private slots:
     void savesRecoveredCopiesWithMarkedPlaceholders();
     void opensNewerVersionBoardsAsRecovered();
     void recoversImagesWhenTheItemRowsAreGone();
+    void tracksSaveChanges();
+    void changesFollowTheSavedFile();
 };
 
 void TestDocument::savesAndReopensEveryField()
@@ -664,6 +666,84 @@ void TestDocument::recoversImagesWhenTheItemRowsAreGone()
     QVERIFY(!again.value().damaged());
     QCOMPARE(again.value().items().size(), 1);
     QCOMPARE(again.value().blob(*again.value().items().first()).value(), png);
+}
+
+void TestDocument::tracksSaveChanges()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString path = dir.filePath(QStringLiteral("changes.beex"));
+
+    doc::Document document = doc::Document::create();
+    const doc::ItemPtr first = pixmapItem(makePng(300, 200, Qt::red));
+    document.addItem(first);
+
+    // Everything is new before the first save.
+    QVERIFY(document.changes().added.contains(first.get()));
+    QVERIFY(document.changes().removedIds.isEmpty());
+    QVERIFY(!document.changes().isEmpty());
+
+    QVERIFY(document.save(path).isOk());
+    QVERIFY(document.changes().isEmpty());
+
+    // A change to a saved item is an update, not an insert.
+    first->scale = 0.5;
+    document.noteItemChanged(first);
+    QVERIFY(document.changes().changed.contains(first.get()));
+    QVERIFY(document.changes().added.isEmpty());
+
+    // A new item is an insert.
+    const doc::ItemPtr second = pixmapItem(makePng(120, 90, Qt::blue));
+    document.addItem(second);
+    QVERIFY(document.changes().added.contains(second.get()));
+
+    QVERIFY(document.save(path).isOk());
+    QVERIFY(document.changes().isEmpty());
+
+    // Removing a saved item is a pending delete; undoing the removal
+    // takes the id back out.
+    document.removeItem(second);
+    QCOMPARE(document.changes().removedIds.size(), 1);
+    QVERIFY(document.changes().removedIds.contains(second->id));
+    document.insertItem(0, second);
+    QVERIFY(document.changes().removedIds.isEmpty());
+
+    // A save settles everything; an item added and removed before any
+    // save never was a file change.
+    QVERIFY(document.save(path).isOk());
+    QVERIFY(document.changes().isEmpty());
+    const doc::ItemPtr third = pixmapItem(makePng(60, 40, Qt::green));
+    document.addItem(third);
+    document.removeItem(third);
+    QVERIFY(document.changes().isEmpty());
+}
+
+void TestDocument::changesFollowTheSavedFile()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString path = dir.filePath(QStringLiteral("changes.beex"));
+
+    doc::Document document = doc::Document::create();
+    document.addItem(pixmapItem(makePng(300, 200, Qt::red)));
+    QVERIFY(document.save(path).isOk());
+
+    // A reopened document starts clean, and its rows are updates, not
+    // inserts.
+    auto reopened = doc::Document::open(path, dir.filePath(QStringLiteral("cache")));
+    QVERIFY(reopened.isOk());
+    doc::Document again = reopened.take();
+    QVERIFY(again.changes().isEmpty());
+
+    const doc::ItemPtr row = again.items().first();
+    row->scale = 2.0;
+    again.noteItemChanged(row);
+    QVERIFY(again.changes().changed.contains(row.get()));
+    QVERIFY(again.changes().added.isEmpty());
+
+    // A row deleted after the save is a pending delete on reopen too.
+    again.removeItem(row);
+    QCOMPARE(again.changes().removedIds.size(), 1);
 }
 
 QTEST_GUILESS_MAIN(TestDocument)
