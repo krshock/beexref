@@ -116,7 +116,9 @@ changelog, both artifacts, checksums, GitHub release); see
   (item rows, one blob per image, no orphaned floors, header) before it
   replaces the target. A pixmap that cannot produce its bytes fails the
   save instead of writing an image-less row, and a failed rename keeps
-  the complete temp file and reports its path.
+  the complete temp file and reports its path. On Windows the replace is
+  retried for about 1.5 s on sharing/lock/access errors first, for
+  antivirus, the indexer and sync clients.
 - `beexref-boardcheck [--write-back PATH] <board>...` migrates on a copy,
   decodes every blob, checks dimensions and diffs all tables; use it to verify
   writer/reader changes against the other ports.

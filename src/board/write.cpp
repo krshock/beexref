@@ -361,13 +361,39 @@ Status writeAll(Connection &db, const QVector<Record> &records, bool storeThumbn
     return transaction.value().commit();
 }
 
+#if defined(Q_OS_WIN)
+// Replacing a file can fail while antivirus, the indexer or a sync
+// client holds the target open for a moment. Retry the transient errors
+// with a short backoff: six attempts over about 1.5 s, long enough for
+// the usual holds and short enough not to feel hung. A directory target
+// or a missing path fails immediately, so a real error is not delayed.
+bool replaceWithRetry(const QString &from, const QString &to)
+{
+    constexpr int kAttempts = 6;
+    int delayMs = 50;
+    for (int attempt = 0; attempt < kAttempts; ++attempt) {
+        if (::MoveFileExW(reinterpret_cast<const wchar_t *>(from.utf16()),
+                          reinterpret_cast<const wchar_t *>(to.utf16()),
+                          MOVEFILE_REPLACE_EXISTING)
+            != 0) {
+            return true;
+        }
+        const DWORD error = ::GetLastError();
+        const bool transient = error == ERROR_SHARING_VIOLATION || error == ERROR_LOCK_VIOLATION
+            || error == ERROR_ACCESS_DENIED;
+        if (!transient || attempt + 1 == kAttempts)
+            return false;
+        ::Sleep(static_cast<DWORD>(delayMs));
+        delayMs *= 2;
+    }
+    return false;
+}
+#endif
+
 bool renameOverwrite(const QString &from, const QString &to)
 {
 #if defined(Q_OS_WIN)
-    return ::MoveFileExW(reinterpret_cast<const wchar_t *>(from.utf16()),
-                         reinterpret_cast<const wchar_t *>(to.utf16()),
-                         MOVEFILE_REPLACE_EXISTING)
-        != 0;
+    return replaceWithRetry(from, to);
 #else
     return ::rename(QFile::encodeName(from).constData(), QFile::encodeName(to).constData()) == 0;
 #endif
