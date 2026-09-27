@@ -37,6 +37,10 @@ void CropTool::start()
     item_ = target;
     drag_ = crop::Part::None;
     item_->enterCropMode();
+    // The crop editor must not be hidden behind other items: the item
+    // goes into the spotlight (a view-only raise), which also leaves it
+    // raised once the crop is confirmed.
+    view_->setSpotlight({item_});
     view_->setFocus();
     view_->sessionFinished(false);
 }

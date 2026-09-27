@@ -260,6 +260,7 @@ public:
             // Enter, then undo.
             window_.view()->cropSelection();
             out() << "crop mode: " << window_.view()->cropActive() << "\n";
+            out() << "crop spotlight: " << window_.view()->hasSpotlight() << "\n";
             const QRectF cropStart = target->cropRect();
             const double cropScale = view->transform().m11() * target->item()->scale;
             const QPointF handle =

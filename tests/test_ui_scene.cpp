@@ -1410,6 +1410,9 @@ void TestUiScene::cropModeDragsAndConfirms()
     view.cropSelection();
     QVERIFY(view.cropActive());
     QVERIFY(viewItem->cropMode());
+    // Cropping spotlights the item, so the editor is not hidden behind
+    // other items (and the crop leaves it raised).
+    QVERIFY(view.hasSpotlight());
     QCOMPARE(viewItem->cropRect(), QRectF(0, 0, 200, 100));
 
     // View scale 2: the handles are 7.5 item units. Drag the bottom-right
@@ -1425,6 +1428,7 @@ void TestUiScene::cropModeDragsAndConfirms()
     QTest::keyClick(&view, Qt::Key_Return);
     QVERIFY(!view.cropActive());
     QVERIFY(!viewItem->cropMode());
+    QVERIFY(view.hasSpotlight());
     QVERIFY(item->hasCrop());
     QCOMPARE(item->crop(), QRectF(0, 0, 160, 80));
     QCOMPARE(viewItem->boundingRect(), QRectF(0, 0, 160, 80));
@@ -1471,6 +1475,8 @@ void TestUiScene::cropModeCancelPaths()
     QTest::keyClick(&view, Qt::Key_Escape);
     QVERIFY(!view.cropActive());
     QVERIFY(!item->hasCrop());
+    // The spotlight the crop started stays, like after a confirm.
+    QVERIFY(view.hasSpotlight());
     QCOMPARE(stack.count(), 0);
 
     // A click outside the rectangle cancels too.

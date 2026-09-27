@@ -33,6 +33,8 @@ public:
     void confirm();
     // The scene is about to delete item: drop the session.
     void cancelIfItem(SceneItem *item);
+    // The item being cropped, for the spotlight pass.
+    SceneItem *item() const { return item_; }
 
     bool mousePress(QMouseEvent *event) override;
     bool mouseMove(QMouseEvent *event) override;

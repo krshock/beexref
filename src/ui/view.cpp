@@ -1077,6 +1077,9 @@ void View::leaveEvent(QEvent *event)
 
 void View::drawSpotlight(QPainter *painter) const
 {
+    // The crop editor brings its own frame while it runs; the dashed
+    // marker would only get in the way.
+    const SceneItem *cropping = cropTool_ ? cropTool_->item() : nullptr;
     // The list is kept in ascending stacking order, so the lowest
     // spotlighted item is drawn first and the topmost of them stays on
     // top, exactly as if the whole group were really raised.
@@ -1085,15 +1088,17 @@ void View::drawSpotlight(QPainter *painter) const
         painter->setTransform(item->sceneTransform(), true);
         painter->setOpacity(item->opacity());
         item->paintContent(painter);
-        // A dashed marker at full opacity, so a view-only spotlight
-        // cannot be mistaken for a real Raise to Top.
-        painter->setOpacity(1.0);
-        QPen pen(theme::selection, 0);
-        pen.setCosmetic(true);
-        pen.setStyle(Qt::DashLine);
-        painter->setPen(pen);
-        painter->setBrush(Qt::NoBrush);
-        painter->drawRect(item->boundingRect());
+        if (item != cropping) {
+            // A dashed marker at full opacity, so a view-only spotlight
+            // cannot be mistaken for a real Raise to Top.
+            painter->setOpacity(1.0);
+            QPen pen(theme::selection, 0);
+            pen.setCosmetic(true);
+            pen.setStyle(Qt::DashLine);
+            painter->setPen(pen);
+            painter->setBrush(Qt::NoBrush);
+            painter->drawRect(item->boundingRect());
+        }
         painter->restore();
     }
 }
@@ -1103,13 +1108,13 @@ void View::drawForeground(QPainter *painter, const QRectF &rect)
     Q_UNUSED(rect);
     if (!boardScene_)
         return;
-    // The crop editor brings its own frame; spotlights and handles would
-    // only get in the way. A spotlight is suspended, not cleared, while
-    // cropping, so it comes back when the crop session ends.
-    if (cropActive())
-        return;
+    // The spotlight paints even while cropping, so the item being
+    // edited is never hidden behind others; the selection handles would
+    // only get in the way (the crop editor brings its own frame).
     if (!spotlighted_.isEmpty())
         drawSpotlight(painter);
+    if (cropActive())
+        return;
 
     const QRectF bounds = boardScene_->selectionBounds();
     if (bounds.isEmpty())
