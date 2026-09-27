@@ -6,8 +6,8 @@ single version source, so the same commands work locally and, later, in
 CI (the workflows will just call these scripts).
 
 The version is `MAJOR.MINOR.PATCH` in `CMakeLists.txt`; the release
-commit is tagged `vX.Y.Z` (annotated), matching the Python reference's
-tags. Never tag from a dirty tree — every script checks that.
+commit is tagged `vX.Y.Z` (annotated), matching the Python fork's tags.
+Never tag from a dirty tree — every script checks that.
 
 ## 1. Start the release
 

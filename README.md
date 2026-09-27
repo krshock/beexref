@@ -5,7 +5,8 @@ canvas that holds hundreds of reference images while you work. Keep your
 references in one place, arrange and inspect them, and leave the board
 floating over your art program.
 
-This is the C++/Qt 6 build, a multiplatform application that runs on
+This is the C++/Qt 6 build: a port of the original
+[BeeRef](https://github.com/rbreu/beeref) with new features, running on
 Linux and Windows (x64).
 
 ## What you can do
@@ -31,8 +32,8 @@ Linux and Windows (x64).
 ## Board files
 
 Boards are saved as `.beex` files: one file holds your images, their
-positions and adjustments, and their metadata. Legacy `.bee` files from
-the original BeeRef can be opened and imported.
+positions and adjustments, and their metadata. BeeRef's own `.bee` files
+can be opened and imported.
 
 ## License
 
@@ -40,18 +41,20 @@ BeeXRef is free software under the GPL-3.0 license (see `LICENSE`).
 
 ## About BeeXRef
 
-BeeXRef is a fork of [BeeRef](https://github.com/rbreu/beeref) by Rebecca Breu
-Its a port from the original python code to C++ plus some new features
+BeeXRef is a fork of [BeeRef](https://github.com/rbreu/beeref) by Rebecca
+Breu: a port of the original Python code to C++, plus new features.
+BeeRef itself saves boards as `.bee` files and has none of the additions
+below.
 
 Compared to BeeRef it adds:
-- Big memory usage optimizations to allow hundreds if images in
+- Big memory usage optimizations to allow hundreds of images in
 the same scene
 - You can edit name, author name or notes of any image
 - a new `.beex` board format, with editable per-image metadata: name,
   author, origin link and notes
-- Original beeref `.bee` file format is supported as import/export only
+- The original BeeRef `.bee` file format is supported as import/export only
 - Image smoothing settings
-- board and image exports (PNG/JPEG/SVG, or every image to a folder);
+- board and image exports (PNG/JPEG/SVG, or every image to a folder)
 - "spotlight" brings an image to the front without modifying its z-order (non-destructive)
 
 ## Development
