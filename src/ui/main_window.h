@@ -77,6 +77,9 @@ public:
     WelcomeOverlay *welcomeOverlay() const { return welcomeOverlay_; }
     Scene *scene() const { return scene_; }
     InputController *input() const { return input_; }
+    // The action registry (menus, shortcuts, state groups); exposed so
+    // tests can check the menu layout against it.
+    ActionRegistry *actions() const { return actions_; }
 
     // Enables the periodic memory audit line (0 disables it).
     void startMemoryAudit(int seconds);

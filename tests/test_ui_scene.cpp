@@ -49,6 +49,7 @@
 #include "ui/input_controller.h"
 #include "ui/lod_manager.h"
 #include "ui/main_window.h"
+#include "ui/menu_layout.h"
 #include "ui/color_gamut.h"
 #include "ui/color_swatch.h"
 #include "ui/controls.h"
@@ -241,6 +242,7 @@ private slots:
     void dragZoomFollowsTheBinding();
     void unknownItemTypeRendersAsUnsupported();
     void syncDocumentAppliesOnlyNotedChanges();
+    void menuLayoutCoversEveryAction();
     void infoDialogsShowTheExpectedContent();
     void metadataPanelEditsAndCommits();
     void hudPreviewShowsTheStyledPanel();
@@ -3124,6 +3126,50 @@ void TestUiScene::syncDocumentAppliesOnlyNotedChanges()
     QVERIFY(stack.undo());
     scene.syncDocument();
     QCOMPARE(secondView->transform().m11(), 1.0);
+}
+
+void TestUiScene::menuLayoutCoversEveryAction()
+{
+    // The menu bar is built from the layout table, so every registered
+    // action must appear in that table exactly once: a typo in an id
+    // would silently drop the action from every menu.
+    ui::MainWindow window;
+
+    QStringList laid;
+    for (const ui::MenuDef &menu : ui::menuLayout()) {
+        for (const ui::MenuEntry &entry : menu.entries) {
+            if (entry.recent) {
+                QVERIFY(entry.id.isEmpty());
+                QVERIFY(entry.submenuIds.isEmpty());
+            } else if (!entry.submenuTitle.isEmpty()) {
+                QVERIFY(!entry.submenuIds.isEmpty());
+                laid += entry.submenuIds;
+            } else if (!entry.id.isEmpty()) {
+                laid.append(entry.id);
+            }
+        }
+    }
+
+    const QStringList registered = window.actions()->ids();
+    for (const QString &id : laid)
+        QVERIFY2(registered.contains(id), qPrintable(id));
+    // Two actions are deliberately shortcut-only, as in the reference;
+    // everything else must be in a menu exactly once.
+    const QStringList shortcutOnly = {QStringLiteral("metadata_panel"),
+                                      QStringLiteral("hud_preview")};
+    for (const QString &id : registered) {
+        if (shortcutOnly.contains(id)) {
+            QCOMPARE(laid.count(id), 0);
+            continue;
+        }
+        QCOMPARE(laid.count(id), 1);
+    }
+
+    // The built menu bar matches the table's top level.
+    const QList<QAction *> barActions = window.menuBar()->actions();
+    QCOMPARE(barActions.size(), ui::menuLayout().size());
+    for (int i = 0; i < barActions.size(); ++i)
+        QCOMPARE(barActions.at(i)->text(), ui::menuLayout().at(i).title);
 }
 
 void TestUiScene::infoDialogsShowTheExpectedContent()

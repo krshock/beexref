@@ -137,6 +137,8 @@ qt_add_library(beexref_core STATIC
     src/ui/lod_manager.h
     src/ui/main_window.cpp
     src/ui/main_window.h
+    src/ui/menu_layout.cpp
+    src/ui/menu_layout.h
     src/ui/scene.cpp
     src/ui/scene.h
     src/ui/scene_export.cpp

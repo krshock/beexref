@@ -8,6 +8,7 @@
 #include "hud_preview.h"
 #include "info_dialogs.h"
 #include "metadata_panel.h"
+#include "menu_layout.h"
 #include "constants.h"
 #include "input_controller.h"
 #include "layout_ops.h"
@@ -1338,102 +1339,26 @@ void MainWindow::buildActions()
 
 void MainWindow::buildMenus()
 {
-    // File: the Export submenu arrives with the export phase; the
-    // reference's Open Recent submenu is rebuilt whenever it is shown.
-    auto *fileMenu = menuBar()->addMenu(QStringLiteral("&File"));
-    actions_->append(fileMenu, QStringLiteral("new_scene"));
-    actions_->append(fileMenu, QStringLiteral("open"));
-    recentMenu_ = fileMenu->addMenu(QStringLiteral("Open &Recent"));
-    connect(recentMenu_, &QMenu::aboutToShow, this, &MainWindow::rebuildRecentMenu);
-    rebuildRecentMenu();
-    actions_->appendSeparator(fileMenu);
-    actions_->append(fileMenu, QStringLiteral("save"));
-    actions_->append(fileMenu, QStringLiteral("save_as"));
-    auto *exportMenu = fileMenu->addMenu(QStringLiteral("&Export"));
-    actions_->append(exportMenu, QStringLiteral("export_bee"));
-    actions_->append(exportMenu, QStringLiteral("export_scene"));
-    actions_->append(exportMenu, QStringLiteral("export_images"));
-    actions_->appendSeparator(fileMenu);
-    actions_->append(fileMenu, QStringLiteral("quit"));
-
-    auto *editMenu = menuBar()->addMenu(QStringLiteral("&Edit"));
-    actions_->append(editMenu, QStringLiteral("undo"));
-    actions_->append(editMenu, QStringLiteral("redo"));
-    actions_->appendSeparator(editMenu);
-    actions_->append(editMenu, QStringLiteral("select_all"));
-    actions_->append(editMenu, QStringLiteral("deselect_all"));
-    actions_->appendSeparator(editMenu);
-    actions_->append(editMenu, QStringLiteral("cut"));
-    actions_->append(editMenu, QStringLiteral("copy"));
-    actions_->append(editMenu, QStringLiteral("paste"));
-    actions_->append(editMenu, QStringLiteral("delete"));
-    actions_->appendSeparator(editMenu);
-    actions_->append(editMenu, QStringLiteral("raise_to_top"));
-    actions_->append(editMenu, QStringLiteral("lower_to_bottom"));
-    actions_->append(editMenu, QStringLiteral("spotlight_item"));
-
-    // View: the window and scrollbar toggles arrive with the window
-    // slice.
-    auto *viewMenu = menuBar()->addMenu(QStringLiteral("&View"));
-    actions_->append(viewMenu, QStringLiteral("fit_scene"));
-    actions_->append(viewMenu, QStringLiteral("fit_selection"));
-    actions_->appendSeparator(viewMenu);
-    actions_->append(viewMenu, QStringLiteral("fullscreen"));
-    actions_->append(viewMenu, QStringLiteral("always_on_top"));
-    actions_->append(viewMenu, QStringLiteral("show_scrollbars"));
-    actions_->append(viewMenu, QStringLiteral("show_menubar"));
-    actions_->append(viewMenu, QStringLiteral("show_status"));
-    actions_->append(viewMenu, QStringLiteral("show_titlebar"));
-    actions_->append(viewMenu, QStringLiteral("smooth_images"));
-    actions_->appendSeparator(viewMenu);
-    actions_->append(viewMenu, QStringLiteral("move_window"));
-
-    // Insert: images and text items.
-    auto *insertMenu = menuBar()->addMenu(QStringLiteral("&Insert"));
-    actions_->append(insertMenu, QStringLiteral("insert_images"));
-    actions_->append(insertMenu, QStringLiteral("insert_text"));
-
-    auto *transformMenu = menuBar()->addMenu(QStringLiteral("&Transform"));
-    actions_->append(transformMenu, QStringLiteral("crop"));
-    actions_->append(transformMenu, QStringLiteral("flip_horizontally"));
-    actions_->append(transformMenu, QStringLiteral("flip_vertically"));
-    actions_->appendSeparator(transformMenu);
-    actions_->append(transformMenu, QStringLiteral("reset_scale"));
-    actions_->append(transformMenu, QStringLiteral("reset_rotation"));
-    actions_->append(transformMenu, QStringLiteral("reset_flip"));
-    actions_->append(transformMenu, QStringLiteral("reset_crop"));
-    actions_->append(transformMenu, QStringLiteral("reset_transforms"));
-
-    auto *normalizeMenu = menuBar()->addMenu(QStringLiteral("&Normalize"));
-    actions_->append(normalizeMenu, QStringLiteral("normalize_height"));
-    actions_->append(normalizeMenu, QStringLiteral("normalize_width"));
-    actions_->append(normalizeMenu, QStringLiteral("normalize_size"));
-
-    auto *arrangeMenu = menuBar()->addMenu(QStringLiteral("&Arrange"));
-    actions_->append(arrangeMenu, QStringLiteral("arrange_optimal"));
-    actions_->append(arrangeMenu, QStringLiteral("arrange_horizontal"));
-    actions_->append(arrangeMenu, QStringLiteral("arrange_vertical"));
-    actions_->append(arrangeMenu, QStringLiteral("arrange_square"));
-    actions_->appendSeparator(arrangeMenu);
-    actions_->append(arrangeMenu, QStringLiteral("arrange_default"));
-
-    auto *imagesMenu = menuBar()->addMenu(QStringLiteral("&Images"));
-    actions_->append(imagesMenu, QStringLiteral("change_opacity"));
-    actions_->append(imagesMenu, QStringLiteral("grayscale"));
-    actions_->appendSeparator(imagesMenu);
-    actions_->append(imagesMenu, QStringLiteral("show_color_gamut"));
-    actions_->append(imagesMenu, QStringLiteral("sample_color"));
-
-    // Settings: the Keyboard & Mouse editor arrives with the bindings.
-    auto *settingsMenu = menuBar()->addMenu(QStringLiteral("&Settings"));
-    actions_->append(settingsMenu, QStringLiteral("settings"));
-    actions_->append(settingsMenu, QStringLiteral("keyboard_settings"));
-    actions_->append(settingsMenu, QStringLiteral("open_settings_dir"));
-
-    auto *helpMenu = menuBar()->addMenu(QStringLiteral("&Help"));
-    actions_->append(helpMenu, QStringLiteral("help"));
-    actions_->append(helpMenu, QStringLiteral("about"));
-    actions_->append(helpMenu, QStringLiteral("debuglog"));
+    // The layout is data (menu_layout.cpp); this only builds widgets.
+    for (const MenuDef &menu : menuLayout()) {
+        QMenu *barMenu = menuBar()->addMenu(menu.title);
+        for (const MenuEntry &entry : menu.entries) {
+            if (entry.recent) {
+                // Rebuilt from the settings whenever it is shown.
+                recentMenu_ = barMenu->addMenu(entry.submenuTitle);
+                connect(recentMenu_, &QMenu::aboutToShow, this, &MainWindow::rebuildRecentMenu);
+                rebuildRecentMenu();
+            } else if (!entry.submenuTitle.isEmpty()) {
+                QMenu *submenu = barMenu->addMenu(entry.submenuTitle);
+                for (const QString &id : entry.submenuIds)
+                    actions_->append(submenu, id);
+            } else if (entry.id.isEmpty()) {
+                actions_->appendSeparator(barMenu);
+            } else {
+                actions_->append(barMenu, entry.id);
+            }
+        }
+    }
 }
 
 void MainWindow::updateActions()
