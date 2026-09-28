@@ -52,9 +52,16 @@ View::View(QWidget *parent)
     moveWindowTimer_->setInterval(10);
     moveWindowTool_ = tools_->add<MoveWindowTool>(this, moveWindowTimer_);
     connect(moveWindowTimer_, &QTimer::timeout, this, [this]() { moveWindowTool_->tick(); });
+
+    // Pan momentum: a fast release lets the canvas glide to a stop. The
+    // tool owns the physics, the view owns the timer, like move-window.
+    panGlideTimer_ = new QTimer(this);
+    panGlideTimer_->setInterval(16);
+    connect(panGlideTimer_, &QTimer::timeout, this, [this]() { panTool_->tick(); });
+
     textEditTool_ = tools_->add<TextEditTool>(this);
     cropTool_ = tools_->add<CropTool>(this);
-    panTool_ = tools_->add<PanTool>(this);
+    panTool_ = tools_->add<PanTool>(this, panGlideTimer_);
     dragZoomTool_ = tools_->add<DragZoomTool>(this);
 
     // The corner move handle: shown only while the window's title bar
@@ -452,6 +459,9 @@ void View::contextMenuEvent(QContextMenuEvent *event)
 
 void View::wheelEvent(QWheelEvent *event)
 {
+    // A wheel step takes over from a glide.
+    if (panTool_)
+        panTool_->stopGlide();
     const int delta = event->angleDelta().y();
     if (delta == 0) {
         QGraphicsView::wheelEvent(event);
@@ -487,6 +497,9 @@ void View::wheelEvent(QWheelEvent *event)
 
 void View::mousePressEvent(QMouseEvent *event)
 {
+    // A new press stops a pan glide where it is.
+    if (panTool_)
+        panTool_->stopGlide();
     beginInteraction();
     lod_->evaluateNow();
 

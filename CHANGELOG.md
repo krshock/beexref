@@ -18,6 +18,10 @@ project uses [Semantic Versioning](https://semver.org/).
 - **Recovered copies**: a board opened with problems is never written
   over its source. Save As writes a copy in which the imageless items are
   explicit placeholders, and that copy can be saved normally afterwards.
+- **Panning has momentum**: a fast pan release lets the canvas glide to a
+  stop instead of stopping dead; a slow release (or a pause before
+  releasing) stops where the cursor left it, and any new press or wheel
+  step ends the glide. A deliberate, subtle deviation from the reference.
 - **Grayscale methods**: the grayscale toggle can render with Classic
   (the look BeeXRef always had), BT.601 luma, BT.709 luma, Average,
   Lightness, Max or Min — picked from `Images ▸ Grayscale Method` (also

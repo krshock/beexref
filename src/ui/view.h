@@ -247,6 +247,7 @@ private:
     bool moveStarted_ = false;
     bool transformStarted_ = false;
     QTimer *moveWindowTimer_ = nullptr;
+    QTimer *panGlideTimer_ = nullptr;
     MoveHandle *moveHandle_ = nullptr;
     controls::Bindings bindings_;
     Drag drag_ = Drag::None;

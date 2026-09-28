@@ -217,6 +217,9 @@ private slots:
     void fitSceneFramesTheItems();
     void zoomLimitsHold();
     void middleDragPansWithTheCursor();
+    void panGlidesAfterAFastRelease();
+    void slowPanStopsImmediately();
+    void newPressStopsThePanGlide();
     void wheelPanAxesMatchReference();
     void windowOpensBoardAndLoadsLevel();
     void newWindowHasUnsavedDocument();
@@ -3821,6 +3824,106 @@ void TestUiScene::grayscaleMethodMenuSwitchesTheLook()
     // Back to classic: the cache follows the method both ways.
     window.actions()->action(QStringLiteral("grayscale_method_classic"))->trigger();
     QCOMPARE(view->sampleColorAt(view->mapToScene(QPointF(1, 1))).red(), 127);
+}
+
+void TestUiScene::panGlidesAfterAFastRelease()
+{
+    // Deliberate deviation from the reference: a fast pan release lets the
+    // canvas glide to a stop instead of stopping dead.
+    auto document = std::make_shared<doc::Document>(doc::Document::create());
+    document->addItem(pixmapItem(2000, 1000, Qt::darkGreen));
+
+    ui::View view;
+    auto *scene = new ui::Scene(&view);
+    scene->setDocument(document);
+    view.setBoardScene(scene);
+    view.resize(200, 150);
+    view.fitScene();
+    view.zoomAt(500, view.viewport()->rect().center());
+    view.centerOn(1000, 500);
+
+    const QPoint start = view.viewport()->rect().center();
+    sendMouse(view.viewport(), QEvent::MouseButtonPress, start, Qt::MiddleButton,
+              Qt::MiddleButton);
+    sendMouse(view.viewport(), QEvent::MouseMove, start + QPoint(30, 0), Qt::NoButton,
+              Qt::MiddleButton);
+    sendMouse(view.viewport(), QEvent::MouseMove, start + QPoint(60, 0), Qt::NoButton,
+              Qt::MiddleButton);
+    sendMouse(view.viewport(), QEvent::MouseButtonRelease, start + QPoint(60, 0), Qt::MiddleButton,
+              Qt::NoButton);
+
+    const int afterRelease = view.horizontalScrollBar()->value();
+    QTest::qWait(120);
+    const int gliding = view.horizontalScrollBar()->value();
+    QVERIFY2(gliding < afterRelease,
+             qPrintable(QStringLiteral("release=%1 gliding=%2").arg(afterRelease).arg(gliding)));
+
+    // The coast ends on its own.
+    QTest::qWait(1500);
+    const int settled = view.horizontalScrollBar()->value();
+    QTest::qWait(250);
+    QCOMPARE(view.horizontalScrollBar()->value(), settled);
+}
+
+void TestUiScene::slowPanStopsImmediately()
+{
+    // A drag that pauses before the release has no momentum: the canvas
+    // stops where the cursor left it.
+    auto document = std::make_shared<doc::Document>(doc::Document::create());
+    document->addItem(pixmapItem(2000, 1000, Qt::darkGreen));
+
+    ui::View view;
+    auto *scene = new ui::Scene(&view);
+    scene->setDocument(document);
+    view.setBoardScene(scene);
+    view.resize(200, 150);
+    view.fitScene();
+    view.zoomAt(500, view.viewport()->rect().center());
+    view.centerOn(1000, 500);
+
+    const QPoint start = view.viewport()->rect().center();
+    sendMouse(view.viewport(), QEvent::MouseButtonPress, start, Qt::MiddleButton,
+              Qt::MiddleButton);
+    sendMouse(view.viewport(), QEvent::MouseMove, start + QPoint(40, 0), Qt::NoButton,
+              Qt::MiddleButton);
+    QTest::qWait(200); // a pause: the velocity is stale by the release
+    sendMouse(view.viewport(), QEvent::MouseButtonRelease, start + QPoint(40, 0), Qt::MiddleButton,
+              Qt::NoButton);
+
+    const int afterRelease = view.horizontalScrollBar()->value();
+    QTest::qWait(150);
+    QCOMPARE(view.horizontalScrollBar()->value(), afterRelease);
+}
+
+void TestUiScene::newPressStopsThePanGlide()
+{
+    auto document = std::make_shared<doc::Document>(doc::Document::create());
+    document->addItem(pixmapItem(2000, 1000, Qt::darkGreen));
+
+    ui::View view;
+    auto *scene = new ui::Scene(&view);
+    scene->setDocument(document);
+    view.setBoardScene(scene);
+    view.resize(200, 150);
+    view.fitScene();
+    view.zoomAt(500, view.viewport()->rect().center());
+    view.centerOn(1000, 500);
+
+    const QPoint start = view.viewport()->rect().center();
+    sendMouse(view.viewport(), QEvent::MouseButtonPress, start, Qt::MiddleButton,
+              Qt::MiddleButton);
+    sendMouse(view.viewport(), QEvent::MouseMove, start + QPoint(60, 0), Qt::NoButton,
+              Qt::MiddleButton);
+    sendMouse(view.viewport(), QEvent::MouseButtonRelease, start + QPoint(60, 0), Qt::MiddleButton,
+              Qt::NoButton);
+
+    // While it glides, any new press stops it where it is.
+    QTest::qWait(60);
+    sendMouse(view.viewport(), QEvent::MouseButtonPress, start, Qt::LeftButton, Qt::LeftButton);
+    const int stopped = view.horizontalScrollBar()->value();
+    QTest::qWait(200);
+    QCOMPARE(view.horizontalScrollBar()->value(), stopped);
+    sendMouse(view.viewport(), QEvent::MouseButtonRelease, start, Qt::LeftButton, Qt::NoButton);
 }
 
 QTEST_MAIN(TestUiScene)
