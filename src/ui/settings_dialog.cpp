@@ -95,11 +95,12 @@ const QVector<FieldUi> &fieldTable()
                     {QStringLiteral("fast"), QStringLiteral("Fast"),
                      QStringLiteral("Single-step scaling; faster level decoding")}}),
         checkboxField(QStringLiteral("Items/undo_cache"),
-                      QStringLiteral("Undo history disk cache:"),
-                      QStringLiteral("Store the encoded bytes of images held in the undo history "
-                                     "in a small session cache on disk instead of keeping them in "
-                                     "memory. The cache is deleted when BeeXRef exits."),
-                      QStringLiteral("Cache undo history to disk")),
+                      QStringLiteral("Session disk cache:"),
+                      QStringLiteral("Keep session data on disk instead of in memory: decoded "
+                                     "LOD levels and the encoded bytes of images held in the "
+                                     "undo history. The cache file is deleted when BeeXRef "
+                                     "exits."),
+                      QStringLiteral("Cache session data to disk")),
         integerField(QStringLiteral("Items/lod_decode_threads"),
                      QStringLiteral("Decode Threads:"),
                      QStringLiteral("How many worker threads decode image levels in the "

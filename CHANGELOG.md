@@ -41,6 +41,9 @@ project uses [Semantic Versioning](https://semver.org/).
   (still tunable in Settings ▸ Performance), and a single cache entry is
   never larger than 16 MB — one huge level or payload is not worth the
   disk it would hold for the session.
+- The session cache setting is labelled for what it does — Session disk
+  cache, covering decoded levels and detached payloads — instead of
+  mentioning only the undo history.
 
 ## [0.7.0] - 2026-09-27
 

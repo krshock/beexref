@@ -313,6 +313,8 @@ const QVector<FieldSpec> &fields()
          [](const QVariant &value) { return value.toInt() >= 0 && value.toInt() <= 50; }},
         {QStringLiteral("Items/lod_quality"), QStringLiteral("smooth"), nullptr,
          oneOf({QStringLiteral("fast"), QStringLiteral("smooth")})},
+        // The session disk cache: decoded levels and detached payloads.
+        // The key name predates the setting's wider scope.
         {QStringLiteral("Items/undo_cache"), true, boolCast(), nullptr},
     };
     return specs;
