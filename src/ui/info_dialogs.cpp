@@ -53,6 +53,9 @@ AboutDialog::AboutDialog(QWidget *parent)
     auto *buttons = new QDialogButtonBox(QDialogButtonBox::Close, this);
     connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
     layout->addWidget(buttons);
+    // The wrapped rich text lets the layout collapse to its narrowest
+    // line, so the box needs a size of its own.
+    resize(340, 350);
 }
 
 // --- HelpDialog -------------------------------------------------------

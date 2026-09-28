@@ -12,6 +12,11 @@ project uses [Semantic Versioning](https://semver.org/).
   across runs (the `Window/geometry` value in the settings file). With
   nothing saved yet it starts at 600x450.
 
+### Fixed
+
+- The About box opens at a readable size; the wrapped text used to
+  collapse it to its narrowest line.
+
 ## [0.8.0] - 2026-09-28
 
 ### Added

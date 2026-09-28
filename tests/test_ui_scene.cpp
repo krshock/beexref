@@ -3332,6 +3332,9 @@ void TestUiScene::infoDialogsShowTheExpectedContent()
     QVERIFY(aboutText->text().contains(QStringLiteral("GNU GPL v3")));
     QVERIFY(aboutText->text().contains(QStringLiteral("gpl-3.0.html")));
     QVERIFY(aboutText->text().contains(QString::fromUtf8(constants::ForkCopyright)));
+    // The wrapped text must not collapse the box to its narrowest line.
+    QVERIFY2(about->width() >= 340,
+             qPrintable(QStringLiteral("about width=%1").arg(about->width())));
     about->close();
 
     // The old Image Info window is gone: the panel's Info tab carries
