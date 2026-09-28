@@ -31,6 +31,9 @@ project uses [Semantic Versioning](https://semver.org/).
   Shift go first cancels and restores the exact view. Any mode cancel or
   wheel step cancels. Rebindable in Controls like the other mouse
   actions.
+- Windows: `beexref.exe` carries the BeeXRef icon and its file version
+  information, so Explorer, the taskbar and the Properties dialog show
+  them.
 
 ### Changed
 

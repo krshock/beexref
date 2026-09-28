@@ -159,8 +159,18 @@ Filesystem notes: Windows drives are mounted at `/c`, `/d`, …;
   `%LOCALAPPDATA%/cache/BeeXRef`, through `QStandardPaths`.
 - The atomic save uses `MoveFileExW`; `<windows.h>` is included with
   `NOMINMAX` defined because the file also uses `std::max`.
-- RSS accounting uses `GetProcessMemoryInfo` (psapi); the allocator trim
-  and process-liveness helpers are no-ops on Windows.
+- RSS accounting uses `GetProcessMemoryInfo` (psapi) and the stale-file
+  sweeps use `OpenProcess`; the allocator trim is a no-op on Windows.
+- The executable carries its icon and file properties as Windows
+  resources: `assets/windows/beexref.rc.in` (compiled by `windres`,
+  which comes with the MinGW toolchain) embeds
+  `assets/windows/beexref.ico` and the version from `CMakeLists.txt`
+  through `configure_file`. To regenerate the icon after a logo change:
+
+```
+magick assets/logo.png -define icon:auto-resize=256,128,64,48,32,24,16 \
+    assets/windows/beexref.ico    # convert, on ImageMagick 6
+```
 - `.beex` is platform-neutral, so a Windows build reads and writes the
   same boards as the Linux, Python and Go ports. `beexref-boardcheck`
   is the cross-port check:

@@ -203,7 +203,19 @@ if(WIN32)
 endif()
 beexref_set_warnings(beexref_core)
 
-qt_add_executable(beexref src/main.cpp)
+# The Windows executable's resources: the icon and file properties come
+# from assets/windows, through windres (which ships with the MSYS2
+# toolchain). The version is substituted at configure time, like the
+# code's constants::Version.
+set(beexref_windows_rc "")
+if(WIN32)
+    enable_language(RC)
+    configure_file(assets/windows/beexref.rc.in
+                   "${CMAKE_CURRENT_BINARY_DIR}/beexref.rc" @ONLY)
+    set(beexref_windows_rc "${CMAKE_CURRENT_BINARY_DIR}/beexref.rc")
+endif()
+
+qt_add_executable(beexref src/main.cpp ${beexref_windows_rc})
 target_link_libraries(beexref PRIVATE beexref_core)
 beexref_set_warnings(beexref)
 set_target_properties(beexref PROPERTIES
