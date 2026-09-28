@@ -303,6 +303,10 @@ void View::applyPeekView(double scale, const QPointF &sceneCenter)
     if (extent > kMinZoomExtent)
         scale = qMax(scale, transform().m11() * kMinZoomExtent / extent);
     setTransform(QTransform::fromScale(scale, scale));
+    // Widen the scrollable area for the peeked view, so the pan does not
+    // stop on one axis just because the deep zoom-out outgrows the
+    // scene rect; the release shrinks it back to the base size.
+    recalculateSceneRect();
     centerOn(sceneCenter);
     updateViewState();
     // Keep the levels as they are while peeking; the evaluation runs
@@ -314,8 +318,20 @@ void View::restorePeekView(const QTransform &transform, int horizontalValue,
                            int verticalValue)
 {
     setTransform(transform);
+    // Back to the base scene rect (the same deterministic computation as
+    // before the peek), then the stored scroll offsets land exactly.
+    recalculateSceneRect();
     horizontalScrollBar()->setValue(horizontalValue);
     verticalScrollBar()->setValue(verticalValue);
+    updateViewState();
+    lod_->schedule();
+}
+
+void View::commitPeekView(const QTransform &transform, const QPointF &sceneCenter)
+{
+    setTransform(transform);
+    recalculateSceneRect();
+    centerOn(sceneCenter);
     updateViewState();
     lod_->schedule();
 }

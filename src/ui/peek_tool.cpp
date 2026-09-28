@@ -11,14 +11,19 @@ namespace ui {
 namespace {
 
 // The peek's feel. The pointer's travel from where the peek started
-// drives the whole gesture: at the reference radius (half the viewport
-// diagonal) the view is at kMinZoomFactor of the zoom the peek started
-// from, and the pan leans one screen pixel per pointer pixel at the
-// base zoom (so it lags the pointer once zoomed out). The zoom is a
-// plain lerp on the factor; a geometric one would be the alternative if
-// this feels front-loaded.
-constexpr double kMinZoomFactor = 0.4;
-constexpr double kPanGain = 1.0;
+// drives the whole gesture: at the reference radius the view is at
+// kMinZoomFactor of the zoom the peek started from, and the pan leans
+// kPanGain screen pixels per pointer pixel at the base zoom (so it lags
+// the pointer once zoomed out). The travel is normalized per viewport
+// axis, so reaching the window edge means the same full peek whatever
+// the window's size or aspect ratio; kPeekRadius is that edge (1.0 is
+// the ellipse through the mid-edges). The zoom is interpolated
+// geometrically (m^t): a constant proportional rate, which is what
+// reads as linear -- a plain lerp on the factor accelerates toward the
+// end.
+constexpr double kMinZoomFactor = 0.2;
+constexpr double kPanGain = 0.87;
+constexpr double kPeekRadius = 1.0;
 
 } // namespace
 
@@ -55,34 +60,47 @@ bool PeekTool::mouseMove(QMouseEvent *event)
     if (!active_)
         return false;
     const QPointF raw = event->position().toPoint() - origin_;
-    const double distance = std::hypot(raw.x(), raw.y());
     const QSize size = view_->viewport()->size();
-    const double radius = std::hypot(double(size.width()), double(size.height())) / 2.0;
-    if (radius <= 0.0 || baseScale_ <= 0.0)
+    if (size.isEmpty() || baseScale_ <= 0.0)
         return true;
+    const double halfWidth = size.width() / 2.0;
+    const double halfHeight = size.height() / 2.0;
 
-    // The travel is clamped to the reference radius: at the far end the
-    // peek is fully open and moving further changes nothing.
-    const double travel = qMin(distance, radius);
-    const QPointF direction = distance > 0.0 ? raw / distance : QPointF();
-    const double t = travel / radius;
+    // Normalized per viewport axis: +-kPeekRadius is the window edge
+    // along an axis, and the distance saturates there, so the feel does
+    // not depend on the window size or its aspect ratio.
+    const QPointF normalized(raw.x() / halfWidth, raw.y() / halfHeight);
+    const double distance = std::hypot(normalized.x(), normalized.y());
+    const double t = qMin(distance / kPeekRadius, 1.0);
+    const QPointF clamped =
+        distance > kPeekRadius ? normalized * (kPeekRadius / distance) : normalized;
+    const QPointF travel(clamped.x() * halfWidth, clamped.y() * halfHeight);
 
-    // A simple lerp of the zoom factor, proportional to the zoom the
-    // peek started from, and a pan in the pointer's direction measured
-    // in screen pixels at that same zoom.
-    const double scale = baseScale_ * (1.0 + t * (kMinZoomFactor - 1.0));
-    const QPointF center = baseCenter_ + direction * (travel / baseScale_) * kPanGain;
+    // A geometric interpolation of the zoom factor, proportional to the
+    // zoom the peek started from, and a pan in the pointer's direction
+    // measured in screen pixels at that same zoom, saturating with the
+    // travel.
+    const double scale = baseScale_ * std::pow(kMinZoomFactor, t);
+    const QPointF center = baseCenter_ + travel / baseScale_ * kPanGain;
     view_->applyPeekView(scale, center);
     return true;
 }
 
 bool PeekTool::mouseRelease(QMouseEvent *event)
 {
-    Q_UNUSED(event);
     if (!active_)
         return false;
-    // Any release ends the peek, whatever button it is, and the canvas
-    // goes back to where it started.
+    // Any release ends the peek, whatever button it is. With Shift still
+    // held the look is kept: the original zoom comes back, centered on
+    // the canvas point under the pointer. With Shift already let go it
+    // is a plain cancel: the canvas goes back to where the peek started.
+    if (event->modifiers().testFlag(Qt::ShiftModifier)) {
+        const QPointF scenePoint = view_->mapToScene(event->position().toPoint());
+        active_ = false;
+        view_->viewport()->unsetCursor();
+        view_->commitPeekView(baseTransform_, scenePoint);
+        return true;
+    }
     cancel();
     return true;
 }

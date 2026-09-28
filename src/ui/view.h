@@ -156,6 +156,10 @@ public:
     // Ends a peek: restores the exact transform and scroll offsets the
     // peek started from.
     void restorePeekView(const QTransform &transform, int horizontalValue, int verticalValue);
+    // A peek ended without cancelling (Shift was let go before the
+    // release): the given transform comes back, centered on a scene
+    // point -- the canvas spot the pointer was looking at.
+    void commitPeekView(const QTransform &transform, const QPointF &sceneCenter);
     // The on-screen scale of an item: the view transform times the
     // item's own scale (fixed length for the viewport
     // denominator). A null item gives the plain view scale.

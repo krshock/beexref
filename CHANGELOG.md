@@ -19,11 +19,16 @@ project uses [Semantic Versioning](https://semver.org/).
   remembered.
 - **Peek Scene** (`Shift`+middle-drag): a temporary look at the
   neighbourhood without losing the current view. The pointer's travel
-  from where the drag started zooms the canvas out — a plain lerp, down
-  to 40% of the starting zoom at half a viewport diagonal — and leans it
-  in the pointer's direction, so the canvas "looks at the horizon"; the
-  release (or any mode cancel, press or wheel step) puts it back exactly
-  where it was. Rebindable in Controls like the other mouse actions.
+  from where the drag started zooms the canvas out — at a constant
+  proportional rate, down to 20% of the starting zoom by the time the
+  pointer reaches the window edge — and leans it in the pointer's
+  direction, so the canvas "looks at the horizon"; travel is normalized
+  per viewport axis, so the window's size and aspect ratio do not change
+  the feel. Releasing with Shift still held commits the look — the
+  original zoom, centered on the canvas point under the pointer; letting
+  Shift go first cancels and restores the exact view. Any mode cancel or
+  wheel step cancels. Rebindable in Controls like the other mouse
+  actions.
 
 ### Changed
 

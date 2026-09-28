@@ -17,7 +17,10 @@ class View;
 // temporary zoom-out and a pan in that direction, showing the
 // neighbourhood without losing the current view. Every move recomputes
 // the whole view from the state the peek started from -- no physics, no
-// timers; the release (or cancel) restores that state exactly.
+// timers. Releasing with Shift still held commits the look: the
+// original zoom comes back, centered on the canvas point under the
+// pointer. Releasing with Shift already let go cancels, and the state
+// the peek started from is restored exactly.
 class PeekTool : public Tool
 {
 public:

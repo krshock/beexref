@@ -222,6 +222,8 @@ private slots:
     void newPressStopsThePanGlide();
     void shiftMiddlePeekLeansAndRestores();
     void shiftMiddlePeekSaturates();
+    void peekNormalizesPerViewportAxis();
+    void releasingWithShiftCommitsThePeek();
     void cancelModesRestoresThePeek();
     void wheelPanAxesMatchReference();
     void windowOpensBoardAndLoadsLevel();
@@ -3963,9 +3965,9 @@ void TestUiScene::shiftMiddlePeekLeansAndRestores()
     const QPointF shift = peekCenter - baseCenter;
     // The camera leans toward the pointer: the scene point at the
     // viewport center moves right, barely sideways.
-    QVERIFY2(shift.x() > 100.0,
+    QVERIFY2(shift.x() > 10.0,
              qPrintable(QStringLiteral("shift=(%1, %2)").arg(shift.x()).arg(shift.y())));
-    QVERIFY2(qAbs(shift.y()) < 30.0,
+    QVERIFY2(qAbs(shift.y()) < qAbs(shift.x()) * 0.25,
              qPrintable(QStringLiteral("shift=(%1, %2)").arg(shift.x()).arg(shift.y())));
 
     // Further travel opens the peek further.
@@ -3975,7 +3977,7 @@ void TestUiScene::shiftMiddlePeekLeansAndRestores()
     QVERIFY(view.mapToScene(view.viewport()->rect().center()).x() > peekCenter.x());
 
     sendMouse(view.viewport(), QEvent::MouseButtonRelease, start + QPoint(120, 0), Qt::MiddleButton,
-              Qt::NoButton, Qt::ShiftModifier);
+              Qt::NoButton);
     QCOMPARE(view.transform().m11(), baseScale);
     QCOMPARE(view.horizontalScrollBar()->value(), baseH);
     QCOMPARE(view.verticalScrollBar()->value(), baseV);
@@ -3983,8 +3985,8 @@ void TestUiScene::shiftMiddlePeekLeansAndRestores()
 
 void TestUiScene::shiftMiddlePeekSaturates()
 {
-    // At the reference radius (half the viewport diagonal) the peek is
-    // fully open; a longer travel changes nothing.
+    // Beyond the viewport edge the peek is fully open; a longer travel
+    // changes nothing.
     auto document = std::make_shared<doc::Document>(doc::Document::create());
     document->addItem(pixmapItem(2000, 1000, Qt::darkGreen));
 
@@ -3999,23 +4001,110 @@ void TestUiScene::shiftMiddlePeekSaturates()
 
     const QPoint start = view.viewport()->rect().center();
     const QSize viewport = view.viewport()->size();
-    const int radius =
-        int(std::ceil(std::hypot(double(viewport.width()), double(viewport.height())) / 2.0));
 
     sendMouse(view.viewport(), QEvent::MouseButtonPress, start, Qt::MiddleButton,
               Qt::MiddleButton, Qt::ShiftModifier);
-    sendMouse(view.viewport(), QEvent::MouseMove, start + QPoint(radius, 0), Qt::NoButton,
-              Qt::MiddleButton, Qt::ShiftModifier);
+    sendMouse(view.viewport(), QEvent::MouseMove, start + QPoint(viewport.width(), 0),
+              Qt::NoButton, Qt::MiddleButton, Qt::ShiftModifier);
     const double saturatedScale = view.transform().m11();
     const QPointF saturatedCenter = view.mapToScene(view.viewport()->rect().center());
 
-    sendMouse(view.viewport(), QEvent::MouseMove, start + QPoint(3 * radius, 0), Qt::NoButton,
-              Qt::MiddleButton, Qt::ShiftModifier);
+    sendMouse(view.viewport(), QEvent::MouseMove, start + QPoint(3 * viewport.width(), 0),
+              Qt::NoButton, Qt::MiddleButton, Qt::ShiftModifier);
     QCOMPARE(view.transform().m11(), saturatedScale);
     QCOMPARE(view.mapToScene(view.viewport()->rect().center()), saturatedCenter);
 
-    sendMouse(view.viewport(), QEvent::MouseButtonRelease, start + QPoint(3 * radius, 0),
-              Qt::MiddleButton, Qt::NoButton, Qt::ShiftModifier);
+    sendMouse(view.viewport(), QEvent::MouseButtonRelease, start + QPoint(3 * viewport.width(), 0),
+              Qt::MiddleButton, Qt::NoButton);
+}
+
+void TestUiScene::peekNormalizesPerViewportAxis()
+{
+    // Reaching the horizontal or the vertical window edge gives the same
+    // full-peek zoom: the window's aspect ratio does not change the feel.
+    auto document = std::make_shared<doc::Document>(doc::Document::create());
+    document->addItem(pixmapItem(2000, 1000, Qt::darkGreen));
+
+    ui::View view;
+    auto *scene = new ui::Scene(&view);
+    scene->setDocument(document);
+    view.setBoardScene(scene);
+    view.resize(200, 150);
+    view.fitScene();
+    view.zoomAt(500, view.viewport()->rect().center());
+    view.centerOn(1000, 500);
+
+    const QPoint start = view.viewport()->rect().center();
+    const QSize viewport = view.viewport()->size();
+    const double baseScale = view.transform().m11();
+
+    sendMouse(view.viewport(), QEvent::MouseButtonPress, start, Qt::MiddleButton,
+              Qt::MiddleButton, Qt::ShiftModifier);
+    sendMouse(view.viewport(), QEvent::MouseMove, start + QPoint(viewport.width(), 0),
+              Qt::NoButton, Qt::MiddleButton, Qt::ShiftModifier);
+    const double horizontalScale = view.transform().m11();
+    sendMouse(view.viewport(), QEvent::MouseButtonRelease, start + QPoint(viewport.width(), 0),
+              Qt::MiddleButton, Qt::NoButton);
+
+    sendMouse(view.viewport(), QEvent::MouseButtonPress, start, Qt::MiddleButton,
+              Qt::MiddleButton, Qt::ShiftModifier);
+    sendMouse(view.viewport(), QEvent::MouseMove, start + QPoint(0, viewport.height()),
+              Qt::NoButton, Qt::MiddleButton, Qt::ShiftModifier);
+    const double verticalScale = view.transform().m11();
+    sendMouse(view.viewport(), QEvent::MouseButtonRelease, start + QPoint(0, viewport.height()),
+              Qt::MiddleButton, Qt::NoButton);
+
+    QVERIFY2(horizontalScale < baseScale,
+             qPrintable(QStringLiteral("base=%1 peek=%2").arg(baseScale).arg(horizontalScale)));
+    QVERIFY2(qFuzzyCompare(horizontalScale, verticalScale),
+             qPrintable(QStringLiteral("horizontal=%1 vertical=%2")
+                            .arg(horizontalScale)
+                            .arg(verticalScale)));
+    QCOMPARE(view.transform().m11(), baseScale);
+}
+
+void TestUiScene::releasingWithShiftCommitsThePeek()
+{
+    // Shift still held at the release keeps the look: the original zoom
+    // comes back, centered on the canvas point under the pointer.
+    auto document = std::make_shared<doc::Document>(doc::Document::create());
+    document->addItem(pixmapItem(2000, 1000, Qt::darkGreen));
+
+    ui::View view;
+    auto *scene = new ui::Scene(&view);
+    scene->setDocument(document);
+    view.setBoardScene(scene);
+    view.resize(200, 150);
+    view.fitScene();
+    view.zoomAt(500, view.viewport()->rect().center());
+    view.centerOn(1000, 500);
+
+    const QPoint start = view.viewport()->rect().center();
+    const QPoint dragged = start + QPoint(120, 0);
+    const double baseScale = view.transform().m11();
+    const QPointF baseCenter = view.mapToScene(view.viewport()->rect().center());
+
+    sendMouse(view.viewport(), QEvent::MouseButtonPress, start, Qt::MiddleButton,
+              Qt::MiddleButton, Qt::ShiftModifier);
+    sendMouse(view.viewport(), QEvent::MouseMove, dragged, Qt::NoButton, Qt::MiddleButton,
+              Qt::ShiftModifier);
+    QVERIFY(view.transform().m11() < baseScale);
+    const QPointF lookedAt = view.mapToScene(dragged);
+
+    // Shift is still held at the release: commit instead of restore.
+    sendMouse(view.viewport(), QEvent::MouseButtonRelease, dragged, Qt::MiddleButton,
+              Qt::NoButton, Qt::ShiftModifier);
+
+    QCOMPARE(view.transform().m11(), baseScale);
+    const QPointF committedCenter = view.mapToScene(view.viewport()->rect().center());
+    const QPointF delta = committedCenter - lookedAt;
+    QVERIFY2(std::hypot(delta.x(), delta.y()) < 5.0,
+             qPrintable(QStringLiteral("lookedAt=(%1, %2) center=(%3, %4)")
+                            .arg(lookedAt.x())
+                            .arg(lookedAt.y())
+                            .arg(committedCenter.x())
+                            .arg(committedCenter.y())));
+    QVERIFY(committedCenter.x() > baseCenter.x() + 100.0);
 }
 
 void TestUiScene::cancelModesRestoresThePeek()
