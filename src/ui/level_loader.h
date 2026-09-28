@@ -154,6 +154,14 @@ private:
     // Evicts LRU entries (oldest first) until the cache is at most
     // target bytes, never going below floor.
     void evictToBytes(qint64 target, qint64 floor);
+    // Whether the RAM LRU is off, so the disk cache is the only cache
+    // and levels are written through instead of on eviction.
+    bool ramCacheDisabled() const;
+    // Queues levels evicted from the RAM cache for a worker to write to
+    // the session cache (the eviction itself runs on the UI thread).
+    void queueCacheWrites(QVector<QPair<QString, QImage>> entries);
+    // Writes the queued levels; runs on a worker thread.
+    void flushCacheWrites();
     // One settle step: releases the configured share of the off-screen
     // cache, oldest first, never below the pinned bytes.
     void settleStep();
@@ -171,6 +179,12 @@ private:
     int settleSeconds_ = 0;
     int settlePercent_ = 0;
     qint64 pinnedBytes_ = 0;
+
+    // Levels evicted from the LRU, waiting for a worker to write them to
+    // the session cache; bounded, because the disk copy is best-effort.
+    QMutex cacheWriteMutex_;
+    QVector<QPair<QString, QImage>> pendingCacheWrites_;
+    qint64 pendingCacheWriteBytes_ = 0;
 
     QVector<QThread *> threads_;
     QVector<Worker *> workers_;

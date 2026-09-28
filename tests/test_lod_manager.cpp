@@ -104,6 +104,9 @@ private slots:
     void offScreenDowngradesOrderByBytesFreed();
     void primaryBudgetSkipsRequestsThatDoNotFit();
     void ramCacheServesRepeatLevelsAndEvicts();
+    void levelsThatFitTheRamCacheNeverTouchTheDisk();
+    void evictedLevelsAreWrittenToTheDiskCache();
+    void levelsWriteThroughWhenTheRamCacheIsOff();
     void threadPoolClampsAndResizes();
     void threadPoolDecodesInParallel();
     void settingsThreadCountReachesTheLoader();
@@ -927,6 +930,78 @@ void TestLodManager::settleReleasesOffScreenCacheOnly()
              qPrintable(QStringLiteral("cache %1 not below %2")
                             .arg(manager.stats().lodRamCacheMB)
                             .arg(cachedBefore)));
+}
+
+void TestLodManager::levelsThatFitTheRamCacheNeverTouchTheDisk()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    auto cache = cache::SessionCache::createAt(dir.filePath(QStringLiteral("cache.db")));
+    QVERIFY(cache->isAvailable());
+
+    ui::LevelLoader loader;
+    loader.setThreads(1);
+    loader.setLevelCache(cache);
+    loader.setRamCacheBudget(16 * 1024 * 1024);
+    QSignalSpy ready(&loader, &ui::LevelLoader::levelReady);
+
+    auto source = std::make_shared<doc::BytesSource>(makePng(120, 90, Qt::darkRed));
+    loader.request(1, source, QSize(120, 90), QStringLiteral("smooth"), QStringLiteral("key-fit"));
+    QTRY_COMPARE_WITH_TIMEOUT(ready.count(), 1, 5000);
+
+    // The level stays in RAM, so the disk cache never sees it: levels are
+    // written on eviction, not on decode.
+    QTest::qWait(300); // past the cost pass
+    QVERIFY(!cache->get(QStringLiteral("lod"), QStringLiteral("key-fit")).has_value());
+}
+
+void TestLodManager::evictedLevelsAreWrittenToTheDiskCache()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    auto cache = cache::SessionCache::createAt(dir.filePath(QStringLiteral("cache.db")));
+    QVERIFY(cache->isAvailable());
+
+    ui::LevelLoader loader;
+    loader.setThreads(1);
+    loader.setLevelCache(cache);
+    QSignalSpy ready(&loader, &ui::LevelLoader::levelReady);
+
+    auto source = std::make_shared<doc::BytesSource>(makePng(120, 90, Qt::darkRed));
+    loader.request(1, source, QSize(120, 90), QStringLiteral("smooth"),
+                   QStringLiteral("key-evict"));
+    QTRY_COMPARE_WITH_TIMEOUT(ready.count(), 1, 5000);
+
+    // A one-byte budget makes the next cost pass evict the level, and the
+    // worker writes it to the session cache.
+    loader.setRamCacheBudget(1);
+    QTRY_VERIFY_WITH_TIMEOUT(
+        cache->get(QStringLiteral("lod"), QStringLiteral("key-evict")).has_value(), 5000);
+    const QImage cached = QImage::fromData(*cache->get(QStringLiteral("lod"),
+                                                      QStringLiteral("key-evict")));
+    QVERIFY(!cached.isNull());
+    QCOMPARE(cached.size(), QSize(120, 90));
+}
+
+void TestLodManager::levelsWriteThroughWhenTheRamCacheIsOff()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    auto cache = cache::SessionCache::createAt(dir.filePath(QStringLiteral("cache.db")));
+    QVERIFY(cache->isAvailable());
+
+    ui::LevelLoader loader;
+    loader.setThreads(1);
+    loader.setLevelCache(cache);
+    loader.setRamCacheBudget(0); // the LRU is off: the disk is the cache
+    QSignalSpy ready(&loader, &ui::LevelLoader::levelReady);
+
+    auto source = std::make_shared<doc::BytesSource>(makePng(120, 90, Qt::darkRed));
+    loader.request(1, source, QSize(120, 90), QStringLiteral("smooth"), QStringLiteral("key-off"));
+    QTRY_COMPARE_WITH_TIMEOUT(ready.count(), 1, 5000);
+
+    // Nothing can evict, so the level is written through on decode.
+    QVERIFY(cache->get(QStringLiteral("lod"), QStringLiteral("key-off")).has_value());
 }
 
 QTEST_MAIN(TestLodManager)

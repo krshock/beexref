@@ -32,6 +32,13 @@ project uses [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- **Decoded levels are written to the disk cache only when they are
+  evicted from RAM** — previously every decoded level was written
+  immediately, even if it never left memory. A session that keeps its
+  levels in RAM now writes nothing to the cache; after an eviction the
+  level is still served from disk instead of being decoded again. The
+  decoded-level RAM cache also defaults to 512 MB instead of 150 MB
+  (still tunable in Settings ▸ Performance).
 - Board files stay compatible with the other ports; a recovered copy
   marks its imageless items so they are not mistaken for damage.
 - Internal: the extensibility pass (tool host, item-type traits,

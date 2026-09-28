@@ -23,6 +23,10 @@ namespace {
 // reflects what is really resident.
 constexpr int kCacheCostDelayMs = 200;
 
+// The evicted levels waiting for the cache writer are capped, so a burst
+// of evictions cannot hold a large share of RAM hostage for the disk.
+constexpr qint64 kMaxPendingCacheWriteBytes = 64 * 1024 * 1024;
+
 QImage decodeLevel(const doc::SourcePtr &source, const QSize &targetSize, const QString &quality)
 {
     if (!source || !source->isValid())
@@ -382,7 +386,11 @@ void LevelLoader::runJob(const Job &job, Worker *worker)
     }
     if (image.isNull()) {
         image = decodeLevel(job.source, job.targetSize, job.quality);
-        if (!image.isNull() && cacheable) {
+        // With the RAM LRU in play, the disk copy is written when the
+        // level is evicted (see evictToBytes), so a level that stays in
+        // RAM never touches the disk. With the LRU off nothing ever
+        // evicts, so the disk is the cache and gets the level now.
+        if (!image.isNull() && cacheable && ramCacheDisabled()) {
             cache->put(QStringLiteral("lod"), job.cacheKey, QStringLiteral("png"),
                        doc::encodePng(image));
         }
@@ -432,18 +440,86 @@ void LevelLoader::updateRamCacheCost()
 void LevelLoader::evictToBytes(qint64 target, qint64 floor)
 {
     target = qMax(target, floor);
-    QMutexLocker locker(&shared_->mutex);
-    while (shared_->ramCacheBytes > target) {
-        auto oldest = shared_->ramCache.cend();
-        for (auto it = shared_->ramCache.cbegin(); it != shared_->ramCache.cend(); ++it) {
-            if (oldest == shared_->ramCache.cend() || it->lastUsed < oldest->lastUsed)
-                oldest = it;
+    // Collect the evicted levels under the lock, then hand them to a
+    // worker: only levels that fall out of RAM reach the disk cache, and
+    // the encoding and the write never run on the UI thread.
+    QVector<QPair<QString, QImage>> evicted;
+    {
+        QMutexLocker locker(&shared_->mutex);
+        while (shared_->ramCacheBytes > target) {
+            auto oldest = shared_->ramCache.cend();
+            for (auto it = shared_->ramCache.cbegin(); it != shared_->ramCache.cend(); ++it) {
+                if (oldest == shared_->ramCache.cend() || it->lastUsed < oldest->lastUsed)
+                    oldest = it;
+            }
+            if (oldest == shared_->ramCache.cend())
+                break;
+            shared_->ramCacheBytes -= oldest->bytes;
+            evicted.append({oldest.key(), oldest->image});
+            shared_->ramCache.erase(oldest);
         }
-        if (oldest == shared_->ramCache.cend())
-            break;
-        shared_->ramCacheBytes -= oldest->bytes;
-        shared_->ramCache.erase(oldest);
     }
+    queueCacheWrites(std::move(evicted));
+}
+
+bool LevelLoader::ramCacheDisabled() const
+{
+    QMutexLocker locker(&shared_->mutex);
+    return shared_->ramCacheBudget <= 0;
+}
+
+void LevelLoader::queueCacheWrites(QVector<QPair<QString, QImage>> entries)
+{
+    if (entries.isEmpty())
+        return;
+    std::shared_ptr<cache::SessionCache> cache;
+    Worker *worker = nullptr;
+    {
+        QMutexLocker locker(&queueMutex_);
+        cache = cache_;
+        if (!workers_.isEmpty())
+            worker = workers_.first();
+    }
+    if (!cache || !cache->isAvailable() || !worker)
+        return;
+
+    {
+        QMutexLocker locker(&cacheWriteMutex_);
+        for (auto &entry : entries) {
+            // Best-effort and bounded: the disk copy must never hold a
+            // large share of RAM hostage while waiting for the writer.
+            if (pendingCacheWriteBytes_ >= kMaxPendingCacheWriteBytes)
+                break;
+            pendingCacheWriteBytes_ += entry.second.sizeInBytes();
+            pendingCacheWrites_.append(std::move(entry));
+        }
+    }
+    // The worker polls its queue every 50 ms, so a posted call runs even
+    // while it is idle.
+    QMetaObject::invokeMethod(worker, [this]() { flushCacheWrites(); }, Qt::QueuedConnection);
+}
+
+void LevelLoader::flushCacheWrites()
+{
+    QVector<QPair<QString, QImage>> entries;
+    {
+        QMutexLocker locker(&cacheWriteMutex_);
+        entries.swap(pendingCacheWrites_);
+        pendingCacheWriteBytes_ = 0;
+    }
+    if (entries.isEmpty())
+        return;
+
+    std::shared_ptr<cache::SessionCache> cache;
+    {
+        QMutexLocker locker(&queueMutex_);
+        cache = cache_;
+    }
+    if (!cache || !cache->isAvailable())
+        return;
+    for (const auto &entry : entries)
+        cache->put(QStringLiteral("lod"), entry.first, QStringLiteral("png"),
+                   doc::encodePng(entry.second));
 }
 
 void LevelLoader::releaseMemory()
