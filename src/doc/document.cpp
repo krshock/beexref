@@ -30,6 +30,20 @@ QJsonObject parseJsonObject(const QString &text, bool *ok = nullptr)
     return document.object();
 }
 
+// Whether two paths name the same file. The writer must release its own
+// reader when a save replaces the document's open file: Windows cannot
+// replace an open file, not even the same process's own.
+bool sameFile(const QString &a, const QString &b)
+{
+    if (a.isEmpty() || b.isEmpty())
+        return false;
+    const QString canonicalA = QFileInfo(a).canonicalFilePath();
+    const QString canonicalB = QFileInfo(b).canonicalFilePath();
+    if (!canonicalA.isEmpty() && !canonicalB.isEmpty())
+        return canonicalA == canonicalB;
+    return QFileInfo(a).absoluteFilePath() == QFileInfo(b).absoluteFilePath();
+}
+
 // Extra save data: images always carry their
 // filename, opacity, grayscale flag and crop, even at their defaults, so
 // a freshly created item serializes like the Python and Go ports.
@@ -482,7 +496,21 @@ board::Status Document::save(const QString &path, bool storeThumbnails,
 
     const QVector<board::Record> records = buildRecords();
     QVector<qint64> ids;
-    const board::Status status = board::save(path, records, storeThumbnails, progress, &ids);
+    auto temp = board::writeTemp(path, records, storeThumbnails, progress, &ids);
+    if (!temp)
+        return temp.error();
+    // The target can be the very file this document has open. The
+    // records needed that reader while the temp was written, but Windows
+    // cannot replace a file this process still holds, so the reader is
+    // released before the swap and rebuilt right after -- also when the
+    // swap fails, so the document never loses its sources.
+    const bool ownOpenFile =
+        board_ && board_->tempPath().isEmpty() && sameFile(path, path_);
+    if (ownOpenFile)
+        board_->close();
+    const board::Status status = board::replaceTemp(temp.value(), path);
+    if (ownOpenFile)
+        adoptFileSources();
     if (!status)
         return status;
     // The writer assigned a row id to every record, in order.

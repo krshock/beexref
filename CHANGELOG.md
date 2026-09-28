@@ -51,6 +51,13 @@ project uses [Semantic Versioning](https://semver.org/).
   item picks up the cache-backed source when the write lands. An undo
   that arrives before that still restores the image.
 
+### Fixed
+
+- Windows: a save that rewrites the whole file can replace a board the
+  app has open (with `Save/incremental` off it used to fail and keep a
+  `.tmp`), stale temporary and session files are swept again, and a
+  failed save leaves no temporary file behind.
+
 ## [0.7.0] - 2026-09-27
 
 ### Added

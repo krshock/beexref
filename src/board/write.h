@@ -70,6 +70,18 @@ Status save(const QString &path, const QVector<Record> &records,
             bool storeThumbnails = true, const Progress &progress = {},
             QVector<qint64> *assignedIds = nullptr, Format format = Format::Beex);
 
+// The two halves of save(), for a caller that has its own reader open on
+// the target: writeTemp writes and verifies the complete new file next to
+// path and returns its path; replaceTemp moves it over the target. A
+// caller whose reader is the target itself must release that reader
+// between the two calls -- Windows cannot replace an open file, not even
+// the same process's own -- and rebuild it afterwards. On a failed
+// replace the temp file is kept: it is the only copy of the save.
+Result<QString> writeTemp(const QString &path, const QVector<Record> &records,
+                          bool storeThumbnails = true, const Progress &progress = {},
+                          QVector<qint64> *assignedIds = nullptr, Format format = Format::Beex);
+Status replaceTemp(const QString &tempPath, const QString &path);
+
 // Checks that a board just written from records is complete: one item
 // row per record, one blob per pixmap record, no orphaned floors, and
 // the header the reader expects. save() runs this on the temp file

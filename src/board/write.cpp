@@ -646,8 +646,9 @@ Status verifyWritten(Connection &db, const QVector<Record> &records, Format form
     return Status::ok();
 }
 
-Status save(const QString &path, const QVector<Record> &records, bool storeThumbnails,
-            const Progress &progress, QVector<qint64> *assignedIds, Format format)
+Result<QString> writeTemp(const QString &path, const QVector<Record> &records,
+                         bool storeThumbnails, const Progress &progress,
+                         QVector<qint64> *assignedIds, Format format)
 {
     const QFileInfo target(path);
     const QDir dir(target.absolutePath());
@@ -677,6 +678,9 @@ Status save(const QString &path, const QVector<Record> &records, bool storeThumb
         if (Status status =
                 writeAll(db.value(), records, storeThumbnails, progress, assignedIds, format);
             !status) {
+            // Windows cannot remove an open file: release the connection
+            // before dropping the temp.
+            db.value().close();
             QFile::remove(tempPath);
             return friendlyWriteError(status.error());
         }
@@ -684,11 +688,16 @@ Status save(const QString &path, const QVector<Record> &records, bool storeThumb
         // replaces the target; a mismatch means the target keeps its
         // previous content.
         if (Status status = verifyWritten(db.value(), records, format); !status) {
+            db.value().close();
             QFile::remove(tempPath);
-            return status;
+            return status.error();
         }
     }
+    return tempPath;
+}
 
+Status replaceTemp(const QString &tempPath, const QString &path)
+{
     if (!renameOverwrite(tempPath, path)) {
         // The complete new file is kept: the target could not be
         // replaced, so the temp is the only copy of this save.
@@ -699,6 +708,15 @@ Status save(const QString &path, const QVector<Record> &records, bool storeThumb
                      path};
     }
     return Status::ok();
+}
+
+Status save(const QString &path, const QVector<Record> &records, bool storeThumbnails,
+            const Progress &progress, QVector<qint64> *assignedIds, Format format)
+{
+    auto temp = writeTemp(path, records, storeThumbnails, progress, assignedIds, format);
+    if (!temp)
+        return temp.error();
+    return replaceTemp(temp.value(), path);
 }
 
 Status update(const QString &path, const QVector<Record> &changed, const QVector<Record> &added,

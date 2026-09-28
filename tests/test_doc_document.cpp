@@ -124,6 +124,17 @@ private slots:
     // scratch dir is shared by the suite, so a test that changes a
     // setting puts it back (see updatesTheFileInPlaceWhenPossible).
     void initTestCase() { testenv::isolate(); }
+    void init()
+    {
+        // The suite shares one settings directory, so a test that flips
+        // Save/incremental and fails before restoring it must not leak
+        // into the next one.
+        settings::File file(settings::iniPath());
+        file.load();
+        file.setValue(QStringLiteral("Save"), QStringLiteral("incremental"),
+                      QStringLiteral("true"));
+        file.sync();
+    }
     void cleanup() { testenv::isolate(); }
     void savesAndReopensEveryField();
     void reopenReadsTheBlobFormat();
@@ -860,10 +871,16 @@ void TestDocument::updatesTheFileInPlaceWhenPossible()
     QCOMPARE(inodeOf(path), firstInode);
 #endif
 
-    auto reopened = doc::Document::open(path, dir.filePath(QStringLiteral("cache")));
-    QVERIFY(reopened.isOk());
-    QCOMPARE(reopened.value().items().size(), 1);
-    QCOMPARE(reopened.value().items().first()->x, 42.0);
+    {
+        // The reader must not outlive this scope: the complete rewrite
+        // below replaces the file, and Windows cannot replace a file that
+        // another reader in the same process still holds (the app has a
+        // single reader, so this only matters for the test).
+        auto reopened = doc::Document::open(path, dir.filePath(QStringLiteral("cache")));
+        QVERIFY(reopened.isOk());
+        QCOMPARE(reopened.value().items().size(), 1);
+        QCOMPARE(reopened.value().items().first()->x, 42.0);
+    }
 
     // The setting is the safety valve: off means a complete new file.
     document.setPath(path);
