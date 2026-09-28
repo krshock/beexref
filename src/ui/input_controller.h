@@ -14,6 +14,7 @@
 #include <memory>
 
 class QMimeData;
+class QThreadPool;
 
 namespace cache {
 class SessionCache;
@@ -55,6 +56,7 @@ class InputController : public QObject
 
 public:
     InputController(Scene *scene, doc::UndoStack *undoStack, QObject *parent = nullptr);
+    ~InputController() override;
 
     bool acceptsMimeData(const QMimeData &data) const;
     void insertMimeData(const QMimeData &data, const QPointF &scenePos, double viewScale = 1.0);
@@ -85,8 +87,14 @@ public:
     void clearInternalClipboard() { internalClipboard_.clear(); }
 
     // Payloads of items that leave the board are moved here, so a
-    // deleted image's bytes do not stay in RAM for undo.
+    // deleted image's bytes do not stay in RAM for undo. The move runs
+    // on a worker; the item gets its cache-backed source back on the UI
+    // thread once the write lands.
     void setSessionCache(std::shared_ptr<cache::SessionCache> cache);
+    // Blocks until every queued spill reached the cache and the items
+    // picked up their cache-backed sources. Tests use it; the UI never
+    // waits.
+    void waitForSpills();
 
 signals:
     void message(const QString &text);
@@ -97,6 +105,9 @@ private:
     void insertLoaded(const doc::LoadedImage &loaded, const QPointF &scenePos);
     void insertUrls(const QList<QUrl> &urls, const QPointF &scenePos);
     void spillToCache(const doc::ItemPtr &item);
+    // One queued spill swap landed (or was dropped after a failed
+    // write); waitForSpills() drains on this counter.
+    void finishSpillSwap();
     void arrangeInserted(const QVector<doc::ItemPtr> &items, const QPointF &scenePos);
     // Whether a registered handler claims the payload (format names only).
     static bool handlerClaims(const InsertHandler &handler, const QMimeData &data);
@@ -105,6 +116,12 @@ private:
     doc::UndoStack *undoStack_;
     Downloader *downloader_;
     std::shared_ptr<cache::SessionCache> sessionCache_;
+    // One worker moves detached payloads out of RAM; spills are rare and
+    // order does not matter.
+    QThreadPool *spillPool_ = nullptr;
+    // Spill swaps queued to this thread but not delivered yet; only
+    // touched here.
+    int pendingSpillSwaps_ = 0;
     QVector<InsertHandler> insertHandlers_;
     QVector<doc::ItemPtr> internalClipboard_;
     QHash<quint64, QPointF> pendingDrops_;

@@ -95,6 +95,7 @@ private slots:
     void pasteSystemClipboardText();
     void cutAndUndoRestores();
     void removingAnImageSpillsItsBytes();
+    void undoBeforeTheSpillLandsStillRestores();
     void customInsertHandlerClaimsItsFormat();
 };
 
@@ -414,6 +415,10 @@ void TestInput::removingAnImageSpillsItsBytes()
     controller.cut();
     QCOMPARE(document->items().size(), 0);
 
+    // The spill runs on a worker; wait for the write and the source
+    // swap before looking at the cache.
+    controller.waitForSpills();
+
     // The payload left RAM for the cache, and undo still restores it.
     QCOMPARE(item->source->residentBytes(), qint64(0));
     QVERIFY(item->source->isValid());
@@ -422,6 +427,45 @@ void TestInput::removingAnImageSpillsItsBytes()
     QCOMPARE(*spilled, png);
 
     QVERIFY(stack.undo());
+    scene.syncDocument();
+    QCOMPARE(document->items().size(), 1);
+    auto blob = document->blob(*document->items().first());
+    QVERIFY(blob.isOk());
+    QCOMPARE(blob.value(), png);
+}
+
+void TestInput::undoBeforeTheSpillLandsStillRestores()
+{
+    // The spill is asynchronous: an undo that arrives while it is still
+    // queued must restore the image (the item gets its cache-backed
+    // source afterwards, and the bytes stay readable).
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    auto cache = cache::SessionCache::create(dir.path());
+    QVERIFY(cache->isAvailable());
+
+    auto document = std::make_shared<doc::Document>(doc::Document::create());
+    ui::Scene scene;
+    scene.setDocument(document);
+    doc::UndoStack stack(document.get());
+    ui::InputController controller(&scene, &stack);
+    controller.setSessionCache(cache);
+
+    const QByteArray png = makePng(400, 300, Qt::blue);
+    QImage image;
+    image.loadFromData(png);
+    QMimeData mime;
+    mime.setImageData(image);
+    controller.insertMimeData(mime, QPointF(0, 0));
+    QCOMPARE(document->items().size(), 1);
+
+    scene.itemViewFor(document->items().first())->setSelected(true);
+    controller.cut();
+    QCOMPARE(document->items().size(), 0);
+
+    // Undo right away, without letting the queued swap land.
+    QVERIFY(stack.undo());
+    controller.waitForSpills();
     scene.syncDocument();
     QCOMPARE(document->items().size(), 1);
     auto blob = document->blob(*document->items().first());

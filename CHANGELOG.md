@@ -44,6 +44,10 @@ project uses [Semantic Versioning](https://semver.org/).
 - The session cache setting is labelled for what it does — Session disk
   cache, covering decoded levels and detached payloads — instead of
   mentioning only the undo history.
+- Deleting or cutting a large image no longer stalls the window: its
+  payload is encoded and moved to the session cache on a worker, and the
+  item picks up the cache-backed source when the write lands. An undo
+  that arrives before that still restores the image.
 
 ## [0.7.0] - 2026-09-27
 

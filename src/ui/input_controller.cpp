@@ -15,6 +15,8 @@
 #include <QFileInfo>
 #include <QImageReader>
 #include <QMimeData>
+#include <QPointer>
+#include <QThreadPool>
 #include <QUrl>
 
 #include <memory>
@@ -60,6 +62,11 @@ InputController::InputController(Scene *scene, doc::UndoStack *undoStack, QObjec
     , undoStack_(undoStack)
     , downloader_(new Downloader(this))
 {
+    // Detached payloads are encoded and written here, off the UI thread;
+    // one worker is plenty, the spills are rare and order does not
+    // matter.
+    spillPool_ = new QThreadPool(this);
+    spillPool_->setMaxThreadCount(1);
     connect(downloader_, &Downloader::finished, this,
             [this](quint64 requestId, const QByteArray &bytes, const QString &source) {
                 const QPointF position = pendingDrops_.take(requestId);
@@ -75,6 +82,14 @@ InputController::InputController(Scene *scene, doc::UndoStack *undoStack, QObjec
                 pendingDrops_.remove(requestId);
                 emit message(QStringLiteral("Download failed: %1 (%2)").arg(source, error));
             });
+}
+
+InputController::~InputController()
+{
+    // The runnables keep their payloads alive through shared pointers,
+    // but nothing of theirs may outlive this object: wait them out.
+    if (spillPool_)
+        spillPool_->waitForDone();
 }
 
 bool InputController::acceptsMimeData(const QMimeData &data) const
@@ -299,20 +314,53 @@ void InputController::spillToCache(const doc::ItemPtr &item)
     // the open file; only in-memory payloads are worth moving out.
     if (item->source->residentBytes() == 0)
         return;
-
-    const QByteArray bytes = item->source->bytes();
-    if (bytes.isEmpty())
-        return;
     const QString key = item->ensureUuid();
     if (key.isEmpty())
         return;
-    const QString format = item->format.isEmpty() ? QStringLiteral("png") : item->format;
-    if (!sessionCache_->put(QStringLiteral("undo"), key, format, bytes))
-        return;
 
+    // The encode and the disk write never run on the UI thread: deleting
+    // a large image used to stall the window while its payload was
+    // encoded and written. The captures keep the payload alive, and the
+    // swap lands back on this thread, so the item's source is only ever
+    // written here (and only while it still holds the spilled source).
+    const doc::SourcePtr source = item->source;
+    const QString format = item->format.isEmpty() ? QStringLiteral("png") : item->format;
     const auto cache = sessionCache_;
-    item->source = std::make_shared<doc::ProviderSource>(
-        [cache, key]() { return cache->get(QStringLiteral("undo"), key).value_or(QByteArray()); });
+    const QPointer<InputController> self(this);
+    ++pendingSpillSwaps_;
+    spillPool_->start([self, item, source, cache, key, format]() {
+        const QByteArray bytes = source->bytes();
+        const bool stored =
+            !bytes.isEmpty() && cache->put(QStringLiteral("undo"), key, format, bytes);
+        if (!self)
+            return;
+        QMetaObject::invokeMethod(
+            self,
+            [self, item, source, cache, key, stored]() {
+                if (stored && item->source == source) {
+                    item->source = std::make_shared<doc::ProviderSource>([cache, key]() {
+                        return cache->get(QStringLiteral("undo"), key).value_or(QByteArray());
+                    });
+                }
+                self->finishSpillSwap();
+            },
+            Qt::QueuedConnection);
+    });
+}
+
+void InputController::finishSpillSwap()
+{
+    if (pendingSpillSwaps_ > 0)
+        --pendingSpillSwaps_;
+}
+
+void InputController::waitForSpills()
+{
+    spillPool_->waitForDone();
+    // The swaps are queued to this thread: run them, so the items really
+    // hold their cache-backed sources when this returns.
+    while (pendingSpillSwaps_ > 0)
+        QCoreApplication::processEvents();
 }
 
 void InputController::removeSelection()
