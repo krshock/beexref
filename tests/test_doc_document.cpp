@@ -18,6 +18,7 @@
 #include "doc/document.h"
 #include "doc/item.h"
 #include "doc/source.h"
+#include "doc/undo.h"
 #include "settings.h"
 #include "test_env.h"
 
@@ -33,6 +34,30 @@ QByteArray makePng(int width, int height, const QColor &color)
     image.save(&buffer, "PNG");
     return bytes;
 }
+
+// Counts how often its bytes are read, to prove an update writes only
+// what changed.
+class CountingSource final : public doc::Source
+{
+public:
+    explicit CountingSource(QByteArray data)
+        : data_(std::move(data))
+    {
+    }
+
+    bool isValid() const override { return true; }
+    QByteArray bytes() const override
+    {
+        ++reads;
+        return data_;
+    }
+    qint64 residentBytes() const override { return data_.size(); }
+
+    mutable int reads = 0;
+
+private:
+    QByteArray data_;
+};
 
 board::Record pixmapRecord(qint64 saveId, const QByteArray &png, const QString &filename)
 {
@@ -124,6 +149,9 @@ private slots:
     void updatesTheFileInPlaceWhenPossible();
     void incrementalSaveCarriesAddsAndDeletes();
     void incrementalAndFullSavesAgree();
+    void deleteUndoSaveNeverReusesIds();
+    void incrementalUpdateKeepsPlaceholders();
+    void incrementalUpdateWritesOnlyWhatChanged();
 };
 
 void TestDocument::savesAndReopensEveryField()
@@ -996,6 +1024,150 @@ void TestDocument::incrementalAndFullSavesAgree()
                  QJsonDocument(b->meta).toJson(QJsonDocument::Compact));
         QCOMPARE(it.value().second, full.value(it.key()).second);
     }
+}
+
+void TestDocument::deleteUndoSaveNeverReusesIds()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString path = dir.filePath(QStringLiteral("ids.beex"));
+
+    doc::Document document = doc::Document::create();
+    const doc::ItemPtr first = pixmapItem(makePng(300, 200, Qt::red));
+    first->uuid = QStringLiteral("u1");
+    const doc::ItemPtr second = pixmapItem(makePng(120, 90, Qt::blue));
+    second->uuid = QStringLiteral("u2");
+    document.addItem(first);
+    document.addItem(second);
+    QVERIFY(document.save(path).isOk());
+    document.setPath(path);
+    document.adoptFileSources();
+    const qint64 secondId = second->id;
+    QVERIFY(secondId > 0);
+
+    // Delete the second item through the real command, save the delete,
+    // then undo it: the restored item keeps its id, and the item added
+    // afterwards must not be handed that id. The spill callback is what
+    // the app uses to keep the bytes alive for undo (the session cache);
+    // here it keeps them in RAM.
+    doc::UndoStack stack(&document);
+    stack.push(std::make_unique<doc::RemoveItemsCommand>(
+        QVector<doc::ItemPtr>{second},
+        [](const doc::ItemPtr &item) {
+            item->source = std::make_shared<doc::BytesSource>(item->source->bytes());
+        },
+        QStringLiteral("Delete")));
+    const auto afterDelete = document.save(path);
+    QVERIFY2(afterDelete.isOk(), qPrintable(afterDelete.error().toString()));
+    document.setPath(path);
+    document.adoptFileSources();
+
+    QVERIFY(stack.undo());
+    const doc::ItemPtr third = pixmapItem(makePng(60, 40, Qt::green));
+    third->uuid = QStringLiteral("u3");
+    document.addItem(third);
+    const auto afterUndo = document.save(path);
+    QVERIFY2(afterUndo.isOk(), qPrintable(afterUndo.error().toString()));
+
+    QVERIFY(third->id > 0);
+    QVERIFY(third->id != secondId);
+    auto reopened = doc::Document::open(path, dir.filePath(QStringLiteral("cache")));
+    QVERIFY(reopened.isOk());
+    QCOMPARE(reopened.value().items().size(), 3);
+    const doc::ItemPtr restored = reopened.value().itemById(secondId);
+    QVERIFY(restored);
+    QCOMPARE(restored->uuid, QStringLiteral("u2"));
+    QCOMPARE(reopened.value().blob(*restored).value(), makePng(120, 90, Qt::blue));
+    QCOMPARE(reopened.value().blob(*reopened.value().itemById(third->id)).value(),
+             makePng(60, 40, Qt::green));
+}
+
+void TestDocument::incrementalUpdateKeepsPlaceholders()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString path = dir.filePath(QStringLiteral("placeholder.beex"));
+
+    // A recovered copy: one real image and one marked placeholder.
+    QVector<board::Record> records;
+    records << pixmapRecord(1, makePng(300, 200, Qt::red), QStringLiteral("a.png"));
+    board::Record placeholder = pixmapRecord(2, QByteArray(), QStringLiteral("gone.png"));
+    placeholder.placeholder = true;
+    placeholder.dataJson = QStringLiteral("{\"filename\":\"gone.png\",\"placeholder\":true}");
+    records << placeholder;
+    QVERIFY(board::save(path, records).isOk());
+
+    auto opened = doc::Document::open(path, dir.filePath(QStringLiteral("cache")));
+    QVERIFY(opened.isOk());
+    doc::Document document = opened.take();
+    QVERIFY(!document.damaged());
+    QCOMPARE(document.placeholderCount(), 1);
+
+    // Move the real image and add another: one in-place update that must
+    // carry the placeholder row along untouched.
+    const doc::ItemPtr first = document.itemById(1);
+    QVERIFY(first);
+    first->x = 12;
+    document.noteItemChanged(first);
+    const doc::ItemPtr third = pixmapItem(makePng(60, 40, Qt::green));
+    third->uuid = QStringLiteral("u3");
+    document.addItem(third);
+    QVERIFY(document.save(path).isOk());
+
+    auto again = doc::Document::open(path, dir.filePath(QStringLiteral("cache")));
+    QVERIFY(again.isOk());
+    const doc::Document &board = again.value();
+    QCOMPARE(board.items().size(), 3);
+    QCOMPARE(board.placeholderCount(), 1);
+    QCOMPARE(board.itemById(1)->x, 12.0);
+    QVERIFY(board.itemById(2)); // the placeholder is still there
+    QVERIFY(!board.itemById(2)->data.isEmpty());
+    // Two real blobs: the kept image and the new one.
+    QCOMPARE(board.board()->counts().value().value(QStringLiteral("sqlar")), qint64(2));
+}
+
+void TestDocument::incrementalUpdateWritesOnlyWhatChanged()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString path = dir.filePath(QStringLiteral("reads.beex"));
+
+    const QByteArray red = makePng(300, 200, Qt::red);
+    QVERIFY(board::save(path, {pixmapRecord(1, red, QStringLiteral("a.png"))}).isOk());
+
+    auto opened = doc::Document::open(path, dir.filePath(QStringLiteral("cache")));
+    QVERIFY(opened.isOk());
+    doc::Document document = opened.take();
+    const doc::ItemPtr existing = document.items().first();
+
+    // The kept item's source counts its reads: an update must not touch
+    // its blob at all.
+    auto *existingSource = new CountingSource(red);
+    existing->source = doc::SourcePtr(existingSource);
+
+    // The new item's source is read once, when its blob is written.
+    auto *newSource = new CountingSource(makePng(60, 40, Qt::green));
+    auto added = std::make_shared<doc::Item>(doc::kTypePixmap);
+    added->source = doc::SourcePtr(newSource);
+    added->setOriginalSize(QSize(60, 40));
+    added->format = QStringLiteral("png");
+    added->uuid = QStringLiteral("u2");
+    document.addItem(added);
+
+    existing->x = 5;
+    document.noteItemChanged(existing);
+    QVERIFY(document.save(path).isOk());
+
+    QCOMPARE(existingSource->reads, 0);
+    QCOMPARE(newSource->reads, 1);
+
+    auto reopened = doc::Document::open(path, dir.filePath(QStringLiteral("cache")));
+    QVERIFY(reopened.isOk());
+    QCOMPARE(reopened.value().items().size(), 2);
+    QCOMPARE(reopened.value().itemById(1)->x, 5.0);
+    QCOMPARE(reopened.value().blob(*reopened.value().itemById(1)).value(), red);
+    QCOMPARE(reopened.value().blob(*reopened.value().itemById(added->id)).value(),
+             makePng(60, 40, Qt::green));
 }
 
 QTEST_GUILESS_MAIN(TestDocument)

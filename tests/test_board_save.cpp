@@ -77,6 +77,7 @@ private slots:
     void updateRefusesNonCurrentFiles();
     void updateRollsBackOnFailure();
     void updateWritesPlaceholderRows();
+    void updateKeepsFloors();
 };
 
 void TestBoardSave::savesAndReloads()
@@ -593,6 +594,39 @@ void TestBoardSave::updateWritesPlaceholderRows()
     QVERIFY(!failed.isOk());
     QVERIFY2(failed.error().message.contains(QStringLiteral("could not be read")),
              qPrintable(failed.error().toString()));
+}
+
+void TestBoardSave::updateKeepsFloors()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString path = dir.filePath(QStringLiteral("floors.beex"));
+
+    QVERIFY(board::save(path, {pixmapRecord(1, makePng(300, 200, Qt::red), QStringLiteral("a.png")),
+                               pixmapRecord(2, makePng(300, 200, Qt::blue), QStringLiteral("b.png"))})
+                .isOk());
+    auto before = board::Board::open(path, dir.filePath(QStringLiteral("cache")));
+    QVERIFY(before.isOk());
+    const QByteArray floor1 = before.value().floorLevels().value().value(1).data;
+    QVERIFY(!floor1.isEmpty());
+
+    // Move item 1, delete item 2 and add item 3: the kept item's floor is
+    // reused verbatim, the deleted one's goes with its item, the new one
+    // gets its own.
+    board::Record moved = pixmapRecord(1, QByteArray(), QStringLiteral("a.png"));
+    moved.x = 9;
+    const auto status = board::update(
+        path, {moved}, {pixmapRecord(0, makePng(300, 200, Qt::green), QStringLiteral("c.png"))}, {2},
+        100, true, {});
+    QVERIFY2(status.isOk(), qPrintable(status.error().toString()));
+
+    auto after = board::Board::open(path, dir.filePath(QStringLiteral("cache")));
+    QVERIFY(after.isOk());
+    const auto floors = after.value().floorLevels();
+    QVERIFY(floors.isOk());
+    QCOMPARE(floors.value().value(1).data, floor1);
+    QVERIFY(!floors.value().contains(2));
+    QVERIFY(floors.value().contains(100));
 }
 
 QTEST_GUILESS_MAIN(TestBoardSave)
