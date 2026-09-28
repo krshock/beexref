@@ -18,10 +18,11 @@ dist=$(release_dist)
 if [ "$#" -gt 0 ]; then
     # Resolve the named artifacts once: the AppImage check extracts from
     # a different directory, so a relative path would no longer resolve.
+    # A Windows drive path (the MSYS2 builds) counts as absolute too.
     artifacts=""
     for artifact in "$@"; do
         case "$artifact" in
-            /*) ;;
+            /* | [A-Za-z]:/*) ;;
             *) artifact="$PWD/$artifact" ;;
         esac
         artifacts="$artifacts $artifact"
