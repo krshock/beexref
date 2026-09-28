@@ -6,6 +6,12 @@ project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- The main window remembers its size, position and maximized state
+  across runs (the `Window/geometry` value in the settings file). With
+  nothing saved yet it starts at 600x450.
+
 ## [0.8.0] - 2026-09-28
 
 ### Added

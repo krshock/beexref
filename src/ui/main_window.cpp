@@ -34,6 +34,7 @@
 
 #include <QAction>
 #include <QApplication>
+#include <QByteArray>
 #include <QCloseEvent>
 #include <QImageReader>
 #include <QPlainTextEdit>
@@ -314,7 +315,19 @@ MainWindow::MainWindow(bool cacheDisabled, QWidget *parent)
     updateActions();
 
     setMinimumSize(400, 300);
-    resize(500, 300);
+    resize(600, 450);
+    // The window comes back where it was left: size, position and the
+    // maximized or fullscreen state travel in one opaque blob, and
+    // restoreGeometry checks that the saved screens still exist before
+    // using them. With nothing saved, the default above stands.
+    {
+        settings::File file(settings::iniPath());
+        file.load();
+        const QString geometry =
+            file.value(QStringLiteral("Window"), QStringLiteral("geometry"));
+        if (!geometry.isEmpty())
+            restoreGeometry(QByteArray::fromBase64(geometry.toLatin1()));
+    }
     updateWelcomeOverlay();
     updateTitle();
 
@@ -698,6 +711,13 @@ void MainWindow::closeEvent(QCloseEvent *event)
         event->ignore();
         return;
     }
+    // Remember where the window was left for the next run. Only a close
+    // that goes through saves it: a refused close changes nothing.
+    settings::File file(settings::iniPath());
+    file.load();
+    file.setValue(QStringLiteral("Window"), QStringLiteral("geometry"),
+                  QString::fromLatin1(saveGeometry().toBase64()));
+    file.sync();
     event->accept();
 }
 

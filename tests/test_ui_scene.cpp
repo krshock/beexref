@@ -268,6 +268,7 @@ private slots:
     void windowExportsSceneSvg();
     void windowExportsImagesToDirectory();
     void windowCarriesTheAppIcon();
+    void windowRemembersItsGeometry();
     void closeHonoursTheUnsavedSetting();
     void selectingAnImageSchedulesLod();
     void hudToastsAppearAndExpire();
@@ -2357,6 +2358,36 @@ void TestUiScene::windowCarriesTheAppIcon()
     // The embedded logo, like the reference's BeeAssets().logo.
     QVERIFY(!window.windowIcon().isNull());
     QVERIFY(!window.windowIcon().pixmap(64, 64).isNull());
+
+    settings::setSettingsDir(QString());
+}
+
+void TestUiScene::windowRemembersItsGeometry()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    settings::setSettingsDir(dir.path());
+    {
+        // A close must not ask about the fresh document.
+        settings::File file(settings::iniPath());
+        file.load();
+        file.setValue(QStringLiteral("Save"), QStringLiteral("confirm_close_unsaved"),
+                      QStringLiteral("false"));
+        QVERIFY(file.sync());
+    }
+
+    // With nothing saved, the window starts at its default size.
+    {
+        ui::MainWindow fresh;
+        QCOMPARE(fresh.size(), QSize(600, 450));
+        fresh.resize(700, 520);
+        fresh.show();
+        QVERIFY(fresh.close());
+    }
+
+    // The next run comes back where the previous one was left.
+    ui::MainWindow restored;
+    QCOMPARE(restored.size(), QSize(700, 520));
 
     settings::setSettingsDir(QString());
 }
