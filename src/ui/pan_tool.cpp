@@ -16,12 +16,12 @@ namespace {
 // at kMaxGlideNs. The velocity decays with kGlideDecayTau, so the distance
 // is roughly speed * tau.
 constexpr double kVelocitySmoothingTau = 0.08;
-constexpr double kGlideDecayTau = 0.18;
+constexpr double kGlideDecayTau = 0.28;
 constexpr double kMinGlideSpeed = 60.0;
 constexpr double kMaxGlideSpeed = 2500.0;
 constexpr double kMaxGlideStep = 60.0;
 constexpr qint64 kStaleMoveNs = 120'000'000;
-constexpr qint64 kMaxGlideNs = 1'000'000'000;
+constexpr qint64 kMaxGlideNs = 1'500'000'000;
 
 } // namespace
 
