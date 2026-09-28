@@ -6,6 +6,8 @@ project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-09-28
+
 ### Added
 
 - **Panning has momentum**: a fast pan release lets the canvas glide to a
@@ -112,7 +114,8 @@ crop, transforms, arrange, exports), the `.beex` board format with
 per-image metadata and LOD levels, the session cache, and the Linux and
 Windows builds.
 
-[Unreleased]: https://github.com/krshock/beexref/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/krshock/beexref/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/krshock/beexref/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/krshock/beexref/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/krshock/beexref/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/krshock/beexref/releases/tag/v0.5.0
