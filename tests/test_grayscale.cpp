@@ -3,8 +3,6 @@
 #include <QPainter>
 #include <QtTest>
 
-#include <cmath>
-
 #include "ui/grayscale.h"
 #include "ui/theme.h"
 
@@ -21,19 +19,6 @@ QImage pixelImage(const QColor &color)
 int grayAt(const QImage &image, int x = 0, int y = 0)
 {
     return qGray(image.pixel(x, y));
-}
-
-// The float reference for the linear-light method, for a tolerance
-// comparison: sRGB -> linear, Rec.709 luminance, linear -> sRGB.
-int linearReference(int r, int g, int b)
-{
-    const auto toLinear = [](int value) {
-        const double c = value / 255.0;
-        return c <= 0.04045 ? c / 12.92 : std::pow((c + 0.055) / 1.055, 2.4);
-    };
-    const double y = 0.2126 * toLinear(r) + 0.7152 * toLinear(g) + 0.0722 * toLinear(b);
-    const double c = y <= 0.0031308 ? 12.92 * y : 1.055 * std::pow(y, 1.0 / 2.4) - 0.055;
-    return qBound(0, int(std::lround(c * 255.0)), 255);
 }
 
 } // namespace
@@ -54,7 +39,7 @@ private slots:
 void TestGrayscale::methodsAreTheRegistry()
 {
     const QVector<ui::GrayscaleMethod> &methods = ui::grayscaleMethods();
-    QCOMPARE(methods.size(), 8);
+    QCOMPARE(methods.size(), 7);
     QCOMPARE(methods.first().id, QStringLiteral("classic"));
     QCOMPARE(ui::defaultGrayscaleMethod(), QStringLiteral("classic"));
     for (const ui::GrayscaleMethod &method : methods) {
@@ -167,32 +152,6 @@ void TestGrayscale::knownValuesPerMethod()
     for (const ui::GrayscaleMethod &method : ui::grayscaleMethods()) {
         QCOMPARE(grayAt(ui::grayscaleImage(pixelImage(black), method.id)), 0);
         QCOMPARE(grayAt(ui::grayscaleImage(pixelImage(white), method.id)), 255);
-    }
-
-    // Linear light follows the float reference within the LUT's step, and
-    // it matches Classic (the painter path is the same formula) within a
-    // step over the whole cube -- they are the same look.
-    for (const QColor &color : {red, green, blue, mid}) {
-        const int actual = value("linear", color);
-        const int expected = linearReference(color.red(), color.green(), color.blue());
-        QVERIFY2(std::abs(actual - expected) <= 1,
-                 qPrintable(QStringLiteral("%1 vs %2").arg(actual).arg(expected)));
-    }
-    for (int r = 0; r <= 255; r += 17) {
-        for (int g = 0; g <= 255; g += 17) {
-            for (int b = 0; b <= 255; b += 17) {
-                const QColor color(r, g, b);
-                const int classic = value("classic", color);
-                const int linear = value("linear", color);
-                QVERIFY2(std::abs(classic - linear) <= 1,
-                         qPrintable(QStringLiteral("%1,%2,%3: %4 vs %5")
-                                        .arg(r)
-                                        .arg(g)
-                                        .arg(b)
-                                        .arg(classic)
-                                        .arg(linear)));
-            }
-        }
     }
 }
 

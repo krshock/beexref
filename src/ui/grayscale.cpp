@@ -4,10 +4,6 @@
 
 #include <QPainter>
 
-#include <array>
-#include <cmath>
-#include <cstddef>
-
 namespace ui {
 namespace {
 
@@ -98,50 +94,6 @@ QImage minGrayscale(const QImage &image)
     return convertGrayscale(image, [](int r, int g, int b) { return qMin(r, qMin(g, b)); });
 }
 
-// sRGB <-> linear light tables, built once: the linear method sums the
-// linearised channels with the Rec.709 weights and re-encodes.
-const std::array<quint16, 256> &srgbToLinear()
-{
-    static const std::array<quint16, 256> table = [] {
-        std::array<quint16, 256> values{};
-        for (int i = 0; i < 256; ++i) {
-            const double c = i / 255.0;
-            const double linear = c <= 0.04045 ? c / 12.92 : std::pow((c + 0.055) / 1.055, 2.4);
-            values[std::size_t(i)] = static_cast<quint16>(std::lround(linear * 65535.0));
-        }
-        return values;
-    }();
-    return table;
-}
-
-const std::array<uchar, 4096> &linearToSrgb()
-{
-    static const std::array<uchar, 4096> table = [] {
-        std::array<uchar, 4096> values{};
-        for (int i = 0; i < 4096; ++i) {
-            const double linear = i / 4095.0;
-            const double c = linear <= 0.0031308 ? 12.92 * linear
-                                                 : 1.055 * std::pow(linear, 1.0 / 2.4) - 0.055;
-            values[std::size_t(i)] = static_cast<uchar>(qBound(0, int(std::lround(c * 255.0)), 255));
-        }
-        return values;
-    }();
-    return table;
-}
-
-QImage linearGrayscale(const QImage &image)
-{
-    const std::array<quint16, 256> &toLinear = srgbToLinear();
-    const std::array<uchar, 4096> &toSrgb = linearToSrgb();
-    return convertGrayscale(image, [&toLinear, &toSrgb](int r, int g, int b) {
-        // Rec.709 luminance in 16-bit fixed point, then back to sRGB.
-        const quint32 y = (2126u * toLinear[std::size_t(r)] + 7152u * toLinear[std::size_t(g)]
-                           + 722u * toLinear[std::size_t(b)])
-            / 10000u;
-        return int(toSrgb[(y * 4095u + 32767u) / 65535u]);
-    });
-}
-
 } // namespace
 
 const QVector<GrayscaleMethod> &grayscaleMethods()
@@ -153,8 +105,6 @@ const QVector<GrayscaleMethod> &grayscaleMethods()
          QStringLiteral("TV-style luma, gentle on skin tones"), bt601Grayscale},
         {QStringLiteral("bt709"), QStringLiteral("BT.709 luma"),
          QStringLiteral("The sRGB standard, what CSS and SVG filters use"), bt709Grayscale},
-        {QStringLiteral("linear"), QStringLiteral("Linear luminance"),
-         QStringLiteral("Physically correct light, brighter saturated colours"), linearGrayscale},
         {QStringLiteral("average"), QStringLiteral("Average"),
          QStringLiteral("The plain mean of red, green and blue"), averageGrayscale},
         {QStringLiteral("lightness"), QStringLiteral("Lightness"),

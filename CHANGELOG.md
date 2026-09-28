@@ -19,10 +19,10 @@ project uses [Semantic Versioning](https://semver.org/).
   over its source. Save As writes a copy in which the imageless items are
   explicit placeholders, and that copy can be saved normally afterwards.
 - **Grayscale methods**: the grayscale toggle can render with Classic
-  (the look BeeXRef always had), BT.601 luma, BT.709 luma, Linear
-  luminance, Average, Lightness, Max or Min — picked from
-  `Images ▸ Grayscale Method` (also in the right-click menu). The choice
-  applies instantly and is remembered.
+  (the look BeeXRef always had), BT.601 luma, BT.709 luma, Average,
+  Lightness, Max or Min — picked from `Images ▸ Grayscale Method` (also
+  in the right-click menu). The choice applies instantly and is
+  remembered.
 - **Incremental saves** (`Save/incremental`, on by default): saving into
   the board's own file writes only what changed, so Ctrl+S on a large
   board is fast. Save As, migrated or newer files, and turning the
