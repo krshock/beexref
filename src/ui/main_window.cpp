@@ -625,10 +625,11 @@ bool MainWindow::saveDocumentTo(const QString &path, bool createNew)
     // exactly this scene (same path, clean undo stack, no damage), so
     // Ctrl+S on a big board must not rewrite a gigabyte. A migrated,
     // deleted or externally changed file still goes through the write
-    // path.
+    // path. Say so, so the key press never feels ignored.
     if (!createNew && !document_->damaged() && undoStack_.isClean()
         && filename == document_->path() && QFileInfo(filename).size() > 0
         && document_->board() && document_->board()->tempPath().isEmpty()) {
+        hud::toast(view_, QStringLiteral("No changes to save"));
         return true;
     }
 

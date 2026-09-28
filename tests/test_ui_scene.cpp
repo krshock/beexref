@@ -3716,12 +3716,20 @@ void TestUiScene::noOpSaveLeavesTheFileUntouched()
     const QByteArray before = fileBytes(path);
     QVERIFY(!before.isEmpty());
     const QDateTime stamp = QFileInfo(path).lastModified();
+    // A real save says nothing; the no-op is the one that reports.
+    QVERIFY(window.view()->findChildren<QWidget *>(QStringLiteral("HUDToast")).isEmpty());
 
     // Nothing changed: the second save succeeds without touching the
-    // file, however large it is.
+    // file, however large it is, and says so with a toast.
     QVERIFY(window.saveDocumentTo(path, false));
     QCOMPARE(fileBytes(path), before);
     QCOMPARE(QFileInfo(path).lastModified(), stamp);
+    const QList<QWidget *> toasts =
+        window.view()->findChildren<QWidget *>(QStringLiteral("HUDToast"));
+    QCOMPARE(toasts.size(), 1);
+    auto *label = toasts.first()->findChild<QLabel *>();
+    QVERIFY(label);
+    QVERIFY2(label->text().contains(QStringLiteral("No changes")), qPrintable(label->text()));
 
     // A change writes again.
     QVERIFY(window.input()->insertText(QStringLiteral("note"), QPointF(10, 10)));

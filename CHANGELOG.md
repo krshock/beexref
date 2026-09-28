@@ -19,7 +19,9 @@ project uses [Semantic Versioning](https://semver.org/).
 - **Incremental saves** (`Save/incremental`, on by default): saving into
   the board's own file writes only what changed, so Ctrl+S on a large
   board is fast. Save As, migrated or newer files, and turning the
-  setting off keep writing a complete new file atomically.
+  setting off keep writing a complete new file atomically. A save with
+  nothing to write says so with a toast instead of silently doing
+  nothing.
 
 ### Changed
 
