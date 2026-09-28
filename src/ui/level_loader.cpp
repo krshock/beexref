@@ -339,18 +339,23 @@ void LevelLoader::dropQueuedLocked(const QString &coalesceKey)
     }
 }
 
+bool LevelLoader::isCurrentRequest(const Job &job) const
+{
+    if (job.coalesceKey.isEmpty())
+        return true;
+    QMutexLocker locker(&shared_->mutex);
+    return shared_->latest.value(job.coalesceKey) == job.requestId;
+}
+
 void LevelLoader::runJob(const Job &job, Worker *worker)
 {
     // A newer request for the same item supersedes this one; it is
     // dropped before any decode work happens.
-    if (!job.coalesceKey.isEmpty()) {
-        QMutexLocker locker(&shared_->mutex);
-        if (shared_->latest.value(job.coalesceKey) != job.requestId) {
-            emit levelCancelled(job.requestId);
-            if (worker)
-                worker->scheduleTrim();
-            return;
-        }
+    if (!isCurrentRequest(job)) {
+        emit levelCancelled(job.requestId);
+        if (worker)
+            worker->scheduleTrim();
+        return;
     }
 
     std::shared_ptr<cache::SessionCache> cache;
@@ -398,8 +403,14 @@ void LevelLoader::runJob(const Job &job, Worker *worker)
     if (image.isNull()) {
         emit levelFailed(job.requestId);
     } else {
+        // The level is valid for the item whatever happens next, so it
+        // enters the LRU and can serve the newer request; but only the
+        // newest request gets an answer.
         publishRamCache(job, image);
-        emit levelReady(job.requestId, image);
+        if (isCurrentRequest(job))
+            emit levelReady(job.requestId, image);
+        else
+            emit levelCancelled(job.requestId);
     }
     if (worker)
         worker->scheduleTrim();

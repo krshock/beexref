@@ -145,6 +145,11 @@ private:
     // Drops a queued job for the same item, reporting it as cancelled.
     // Caller holds queueMutex_.
     void dropQueuedLocked(const QString &coalesceKey);
+    // Whether this job is still the newest for its item. Checked when it
+    // starts (nothing to do otherwise) and again when it publishes: a
+    // decode that was superseded while running must not answer for the
+    // old request, or the pool would hand out levels nobody waits for.
+    bool isCurrentRequest(const Job &job) const;
     // Runs one job: RAM cache, session cache, decode, publish.
     void runJob(const Job &job, Worker *worker);
     // Inserts a level into the LRU when caching is on.
