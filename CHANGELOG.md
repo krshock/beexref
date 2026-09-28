@@ -6,11 +6,38 @@ project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- **Recovery**: a board that cannot be fully read still opens. Missing
+  image data, invalid metadata, orphaned thumbnails, files written by a
+  newer version and files whose item table is gone are reported in one
+  summary (full list in the details and the log), and the status bar
+  keeps a `recovered · N` badge until the broken items are deleted.
+- **Recovered copies**: a board opened with problems is never written
+  over its source. Save As writes a copy in which the imageless items are
+  explicit placeholders, and that copy can be saved normally afterwards.
+- **Incremental saves** (`Save/incremental`, on by default): saving into
+  the board's own file writes only what changed, so Ctrl+S on a large
+  board is fast. Save As, migrated or newer files, and turning the
+  setting off keep writing a complete new file atomically.
+
 ### Changed
 
+- Board files stay compatible with the other ports; a recovered copy
+  marks its imageless items so they are not mistaken for damage.
 - Internal: the extensibility pass (tool host, item-type traits,
   incremental scene sync, menu table, insertion handlers, export and
-  LOD-method registries). No behaviour or board-format changes.
+  LOD-method registries).
+
+### Fixed
+
+- A save can no longer write less than it promises: an image row is never
+  written without its image, the written file is verified before it
+  replaces the target (and an in-place update before it commits), and a
+  failed replace keeps the complete new file and reports its path.
+- Saving refuses when the file changed on disk since it was opened
+  (another instance, a sync client) instead of overwriting it; a failed
+  post-save reopen is logged instead of swallowed.
 
 ## [0.6.0] - 2026-09-26
 
