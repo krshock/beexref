@@ -38,7 +38,9 @@ project uses [Semantic Versioning](https://semver.org/).
   levels in RAM now writes nothing to the cache; after an eviction the
   level is still served from disk instead of being decoded again. The
   decoded-level RAM cache also defaults to 512 MB instead of 150 MB
-  (still tunable in Settings ▸ Performance).
+  (still tunable in Settings ▸ Performance), and a single cache entry is
+  never larger than 16 MB — one huge level or payload is not worth the
+  disk it would hold for the session.
 
 ## [0.7.0] - 2026-09-27
 

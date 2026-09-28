@@ -17,11 +17,12 @@ namespace cache {
 //
 // Best-effort by design: if the file cannot be created or used, every
 // operation becomes a no-op and callers fall back to their in-memory
-// path. The connection opens lazily on first use, so a slow or locked
-// disk never delays startup; a failed open disables the cache for the
-// rest of the session. The file is deleted when the cache is destroyed
-// (normally at exit); files left behind by a crash are swept on the
-// next start.
+// path. Entries above a fixed size (16 MB) are not written at all, so
+// one huge level or payload cannot hold the disk for the session. The
+// connection opens lazily on first use, so a slow or locked disk never
+// delays startup; a failed open disables the cache for the rest of the
+// session. The file is deleted when the cache is destroyed (normally at
+// exit); files left behind by a crash are swept on the next start.
 //
 // Thread-safe: the underlying connection serializes its operations, so
 // the decode worker may read and write while the UI thread does too.

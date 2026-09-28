@@ -12,6 +12,7 @@ class TestSessionCache : public QObject
 
 private slots:
     void putGetRemoveAndDeleteOnDestruction();
+    void oversizedEntriesAreNotStored();
     void unavailableCacheIsANoop();
     void recreatesOnVersionMismatch();
     void failedOpenDisablesTheCache();
@@ -44,6 +45,28 @@ void TestSessionCache::putGetRemoveAndDeleteOnDestruction()
     }
     // The session file goes away with the cache.
     QVERIFY(!QFile::exists(path));
+}
+
+void TestSessionCache::oversizedEntriesAreNotStored()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    auto cache = cache::SessionCache::create(dir.path());
+    QVERIFY(cache->isAvailable());
+
+    // One entry above the per-entry cap is refused and leaves nothing
+    // behind; the cache itself stays usable.
+    const QByteArray oversized(17 * 1024 * 1024, 'x');
+    QVERIFY(!cache->put(QStringLiteral("undo"), QStringLiteral("big"), QStringLiteral("png"),
+                        oversized));
+    QVERIFY(!cache->get(QStringLiteral("undo"), QStringLiteral("big")).has_value());
+
+    const QByteArray stored(1024 * 1024, 'y');
+    QVERIFY(cache->put(QStringLiteral("undo"), QStringLiteral("small"), QStringLiteral("png"),
+                       stored));
+    const auto value = cache->get(QStringLiteral("undo"), QStringLiteral("small"));
+    QVERIFY(value.has_value());
+    QCOMPARE(*value, stored);
 }
 
 void TestSessionCache::unavailableCacheIsANoop()

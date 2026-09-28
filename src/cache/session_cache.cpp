@@ -15,6 +15,10 @@ namespace {
 
 constexpr int kCacheUserVersion = 1;
 constexpr int kStaleDays = 7;
+// One entry never grows past this: a single huge level or payload is
+// not worth the disk it would hold for the whole session, and the
+// caller's in-memory copy stays instead.
+constexpr qint64 kMaxEntryBytes = 16 * 1024 * 1024;
 // The cache is disposable, so a lock is never worth waiting for: the
 // board connections keep SQLite's default five seconds, the cache does
 // not (a busy cache must not stall a decode worker).
@@ -211,6 +215,10 @@ bool SessionCache::put(const QString &kind, const QString &key, const QString &f
                        const QByteArray &data)
 {
     if (!ensureOpen())
+        return false;
+    // Oversized entries are refused without failing the cache: the
+    // caller falls back to its in-memory copy.
+    if (data.size() > kMaxEntryBytes)
         return false;
     auto statement = connection_.prepare(QStringLiteral(
         "INSERT OR REPLACE INTO blobs (kind, key, format, data) VALUES (?, ?, ?, ?)"));
