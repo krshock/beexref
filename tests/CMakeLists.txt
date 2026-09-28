@@ -114,6 +114,11 @@ target_link_libraries(test_color_tools PRIVATE beexref_core Qt6::Test)
 beexref_set_warnings(test_color_tools)
 add_test(NAME color_tools COMMAND test_color_tools)
 
+qt_add_executable(test_grayscale test_grayscale.cpp)
+target_link_libraries(test_grayscale PRIVATE beexref_core Qt6::Test)
+beexref_set_warnings(test_grayscale)
+add_test(NAME grayscale COMMAND test_grayscale)
+
 qt_add_executable(test_layout_ops test_layout_ops.cpp)
 target_link_libraries(test_layout_ops PRIVATE beexref_core Qt6::Test)
 beexref_set_warnings(test_layout_ops)

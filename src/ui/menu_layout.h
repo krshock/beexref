@@ -10,13 +10,17 @@ namespace ui {
 //  * a separator (everything empty),
 //  * a submenu (submenuTitle non-empty, submenuIds its actions),
 //  * the dynamic Open Recent submenu (recent: its actions are rebuilt
-//    from the settings whenever it is shown).
+//    from the settings whenever it is shown),
+//  * the grayscale method submenu (grayscaleMethods: filled from the
+//    grayscale registry, so a new method appears without touching this
+//    table).
 struct MenuEntry
 {
     QString id;
     QString submenuTitle;
     QVector<QString> submenuIds;
     bool recent = false;
+    bool grayscaleMethods = false;
 };
 
 struct MenuDef

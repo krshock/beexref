@@ -283,6 +283,7 @@ const QVector<FieldSpec> &fields()
     static const QVector<FieldSpec> specs = {
         {QStringLiteral("Save/confirm_close_unsaved"), true, boolCast(), nullptr},
         {QStringLiteral("Save/incremental"), true, boolCast(), nullptr},
+        {QStringLiteral("Items/grayscale_method"), QStringLiteral("classic"), nullptr, nullptr},
         {QStringLiteral("Items/image_storage_format"), QStringLiteral("best"), nullptr,
          oneOf({QStringLiteral("png"), QStringLiteral("jpg"), QStringLiteral("best")})},
         {QStringLiteral("Items/arrange_gap"), 0, intCast(),

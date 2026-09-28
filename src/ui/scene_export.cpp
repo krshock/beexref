@@ -1,9 +1,11 @@
 #include "scene_export.h"
 
+#include "grayscale.h"
 #include "item_types.h"
 
 #include "scene.h"
 #include "scene_item.h"
+#include "settings.h"
 #include "theme.h"
 
 #include <QBuffer>
@@ -21,18 +23,6 @@ namespace {
 // The margin and JPEG quality.
 constexpr double kMarginFraction = 0.03;
 constexpr int kImageQuality = 90;
-
-// The grayscale image: a Grayscale8 image filled with
-// the canvas colour, with the original composited on top.
-QImage grayscaleOf(const QImage &image)
-{
-    QImage gray(image.size(), QImage::Format_Grayscale8);
-    gray.fill(theme::canvas);
-    QPainter painter(&gray);
-    painter.drawImage(0, 0, image);
-    painter.end();
-    return gray;
-}
 
 struct EncodedImage
 {
@@ -63,8 +53,15 @@ EncodedImage encodedForItem(const doc::ItemPtr &item, bool applyGrayscale, bool 
     if (image.isNull())
         return out;
 
-    if (applyGrayscale && item->grayscale())
-        image = grayscaleOf(image);
+    if (applyGrayscale && item->grayscale()) {
+        // The export follows the selected method, read at use time like
+        // every other setting.
+        settings::File file(settings::iniPath());
+        file.load();
+        const QString method =
+            settings::valueOrDefault(file, QStringLiteral("Items/grayscale_method")).toString();
+        image = grayscaleImage(image, method);
+    }
     if (applyCrop && item->hasCrop())
         image = image.copy(item->crop().toRect());
 

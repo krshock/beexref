@@ -267,10 +267,24 @@ void SceneItem::updateGrayscaleLevel()
     }
     if (grayscaleCached_)
         return;
-    grayscaleLevel_ = grayscaleImage(level_);
+    grayscaleLevel_ = grayscaleImage(level_, grayscaleMethod_);
     grayscaleCached_ = !grayscaleLevel_.isNull();
     if (grayscaleCached_)
         update();
+}
+
+void SceneItem::setGrayscaleMethod(const QString &method)
+{
+    if (grayscaleMethod_ == method)
+        return;
+    grayscaleMethod_ = method;
+    // The cached copy was made with the old method: drop it and rebuild
+    // now, so painting and sampling see the new look at once (a cleared
+    // cache would fall back to the colour level until the next sync).
+    grayscaleCached_ = false;
+    grayscaleLevel_ = QImage();
+    updateGrayscaleLevel();
+    update();
 }
 
 void SceneItem::applyModelState()

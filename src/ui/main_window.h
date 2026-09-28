@@ -128,6 +128,9 @@ private:
     void showColorGamut();
     // Settings menu: the settings dialog and the settings folder.
     void toggleHudPreview();
+    // Applies a grayscale method: persists it, pushes it to the canvas
+    // and refreshes the menu checkmarks.
+    void setGrayscaleMethod(const QString &id);
     // Shows, hides and fills the empty-board overlay.
     void updateWelcomeOverlay();
     // The recent files from the settings, existing ones only.
@@ -172,6 +175,8 @@ private:
     LevelLoader *loader_ = nullptr;
     InputController *input_ = nullptr;
     ActionRegistry *actions_ = nullptr;
+    // The Items/grayscale_method value the canvas and the menu show.
+    QString grayscaleMethod_;
     QMenu *recentMenu_ = nullptr;
     int panelWidth_ = 320;
     QSplitter *splitter_ = nullptr;

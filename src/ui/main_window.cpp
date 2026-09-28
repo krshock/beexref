@@ -4,6 +4,7 @@
 #include "cache/session_cache.h"
 #include "color_gamut.h"
 #include "color_tools.h"
+#include "grayscale.h"
 #include "hud.h"
 #include "hud_preview.h"
 #include "info_dialogs.h"
@@ -276,6 +277,18 @@ MainWindow::MainWindow(bool cacheDisabled, QWidget *parent)
     statusBar()->addPermanentWidget(damageBadge_);
     damageBadge_->hide();
     updateStatusBar();
+
+    // The grayscale method from the settings, pushed to the canvas. New
+    // items pick it up through the view's itemsChanged handler.
+    {
+        settings::File file(settings::iniPath());
+        file.load();
+        grayscaleMethod_ =
+            settings::valueOrDefault(file, QStringLiteral("Items/grayscale_method")).toString();
+        if (!grayscaleMethod(grayscaleMethod_))
+            grayscaleMethod_ = defaultGrayscaleMethod();
+        view_->setGrayscaleMethod(grayscaleMethod_);
+    }
 
     connect(view_, &View::colorSampled, this, &MainWindow::copySampledColor);
     // A double-click fits the image; by default it is also spotlighted
@@ -838,6 +851,20 @@ void MainWindow::openSettingsDir()
     QDesktopServices::openUrl(QUrl::fromLocalFile(dir));
 }
 
+void MainWindow::setGrayscaleMethod(const QString &id)
+{
+    if (grayscaleMethod_ == id)
+        return;
+    grayscaleMethod_ = id;
+    settings::File file(settings::iniPath());
+    file.load();
+    file.setValue(QStringLiteral("Items"), QStringLiteral("grayscale_method"), id);
+    file.sync();
+    view_->setGrayscaleMethod(id);
+    // The checkmarks follow the cached value.
+    updateActions();
+}
+
 void MainWindow::applySettingChanged(const QString &key)
 {
     if (key == QLatin1String("Items/image_allocation_limit")) {
@@ -852,6 +879,14 @@ void MainWindow::applySettingChanged(const QString &key)
     }
     // arrange_gap and arrange_default are read when used; the storage
     // format and cache settings apply on the next save or run.
+    if (key == QLatin1String("Items/grayscale_method")) {
+        // The menu owns this setting, but a hand-edited INI applies too.
+        settings::File file(settings::iniPath());
+        file.load();
+        const QString method =
+            settings::valueOrDefault(file, QStringLiteral("Items/grayscale_method")).toString();
+        setGrayscaleMethod(grayscaleMethod(method) ? method : defaultGrayscaleMethod());
+    }
 }
 
 void MainWindow::applyAllocationLimit()
@@ -1395,6 +1430,17 @@ void MainWindow::buildActions()
                   [this](bool) { showAbout(); });
     actions_->add(QStringLiteral("debuglog"), QStringLiteral("Show &Debug Log"), {}, G::Always,
                   [this](bool) { openDebugLog(); });
+
+    // One checkable action per grayscale method; the labels and tooltips
+    // come from the registry, so the ids and the menu cannot drift.
+    for (const GrayscaleMethod &method : grayscaleMethods()) {
+        const QString id = QStringLiteral("grayscale_method_") + method.id;
+        actions_->add(
+            id, method.label, {}, G::Always,
+            [this, methodId = method.id](bool) { setGrayscaleMethod(methodId); }, true,
+            [this, methodId = method.id]() { return grayscaleMethod_ == methodId; });
+        actions_->action(id)->setToolTip(method.help);
+    }
 }
 
 void MainWindow::buildMenus()
@@ -1408,6 +1454,12 @@ void MainWindow::buildMenus()
                 recentMenu_ = barMenu->addMenu(entry.submenuTitle);
                 connect(recentMenu_, &QMenu::aboutToShow, this, &MainWindow::rebuildRecentMenu);
                 rebuildRecentMenu();
+            } else if (entry.grayscaleMethods) {
+                // Filled from the registry, so a new method needs no menu
+                // change here.
+                QMenu *submenu = barMenu->addMenu(entry.submenuTitle);
+                for (const GrayscaleMethod &method : grayscaleMethods())
+                    actions_->append(submenu, QStringLiteral("grayscale_method_") + method.id);
             } else if (!entry.submenuTitle.isEmpty()) {
                 QMenu *submenu = barMenu->addMenu(entry.submenuTitle);
                 for (const QString &id : entry.submenuIds)

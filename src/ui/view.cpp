@@ -130,8 +130,13 @@ void View::setBoardScene(Scene *scene)
                     spotlighted_.removeAll(view);
                     lod_->forgetItem(view);
                 });
-        // New or removed items change the scrollable area.
-        connect(boardScene_, &Scene::itemsChanged, this, [this]() { recalculateSceneRect(); });
+        // New or removed items change the scrollable area; new items also
+        // need the current grayscale method before their first paint.
+        connect(boardScene_, &Scene::itemsChanged, this, [this]() {
+            for (SceneItem *view : boardScene_->itemViews())
+                view->setGrayscaleMethod(grayscaleMethod_);
+            recalculateSceneRect();
+        });
         // A pure selection change moves the overlay without changing
         // any item, so itemsChanged() does not fire for it.
         connect(boardScene_, &QGraphicsScene::selectionChanged, this, [this]() {
@@ -226,6 +231,16 @@ void View::recalculateSceneRect()
 void View::setLodSettings(const LodSettings &settings)
 {
     lod_->setSettings(settings);
+}
+
+void View::setGrayscaleMethod(const QString &method)
+{
+    grayscaleMethod_ = method;
+    if (!boardScene_)
+        return;
+    for (SceneItem *view : boardScene_->itemViews())
+        view->setGrayscaleMethod(method);
+    viewport()->update();
 }
 
 void View::updateViewState()

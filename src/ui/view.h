@@ -54,6 +54,11 @@ public:
     Scene *boardScene() const { return boardScene_; }
     void setMimeFilter(MimeFilter filter) { mimeFilter_ = std::move(filter); }
 
+    // The grayscale method every canvas item paints with (the
+    // Items/grayscale_method value): pushes it to the item views and
+    // drops their cached grayscale copies, so a change is instant.
+    void setGrayscaleMethod(const QString &method);
+
     void setLodSettings(const LodSettings &settings);
     LodManager *lodManager() const { return lod_; }
     // The keyboard/mouse bindings, reloaded after the controls editor
@@ -234,6 +239,9 @@ private:
     LodManager *lod_ = nullptr;
     doc::UndoStack *undoStack_ = nullptr;
     MimeFilter mimeFilter_;
+    // The Items/grayscale_method value the item views paint with; empty
+    // until MainWindow applies the setting.
+    QString grayscaleMethod_;
 
     bool moving_ = false;
     bool moveStarted_ = false;

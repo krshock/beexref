@@ -54,6 +54,7 @@
 #include "ui/lod_manager.h"
 #include "ui/main_window.h"
 #include "ui/export_formats.h"
+#include "ui/grayscale.h"
 #include "ui/menu_layout.h"
 #include "ui/color_gamut.h"
 #include "ui/color_swatch.h"
@@ -282,6 +283,7 @@ private slots:
     void recoveredSaveClearsTheBadge();
     void noOpSaveLeavesTheFileUntouched();
     void externalChangeRefusesTheInPlaceSave();
+    void grayscaleMethodMenuSwitchesTheLook();
     void infoDialogsShowTheExpectedContent();
     void metadataPanelEditsAndCommits();
     void hudPreviewShowsTheStyledPanel();
@@ -1207,7 +1209,7 @@ void TestUiScene::grayscaleImageFlattensOntoTheCanvas()
     source.setPixelColor(0, 1, QColor(255, 255, 255, 128)); // half white
     source.setPixelColor(1, 1, QColor(0, 0, 0, 255));       // opaque black
 
-    const QImage gray = ui::grayscaleImage(source);
+    const QImage gray = ui::grayscaleImage(source, ui::defaultGrayscaleMethod());
     QCOMPARE(gray.size(), source.size());
     QCOMPARE(gray.format(), QImage::Format_Grayscale8);
 
@@ -3205,6 +3207,12 @@ void TestUiScene::menuLayoutCoversEveryAction()
             if (entry.recent) {
                 QVERIFY(entry.id.isEmpty());
                 QVERIFY(entry.submenuIds.isEmpty());
+            } else if (entry.grayscaleMethods) {
+                // Filled from the registry when the menu is built.
+                QVERIFY(entry.id.isEmpty());
+                QVERIFY(entry.submenuIds.isEmpty());
+                for (const ui::GrayscaleMethod &method : ui::grayscaleMethods())
+                    laid.append(QStringLiteral("grayscale_method_") + method.id);
             } else if (!entry.submenuTitle.isEmpty()) {
                 QVERIFY(!entry.submenuIds.isEmpty());
                 laid += entry.submenuIds;
@@ -3774,6 +3782,45 @@ void TestUiScene::externalChangeRefusesTheInPlaceSave()
     QCOMPARE(fileBytes(path), before);
 
     settings::setSettingsDir(QString());
+}
+
+void TestUiScene::grayscaleMethodMenuSwitchesTheLook()
+{
+    ui::MainWindow window;
+    QImage image(2, 2, QImage::Format_ARGB32);
+    image.fill(Qt::red);
+    QMimeData mime;
+    mime.setImageData(image);
+    window.input()->insertMimeData(mime, QPointF(0, 0));
+
+    // Grayscale on: the classic look (linear-light red is 127).
+    QAction *grayscale = actionByText(window, QStringLiteral("&Grayscale"));
+    QVERIFY(grayscale);
+    grayscale->trigger();
+    SceneItem *view = window.scene()->itemViews().first();
+    // Give the item its decoded level (the loader is asynchronous).
+    view->setLevel(image, 1.0);
+    QCOMPARE(view->sampleColorAt(view->mapToScene(QPointF(1, 1))).red(), 127);
+
+    // Pick Max from Images ▸ Grayscale Method: the canvas switches at
+    // once, the checkmark moves and the choice is remembered.
+    QAction *max = window.actions()->action(QStringLiteral("grayscale_method_max"));
+    QVERIFY(max);
+    QVERIFY(max->isCheckable());
+    QVERIFY(!max->isChecked());
+    max->trigger();
+    QVERIFY(max->isChecked());
+    QVERIFY(!window.actions()->action(QStringLiteral("grayscale_method_classic"))->isChecked());
+    QCOMPARE(view->sampleColorAt(view->mapToScene(QPointF(1, 1))).red(), 255);
+
+    settings::File file(settings::iniPath());
+    file.load();
+    QCOMPARE(settings::valueOrDefault(file, QStringLiteral("Items/grayscale_method")).toString(),
+             QStringLiteral("max"));
+
+    // Back to classic: the cache follows the method both ways.
+    window.actions()->action(QStringLiteral("grayscale_method_classic"))->trigger();
+    QCOMPARE(view->sampleColorAt(view->mapToScene(QPointF(1, 1))).red(), 127);
 }
 
 QTEST_MAIN(TestUiScene)

@@ -31,6 +31,14 @@ MenuEntry recentFiles()
     return entry;
 }
 
+MenuEntry grayscaleMethodMenu()
+{
+    MenuEntry entry;
+    entry.submenuTitle = QStringLiteral("Grayscale &Method");
+    entry.grayscaleMethods = true;
+    return entry;
+}
+
 } // namespace
 
 const QVector<MenuDef> &menuLayout()
@@ -118,6 +126,7 @@ const QVector<MenuDef> &menuLayout()
          {
              action("change_opacity"),
              action("grayscale"),
+             grayscaleMethodMenu(),
              separator(),
              action("show_color_gamut"),
              action("sample_color"),

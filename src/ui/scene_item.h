@@ -74,6 +74,9 @@ public:
     // The image actually painted: the grayscale copy when the document
     // item asks for grayscale, the colour level otherwise.
     const QImage &displayLevel() const;
+    // The grayscale method (Items/grayscale_method) the cached copy uses;
+    // changing it drops the cache so the next paint rebuilds it.
+    void setGrayscaleMethod(const QString &method);
     double levelFraction() const { return levelFraction_; }
     void setLevel(const QImage &image, double fraction);
 
@@ -160,6 +163,9 @@ private:
     QImage grayscaleLevel_;
     bool grayscaleCached_ = false;
     bool grayscaleOn_ = false;
+    // The Items/grayscale_method value the cached copy was made with;
+    // empty means the default (Classic).
+    QString grayscaleMethod_;
     bool cropMode_ = false;
     QRectF cropRect_;
     QRectF displayBounds_;
