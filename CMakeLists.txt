@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.24)
 
 project(BeeXRef
-    VERSION 0.8.0
+    VERSION 0.9.0
     DESCRIPTION "BeeXRef reference image viewer"
     LANGUAGES C CXX)
 
