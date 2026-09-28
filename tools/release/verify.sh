@@ -5,7 +5,10 @@
 #     plugins boards need, and that it runs and reports the version;
 #   * zip: lists the essentials (executable, platform plugin, image
 #     formats) for a Windows machine to run;
-#   * SHA256SUMS: verifies it when present.
+#   * SHA256SUMS: verifies it when verifying all of dist/ (a build
+#     script checking the artifact it just wrote names it explicitly, so
+#     it never trips on a checksums file that still describes the
+#     previous build).
 #
 # Usage: verify.sh [artifact...]
 set -eu
@@ -13,7 +16,16 @@ set -eu
 
 dist=$(release_dist)
 if [ "$#" -gt 0 ]; then
-    artifacts=$*
+    # Resolve the named artifacts once: the AppImage check extracts from
+    # a different directory, so a relative path would no longer resolve.
+    artifacts=""
+    for artifact in "$@"; do
+        case "$artifact" in
+            /*) ;;
+            *) artifact="$PWD/$artifact" ;;
+        esac
+        artifacts="$artifacts $artifact"
+    done
 else
     artifacts=$(find "$dist" -maxdepth 1 -type f \( -name '*.AppImage' -o -name '*.zip' \) | sort)
 fi
@@ -88,7 +100,7 @@ for artifact in $artifacts; do
     esac
 done
 
-if [ -f "$dist/SHA256SUMS" ]; then
+if [ "$#" -eq 0 ] && [ -f "$dist/SHA256SUMS" ]; then
     echo "verify: $dist/SHA256SUMS"
     ( cd "$dist" && sha256sum -c SHA256SUMS ) || fail "checksum mismatch"
 fi

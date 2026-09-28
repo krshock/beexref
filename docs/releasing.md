@@ -68,8 +68,10 @@ tools/release/verify.sh [artifact...]      # all dist artifacts by default
 ```
 
 `verify.sh` extracts the AppImage and checks its library closure, the
-JPEG/WebP plugins and `--version`; lists the zip's essentials; and
-verifies `SHA256SUMS` when it is present.
+JPEG/WebP plugins and `--version`; lists the zip's essentials; and, when
+it verifies all of `dist/` rather than named artifacts, checks
+`SHA256SUMS` too (a build script checks only what it just wrote, so a
+checksums file from a previous build never trips it).
 
 ## 4. Publish
 
