@@ -27,9 +27,9 @@ ENV DEBIAN_FRONTEND=noninteractive
 # The build toolchain, the X libraries Qt needs, and the AppImage tools'
 # own dependencies (docs/linux-appimage.md lists the same set).
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        build-essential g++-10 ninja-build git wget ca-certificates \
+        build-essential g++-10 ninja-build git wget ca-certificates gnupg \
         pkg-config ccache python3 python3-venv \
-        libgl1 libxkbcommon0 libxkbcommon-x11-0 libfontconfig1 libfreetype6 \
+        libgl1 libgl1-mesa-dev libxkbcommon0 libxkbcommon-x11-0 libfontconfig1 libfreetype6 \
         libdbus-1-3 libglib2.0-0 \
         libx11-xcb1 libxcb1 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 \
         libxcb-randr0 libxcb-render-util0 libxcb-shape0 libxcb-sync1 \
