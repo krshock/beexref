@@ -132,6 +132,8 @@ qt_add_library(beexref_core STATIC
     src/ui/opacity_dialog.h
     src/ui/pan_tool.cpp
     src/ui/pan_tool.h
+    src/ui/peek_tool.cpp
+    src/ui/peek_tool.h
     src/ui/cursors.cpp
     src/ui/cursors.h
     src/ui/selection_ops.cpp

@@ -220,6 +220,9 @@ private slots:
     void panGlidesAfterAFastRelease();
     void slowPanStopsImmediately();
     void newPressStopsThePanGlide();
+    void shiftMiddlePeekLeansAndRestores();
+    void shiftMiddlePeekSaturates();
+    void cancelModesRestoresThePeek();
     void wheelPanAxesMatchReference();
     void windowOpensBoardAndLoadsLevel();
     void newWindowHasUnsavedDocument();
@@ -3924,6 +3927,130 @@ void TestUiScene::newPressStopsThePanGlide()
     QTest::qWait(200);
     QCOMPARE(view.horizontalScrollBar()->value(), stopped);
     sendMouse(view.viewport(), QEvent::MouseButtonRelease, start, Qt::LeftButton, Qt::NoButton);
+}
+
+void TestUiScene::shiftMiddlePeekLeansAndRestores()
+{
+    // Shift+Middle peeks: it zooms out and leans toward the pointer
+    // without losing the view, and the release restores it exactly.
+    auto document = std::make_shared<doc::Document>(doc::Document::create());
+    document->addItem(pixmapItem(2000, 1000, Qt::darkGreen));
+
+    ui::View view;
+    auto *scene = new ui::Scene(&view);
+    scene->setDocument(document);
+    view.setBoardScene(scene);
+    view.resize(200, 150);
+    view.fitScene();
+    view.zoomAt(500, view.viewport()->rect().center());
+    view.centerOn(1000, 500);
+
+    const QPoint start = view.viewport()->rect().center();
+    const double baseScale = view.transform().m11();
+    const int baseH = view.horizontalScrollBar()->value();
+    const int baseV = view.verticalScrollBar()->value();
+    const QPointF baseCenter = view.mapToScene(view.viewport()->rect().center());
+
+    sendMouse(view.viewport(), QEvent::MouseButtonPress, start, Qt::MiddleButton,
+              Qt::MiddleButton, Qt::ShiftModifier);
+    sendMouse(view.viewport(), QEvent::MouseMove, start + QPoint(60, 0), Qt::NoButton,
+              Qt::MiddleButton, Qt::ShiftModifier);
+
+    const double peekScale = view.transform().m11();
+    QVERIFY2(peekScale < baseScale,
+             qPrintable(QStringLiteral("base=%1 peek=%2").arg(baseScale).arg(peekScale)));
+    const QPointF peekCenter = view.mapToScene(view.viewport()->rect().center());
+    const QPointF shift = peekCenter - baseCenter;
+    // The camera leans toward the pointer: the scene point at the
+    // viewport center moves right, barely sideways.
+    QVERIFY2(shift.x() > 100.0,
+             qPrintable(QStringLiteral("shift=(%1, %2)").arg(shift.x()).arg(shift.y())));
+    QVERIFY2(qAbs(shift.y()) < 30.0,
+             qPrintable(QStringLiteral("shift=(%1, %2)").arg(shift.x()).arg(shift.y())));
+
+    // Further travel opens the peek further.
+    sendMouse(view.viewport(), QEvent::MouseMove, start + QPoint(120, 0), Qt::NoButton,
+              Qt::MiddleButton, Qt::ShiftModifier);
+    QVERIFY(view.transform().m11() < peekScale);
+    QVERIFY(view.mapToScene(view.viewport()->rect().center()).x() > peekCenter.x());
+
+    sendMouse(view.viewport(), QEvent::MouseButtonRelease, start + QPoint(120, 0), Qt::MiddleButton,
+              Qt::NoButton, Qt::ShiftModifier);
+    QCOMPARE(view.transform().m11(), baseScale);
+    QCOMPARE(view.horizontalScrollBar()->value(), baseH);
+    QCOMPARE(view.verticalScrollBar()->value(), baseV);
+}
+
+void TestUiScene::shiftMiddlePeekSaturates()
+{
+    // At the reference radius (half the viewport diagonal) the peek is
+    // fully open; a longer travel changes nothing.
+    auto document = std::make_shared<doc::Document>(doc::Document::create());
+    document->addItem(pixmapItem(2000, 1000, Qt::darkGreen));
+
+    ui::View view;
+    auto *scene = new ui::Scene(&view);
+    scene->setDocument(document);
+    view.setBoardScene(scene);
+    view.resize(200, 150);
+    view.fitScene();
+    view.zoomAt(500, view.viewport()->rect().center());
+    view.centerOn(1000, 500);
+
+    const QPoint start = view.viewport()->rect().center();
+    const QSize viewport = view.viewport()->size();
+    const int radius =
+        int(std::ceil(std::hypot(double(viewport.width()), double(viewport.height())) / 2.0));
+
+    sendMouse(view.viewport(), QEvent::MouseButtonPress, start, Qt::MiddleButton,
+              Qt::MiddleButton, Qt::ShiftModifier);
+    sendMouse(view.viewport(), QEvent::MouseMove, start + QPoint(radius, 0), Qt::NoButton,
+              Qt::MiddleButton, Qt::ShiftModifier);
+    const double saturatedScale = view.transform().m11();
+    const QPointF saturatedCenter = view.mapToScene(view.viewport()->rect().center());
+
+    sendMouse(view.viewport(), QEvent::MouseMove, start + QPoint(3 * radius, 0), Qt::NoButton,
+              Qt::MiddleButton, Qt::ShiftModifier);
+    QCOMPARE(view.transform().m11(), saturatedScale);
+    QCOMPARE(view.mapToScene(view.viewport()->rect().center()), saturatedCenter);
+
+    sendMouse(view.viewport(), QEvent::MouseButtonRelease, start + QPoint(3 * radius, 0),
+              Qt::MiddleButton, Qt::NoButton, Qt::ShiftModifier);
+}
+
+void TestUiScene::cancelModesRestoresThePeek()
+{
+    // A mode cancel (Esc paths, undo, IO) ends a peek and restores the
+    // view it started from.
+    auto document = std::make_shared<doc::Document>(doc::Document::create());
+    document->addItem(pixmapItem(2000, 1000, Qt::darkGreen));
+
+    ui::View view;
+    auto *scene = new ui::Scene(&view);
+    scene->setDocument(document);
+    view.setBoardScene(scene);
+    view.resize(200, 150);
+    view.fitScene();
+    view.zoomAt(500, view.viewport()->rect().center());
+    view.centerOn(1000, 500);
+
+    const QPoint start = view.viewport()->rect().center();
+    const double baseScale = view.transform().m11();
+    const int baseH = view.horizontalScrollBar()->value();
+    const int baseV = view.verticalScrollBar()->value();
+
+    sendMouse(view.viewport(), QEvent::MouseButtonPress, start, Qt::MiddleButton,
+              Qt::MiddleButton, Qt::ShiftModifier);
+    sendMouse(view.viewport(), QEvent::MouseMove, start + QPoint(80, 0), Qt::NoButton,
+              Qt::MiddleButton, Qt::ShiftModifier);
+    QVERIFY(view.transform().m11() < baseScale);
+
+    view.cancelModes();
+    QCOMPARE(view.transform().m11(), baseScale);
+    QCOMPARE(view.horizontalScrollBar()->value(), baseH);
+    QCOMPARE(view.verticalScrollBar()->value(), baseV);
+    sendMouse(view.viewport(), QEvent::MouseButtonRelease, start + QPoint(80, 0), Qt::MiddleButton,
+              Qt::NoButton, Qt::ShiftModifier);
 }
 
 QTEST_MAIN(TestUiScene)

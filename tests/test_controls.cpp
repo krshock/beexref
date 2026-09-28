@@ -154,6 +154,11 @@ void TestControls::bindingMatching()
     QVERIFY(match.valid);
     QCOMPARE(match.group, QStringLiteral("pan"));
 
+    // Shift+Middle peeks the scene.
+    match = bindings.mouseAction(Qt::MiddleButton, Qt::ShiftModifier);
+    QVERIFY(match.valid);
+    QCOMPARE(match.group, QStringLiteral("peek"));
+
     // Left alone is the item interaction, not a binding.
     QVERIFY(!bindings.mouseAction(Qt::LeftButton, Qt::NoModifier).valid);
 

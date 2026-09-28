@@ -33,6 +33,7 @@ class LodManager;
 class MoveHandle;
 class MoveWindowTool;
 class PanTool;
+class PeekTool;
 class TextEditTool;
 class ToolController;
 
@@ -148,6 +149,13 @@ public:
     // A pan drag step: scrolls by the delta and refreshes the view state
     // and the LOD queue (the pan tool and the wheel panning).
     void panStep(const QPoint &delta);
+    // The peek tool's temporary view: a plain scale and the scene point
+    // to center on, applied like a zoom step (the LOD evaluation is
+    // held) and never below the app's zoom-out floor.
+    void applyPeekView(double scale, const QPointF &sceneCenter);
+    // Ends a peek: restores the exact transform and scroll offsets the
+    // peek started from.
+    void restorePeekView(const QTransform &transform, int horizontalValue, int verticalValue);
     // The on-screen scale of an item: the view transform times the
     // item's own scale (fixed length for the viewport
     // denominator). A null item gives the plain view scale.
@@ -272,6 +280,7 @@ private:
     TextEditTool *textEditTool_ = nullptr;
     CropTool *cropTool_ = nullptr;
     PanTool *panTool_ = nullptr;
+    PeekTool *peekTool_ = nullptr;
     DragZoomTool *dragZoomTool_ = nullptr;
 
     // Scale/rotate gesture state.

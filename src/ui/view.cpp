@@ -8,6 +8,7 @@
 #include "move_handle.h"
 #include "move_window_tool.h"
 #include "pan_tool.h"
+#include "peek_tool.h"
 #include "rendering.h"
 #include "selection_ops.h"
 #include "text_edit_tool.h"
@@ -62,6 +63,7 @@ View::View(QWidget *parent)
     textEditTool_ = tools_->add<TextEditTool>(this);
     cropTool_ = tools_->add<CropTool>(this);
     panTool_ = tools_->add<PanTool>(this, panGlideTimer_);
+    peekTool_ = tools_->add<PeekTool>(this);
     dragZoomTool_ = tools_->add<DragZoomTool>(this);
 
     // The corner move handle: shown only while the window's title bar
@@ -290,6 +292,34 @@ void View::panStep(const QPoint &delta)
     lod_->schedule();
 }
 
+void View::applyPeekView(double scale, const QPointF &sceneCenter)
+{
+    if (!scene() || scene()->items().isEmpty() || !std::isfinite(scale) || scale <= 0.0
+        || !std::isfinite(sceneCenter.x()) || !std::isfinite(sceneCenter.y()))
+        return;
+    // Never peek below the app's own zoom-out floor (the same on-screen
+    // item extent zoomAt() refuses to cross).
+    const double extent = zoomExtent(false);
+    if (extent > kMinZoomExtent)
+        scale = qMax(scale, transform().m11() * kMinZoomExtent / extent);
+    setTransform(QTransform::fromScale(scale, scale));
+    centerOn(sceneCenter);
+    updateViewState();
+    // Keep the levels as they are while peeking; the evaluation runs
+    // kZoomInhibitMs after the last move, like a zoom burst.
+    lod_->hold(kZoomInhibitMs);
+}
+
+void View::restorePeekView(const QTransform &transform, int horizontalValue,
+                           int verticalValue)
+{
+    setTransform(transform);
+    horizontalScrollBar()->setValue(horizontalValue);
+    verticalScrollBar()->setValue(verticalValue);
+    updateViewState();
+    lod_->schedule();
+}
+
 double View::scaleFor(const SceneItem *item) const
 {
     const double viewScale = transform().m11();
@@ -459,9 +489,11 @@ void View::contextMenuEvent(QContextMenuEvent *event)
 
 void View::wheelEvent(QWheelEvent *event)
 {
-    // A wheel step takes over from a glide.
+    // A wheel step takes over from a glide or a peek.
     if (panTool_)
         panTool_->stopGlide();
+    if (peekTool_ && peekTool_->active())
+        peekTool_->cancel();
     const int delta = event->angleDelta().y();
     if (delta == 0) {
         QGraphicsView::wheelEvent(event);
@@ -497,9 +529,12 @@ void View::wheelEvent(QWheelEvent *event)
 
 void View::mousePressEvent(QMouseEvent *event)
 {
-    // A new press stops a pan glide where it is.
+    // A new press stops a pan glide where it is, and ends a peek in
+    // progress (restoring its view) before another interaction starts.
     if (panTool_)
         panTool_->stopGlide();
+    if (peekTool_ && peekTool_->active())
+        peekTool_->cancel();
     beginInteraction();
     lod_->evaluateNow();
 
@@ -522,6 +557,11 @@ void View::mousePressEvent(QMouseEvent *event)
     }
     if (binding.valid && binding.group == QLatin1String("pan")) {
         panTool_->start(event->position().toPoint());
+        event->accept();
+        return;
+    }
+    if (binding.valid && binding.group == QLatin1String("peek")) {
+        peekTool_->start(event->position().toPoint());
         event->accept();
         return;
     }
@@ -1072,7 +1112,8 @@ bool View::eventFilter(QObject *watched, QEvent *event)
 
 void View::leaveEvent(QEvent *event)
 {
-    if (drag_ == Drag::None && !panTool_->active() && !samplingColor() && !movingWindow())
+    if (drag_ == Drag::None && !panTool_->active() && !peekTool_->active() && !samplingColor()
+        && !movingWindow())
         viewport()->unsetCursor();
     QGraphicsView::leaveEvent(event);
 }

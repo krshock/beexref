@@ -101,6 +101,8 @@ const QVector<MouseBinding> &defaultMouseBindings()
          QStringLiteral("Middle"), {kNoModifier}, false, false},
         {QStringLiteral("pan2"), QStringLiteral("pan"), QStringLiteral("Pan (alternative)"),
          QStringLiteral("Left"), {QStringLiteral("Alt")}, false, false},
+        {QStringLiteral("peek1"), QStringLiteral("peek"), QStringLiteral("Peek Scene"),
+         QStringLiteral("Middle"), {QStringLiteral("Shift")}, false, false},
         {QStringLiteral("movewindow1"), QStringLiteral("movewindow"),
          QStringLiteral("Move Window"), QStringLiteral("Left"),
          {QStringLiteral("Ctrl"), QStringLiteral("Alt")}, false, false},

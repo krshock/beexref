@@ -17,6 +17,13 @@ project uses [Semantic Versioning](https://semver.org/).
   Lightness, Max or Min — picked from `Images ▸ Grayscale Method` (also
   in the right-click menu). The choice applies instantly and is
   remembered.
+- **Peek Scene** (`Shift`+middle-drag): a temporary look at the
+  neighbourhood without losing the current view. The pointer's travel
+  from where the drag started zooms the canvas out — a plain lerp, down
+  to 40% of the starting zoom at half a viewport diagonal — and leans it
+  in the pointer's direction, so the canvas "looks at the horizon"; the
+  release (or any mode cancel, press or wheel step) puts it back exactly
+  where it was. Rebindable in Controls like the other mouse actions.
 
 ### Changed
 
