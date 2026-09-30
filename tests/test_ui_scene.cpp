@@ -23,6 +23,8 @@
 #include <QMouseEvent>
 #include <QScrollBar>
 #include <QCheckBox>
+#include <QCompleter>
+#include <QElapsedTimer>
 #include <QTabWidget>
 #include <QComboBox>
 #include <QLineEdit>
@@ -64,6 +66,7 @@
 #include "ui/hud_preview.h"
 #include "ui/info_dialogs.h"
 #include "ui/metadata_panel.h"
+#include "ui/fuzzy_authors.h"
 #include "ui/move_handle.h"
 #include "ui/settings_dialog.h"
 #include "ui/grayscale.h"
@@ -298,6 +301,8 @@ private slots:
     void grayscaleMethodMenuSwitchesTheLook();
     void infoDialogsShowTheExpectedContent();
     void metadataPanelEditsAndCommits();
+    void metadataFieldsAreNormalized();
+    void authorCompletionFindsFuzzyMatches();
     void hudPreviewShowsTheStyledPanel();
     void welcomeOverlayTracksTheBoardState();
     void welcomeOverlayListsRecentFiles();
@@ -2493,6 +2498,170 @@ void TestUiScene::selectionOsdShowsTheNameAndPassesClicks()
               Qt::LeftButton);
     QCOMPARE(title->text(), QStringLiteral("short.png"));
     QVERIFY(title->isVisible());
+
+    settings::setSettingsDir(QString());
+}
+
+void TestUiScene::metadataFieldsAreNormalized()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    settings::setSettingsDir(dir.path());
+
+    ui::MainWindow window;
+    QImage image(6, 4, QImage::Format_ARGB32);
+    image.fill(Qt::red);
+    QMimeData mime;
+    mime.setImageData(image);
+    window.input()->insertMimeData(mime, QPointF(10, 10));
+    SceneItem *item = window.scene()->pixmapItemViews().first();
+    QVERIFY(item);
+    window.scene()->clearSelection();
+    item->setSelected(true);
+
+    ui::MetadataPanel *panel = window.metadataPanel();
+    QVERIFY(panel);
+    panel->toggle();
+    QVERIFY(!panel->isHidden());
+
+    auto *name = panel->findChild<QLineEdit *>(QStringLiteral("panelName"));
+    auto *author = panel->findChild<QLineEdit *>(QStringLiteral("panelAuthor"));
+    auto *url = panel->findChild<QLineEdit *>(QStringLiteral("panelUrl"));
+    auto *notes = panel->findChild<QPlainTextEdit *>(QStringLiteral("panelNotes"));
+    auto *save = panel->findChild<QPushButton *>(QStringLiteral("panelSave"));
+    QVERIFY(name && author && url && notes && save);
+
+    const doc::ItemPtr model = item->item();
+    // Single-line fields collapse everything (newlines included); notes
+    // keep their line breaks.
+    name->setText(QStringLiteral("  my  name  "));
+    author->setText(QStringLiteral("  José \n\t García   "));
+    url->setText(QStringLiteral("  https://x.test/a   b  "));
+    notes->setPlainText(
+        QStringLiteral("  first   line  \n second\tline  \n\n  third  "));
+    QVERIFY(save->isEnabled());
+    save->click();
+
+    QCOMPARE(model->filename, QStringLiteral("my name"));
+    QCOMPARE(model->meta.value(QStringLiteral("author")).toString(),
+             QStringLiteral("José García"));
+    QCOMPARE(model->meta.value(QStringLiteral("origin_url")).toString(),
+             QStringLiteral("https://x.test/a b"));
+    QCOMPARE(model->meta.value(QStringLiteral("notes")).toString(),
+             QStringLiteral("first line\nsecond line\n\nthird"));
+
+    // An edit that normalization turns into a no-op has nothing to save:
+    // the panel knows it (Save disabled) and committing the draft anyway
+    // (a selection change) pushes no undo step and stores nothing.
+    doc::UndoStack *stack = window.view()->undoStack();
+    QVERIFY(stack);
+    const int before = stack->count();
+    author->setText(QStringLiteral("José García   "));
+    QVERIFY(!save->isEnabled());
+    QVERIFY(!panel->isDirty());
+    window.scene()->clearSelection();
+    QCOMPARE(stack->count(), before);
+    QCOMPARE(model->meta.value(QStringLiteral("author")).toString(),
+             QStringLiteral("José García"));
+
+    settings::setSettingsDir(QString());
+}
+
+void TestUiScene::authorCompletionFindsFuzzyMatches()
+{
+    // The matching core: folding, dedupe, ranking and the empty entries.
+    const QStringList raw = {
+        QStringLiteral("José García"),
+        QStringLiteral("jose garcia"),
+        QStringLiteral("JOSE GARCIA"),
+        QStringLiteral("  "),
+        QString(QChar(0x200B)) + QString(QChar(0x200B)),
+        QStringLiteral("Ana"),
+        QStringLiteral("María José"),
+        QStringLiteral("García, José"),
+    };
+    const QVector<ui::fuzzy::Candidate> candidates = ui::fuzzy::candidates(raw);
+    QCOMPARE(candidates.size(), 4); // the three José García spellings are one
+    QCOMPARE(candidates.first().display, QStringLiteral("José García"));
+    QCOMPARE(candidates.first().count, 3);
+
+    const QVector<ui::fuzzy::Candidate> matches =
+        ui::fuzzy::search(candidates, QStringLiteral("jose"), 10);
+    QVERIFY(!matches.isEmpty());
+    QCOMPARE(matches.first().display, QStringLiteral("José García"));
+    // A subsequence reaches the name whose letters are far apart.
+    const QVector<ui::fuzzy::Candidate> sub =
+        ui::fuzzy::search(candidates, QStringLiteral("grcj"), 10);
+    QCOMPARE(sub.size(), 1);
+    QCOMPARE(sub.first().display, QStringLiteral("García, José"));
+    // No match, and an all-blank query matching everything (capped).
+    QVERIFY(ui::fuzzy::search(candidates, QStringLiteral("zzz"), 10).isEmpty());
+    QCOMPARE(ui::fuzzy::search(candidates, QStringLiteral("   "), 2).size(), 2);
+
+    // At 3000 authors the whole thing stays far under a frame.
+    QStringList many;
+    many.reserve(3000);
+    for (int i = 0; i < 3000; ++i)
+        many.append(QStringLiteral("Author %1").arg(i));
+    QElapsedTimer timer;
+    timer.start();
+    const QVector<ui::fuzzy::Candidate> big = ui::fuzzy::candidates(many);
+    for (int i = 0; i < 20; ++i)
+        ui::fuzzy::search(big, QStringLiteral("author2%1").arg(i), 15);
+    const qint64 elapsed = timer.elapsed();
+    QCOMPARE(big.size(), 3000);
+    QVERIFY2(elapsed < 250, qPrintable(QStringLiteral("took %1 ms").arg(elapsed)));
+
+    // Integration: typing in the author field suggests the board's authors,
+    // accents and all, and the popup actually opens.
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    settings::setSettingsDir(dir.path());
+
+    ui::MainWindow window;
+    QImage image(6, 4, QImage::Format_ARGB32);
+    image.fill(Qt::red);
+    for (const QPointF &at : {QPointF(10, 10), QPointF(40, 40), QPointF(70, 20)}) {
+        QMimeData mime;
+        mime.setImageData(image);
+        window.input()->insertMimeData(mime, at);
+    }
+    const QList<SceneItem *> views = window.scene()->pixmapItemViews();
+    QCOMPARE(views.size(), 3);
+    views.at(1)->item()->meta.insert(QStringLiteral("author"), QStringLiteral("José García"));
+    views.at(2)->item()->meta.insert(QStringLiteral("author"), QStringLiteral("Jón Clowdër"));
+
+    window.scene()->clearSelection();
+    views.first()->setSelected(true);
+    ui::MetadataPanel *panel = window.metadataPanel();
+    QVERIFY(panel);
+    panel->toggle();
+    QVERIFY(!panel->isHidden());
+    window.show();
+
+    auto *author = panel->findChild<QLineEdit *>(QStringLiteral("panelAuthor"));
+    QVERIFY(author);
+    QVERIFY(author->completer());
+    const auto suggestions = [&author]() {
+        QStringList rows;
+        for (int row = 0; row < author->completer()->model()->rowCount(); ++row)
+            rows.append(author->completer()->model()->index(row, 0).data().toString());
+        return rows;
+    };
+
+    // "jose" suggests "José García" (the accents fold away) and the popup
+    // is really shown.
+    QTest::keyClicks(author, QStringLiteral("jose"));
+    QVERIFY2(suggestions().contains(QStringLiteral("José García")),
+             qPrintable(suggestions().join(QLatin1Char('|'))));
+    QVERIFY(author->completer()->popup()->isVisible());
+
+    // The same for "jon" over "Jón Clowdër".
+    author->clear();
+    QTest::keyClicks(author, QStringLiteral("jon"));
+    QVERIFY2(suggestions().contains(QStringLiteral("Jón Clowdër")),
+             qPrintable(suggestions().join(QLatin1Char('|'))));
+    QVERIFY(author->completer()->popup()->isVisible());
 
     settings::setSettingsDir(QString());
 }

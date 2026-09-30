@@ -1,15 +1,18 @@
 #pragma once
 
 #include "doc/undo.h"
+#include "fuzzy_authors.h"
 
 #include <QWidget>
 
 class QCheckBox;
+class QCompleter;
 class QFormLayout;
 class QLabel;
 class QLineEdit;
 class QPlainTextEdit;
 class QPushButton;
+class QStringListModel;
 class QTabWidget;
 
 namespace ui {
@@ -67,6 +70,9 @@ private:
     QString currentValue(const QString &field) const;
     void updateDirty();
     void setPanelVisible(bool visible);
+    // The author field's suggestions: the unique authors already used in
+    // the board, filtered by a fuzzy (diacritic-insensitive) search.
+    void showAuthorCompletions(const QString &text);
 
     Scene *scene_ = nullptr;
     doc::UndoStack *stack_ = nullptr;
@@ -84,6 +90,12 @@ private:
     QLineEdit *authorEdit_ = nullptr;
     QLineEdit *urlEdit_ = nullptr;
     QPlainTextEdit *notesEdit_ = nullptr;
+    // The author suggestions are cached per board (rebuilt when the
+    // document changes, never per selection or per keystroke).
+    QCompleter *authorCompleter_ = nullptr;
+    QStringListModel *authorModel_ = nullptr;
+    QVector<fuzzy::Candidate> authorCandidates_;
+    bool authorCandidatesDirty_ = true;
     QCheckBox *keepBox_ = nullptr;
     QPushButton *closeButton_ = nullptr;
     QPushButton *saveButton_ = nullptr;

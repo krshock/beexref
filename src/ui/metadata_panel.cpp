@@ -5,15 +5,19 @@
 #include "selection_ops.h"
 #include "settings.h"
 
+#include <QAbstractItemView>
 #include <QCheckBox>
+#include <QCompleter>
 #include <QFormLayout>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QLineEdit>
 #include <QPlainTextEdit>
 #include <QPushButton>
+#include <QRegularExpression>
 #include <QScrollArea>
 #include <QSignalBlocker>
+#include <QStringListModel>
 #include <QTabWidget>
 #include <QVBoxLayout>
 
@@ -24,6 +28,25 @@ const QString kName = QStringLiteral("name");
 const QString kAuthor = QStringLiteral("author");
 const QString kOriginUrl = QStringLiteral("origin_url");
 const QString kNotes = QStringLiteral("notes");
+
+// How many author suggestions the popup shows.
+constexpr int kAuthorCompletionLimit = 15;
+
+// The stored text of one metadata field, normalized on commit:
+// single-line fields collapse every whitespace run -- newlines included
+// -- into one space; the multi-line notes keep their line breaks with the
+// runs of blanks inside each line collapsed. Both trim the edges.
+QString normalizedFieldText(QString text, bool singleLine)
+{
+    static const QRegularExpression anySpace(QStringLiteral("\\s+"));
+    static const QRegularExpression blanks(QStringLiteral("[ \\t\\r\\f\\v]+"));
+    if (singleLine)
+        return text.replace(anySpace, QStringLiteral(" ")).trimmed();
+    QStringList lines = text.split(QLatin1Char('\n'));
+    for (QString &line : lines)
+        line = line.replace(blanks, QStringLiteral(" ")).trimmed();
+    return lines.join(QLatin1Char('\n')).trimmed();
+}
 
 QString number(double value, int precision)
 {
@@ -156,6 +179,25 @@ MetadataPanel::MetadataPanel(Scene *scene, doc::UndoStack *stack, QWidget *paren
     for (QLineEdit *editor : {nameEdit_, authorEdit_, urlEdit_})
         connect(editor, &QLineEdit::textChanged, this, [this]() { updateDirty(); });
     connect(notesEdit_, &QPlainTextEdit::textChanged, this, [this]() { updateDirty(); });
+
+    // The author field autocompletes from the authors already used in the
+    // board, matched fuzzily and without diacritics; the candidate list is
+    // cached and rebuilt only when the document changes, never per
+    // selection or keystroke.
+    authorModel_ = new QStringListModel(this);
+    authorCompleter_ = new QCompleter(authorModel_, this);
+    authorCompleter_->setWidget(authorEdit_);
+    // Unfiltered: the model already holds the fuzzy matches, and the
+    // line edit overwrites the completion prefix with the typed text, so
+    // a prefix-filtered popup would drop them (it matches on the display
+    // text, accents and all).
+    authorCompleter_->setCompletionMode(QCompleter::UnfilteredPopupCompletion);
+    authorCompleter_->setCaseSensitivity(Qt::CaseInsensitive);
+    authorEdit_->setCompleter(authorCompleter_);
+    connect(authorEdit_, &QLineEdit::textEdited, this,
+            [this](const QString &text) { showAuthorCompletions(text); });
+    connect(authorCompleter_, QOverload<const QString &>::of(&QCompleter::activated), this,
+            [this](const QString &text) { authorEdit_->setText(text); });
     connect(saveButton_, &QPushButton::clicked, this, [this]() { commitDraft(); });
     connect(closeButton_, &QPushButton::clicked, this, [this]() { closePanel(); });
     connect(keepBox_, &QCheckBox::checkStateChanged, this,
@@ -164,6 +206,7 @@ MetadataPanel::MetadataPanel(Scene *scene, doc::UndoStack *stack, QWidget *paren
     // Undo and redo must be reflected in an open panel.
     if (stack_) {
         stack_->addChangedCallback([this]() {
+            authorCandidatesDirty_ = true;
             if (item_)
                 populate(item_);
         });
@@ -179,8 +222,11 @@ void MetadataPanel::setScene(Scene *scene)
     if (scene_)
         disconnect(scene_, nullptr, this, nullptr);
     scene_ = scene;
+    authorCandidatesDirty_ = true;
     if (scene_) {
         connect(scene_, &QGraphicsScene::selectionChanged, this, [this]() { refresh(); });
+        connect(scene_, &Scene::itemsChanged, this,
+                [this]() { authorCandidatesDirty_ = true; });
     }
     closePanel();
 }
@@ -324,11 +370,13 @@ QVector<QPair<QString, QString>> MetadataPanel::draftEdits() const
     QVector<QPair<QString, QString>> changes;
     if (!item_)
         return changes;
+    // The values are normalized here, so what is compared (and stored) is
+    // the canonical form.
     const QVector<QPair<QString, QString>> texts = {
-        {kName, nameEdit_->text()},
-        {kAuthor, authorEdit_->text()},
-        {kOriginUrl, urlEdit_->text()},
-        {kNotes, notesEdit_->toPlainText()},
+        {kName, normalizedFieldText(nameEdit_->text(), true)},
+        {kAuthor, normalizedFieldText(authorEdit_->text(), true)},
+        {kOriginUrl, normalizedFieldText(urlEdit_->text(), true)},
+        {kNotes, normalizedFieldText(notesEdit_->toPlainText(), false)},
     };
     for (const auto &entry : texts) {
         if (entry.second != currentValue(entry.first))
@@ -355,13 +403,48 @@ void MetadataPanel::updateDirty()
     titleLabel_->setText(dirty ? QStringLiteral("Image •") : QStringLiteral("Image"));
 }
 
+void MetadataPanel::showAuthorCompletions(const QString &text)
+{
+    if (!authorCompleter_ || !scene_)
+        return;
+    if (authorCandidatesDirty_) {
+        QStringList raw;
+        const QList<SceneItem *> views = scene_->itemViews();
+        raw.reserve(views.size());
+        for (SceneItem *view : views)
+            raw.append(view->item()->meta.value(kAuthor).toString());
+        authorCandidates_ = fuzzy::candidates(raw);
+        authorCandidatesDirty_ = false;
+    }
+    const QVector<fuzzy::Candidate> matches =
+        fuzzy::search(authorCandidates_, text, kAuthorCompletionLimit);
+    QStringList rows;
+    rows.reserve(matches.size());
+    for (const fuzzy::Candidate &candidate : matches)
+        rows.append(candidate.display);
+    authorModel_->setStringList(rows);
+    if (rows.isEmpty()) {
+        authorCompleter_->popup()->hide();
+        return;
+    }
+    // UnfilteredPopupCompletion shows the model as it is: the fuzzy
+    // matches, no prefix filtering on top.
+    authorCompleter_->complete();
+}
+
 void MetadataPanel::commitDraft()
 {
     if (!item_)
         return;
     const QVector<QPair<QString, QString>> changes = draftEdits();
-    if (changes.isEmpty())
+    if (changes.isEmpty()) {
+        // Nothing to store (an edit that normalization made equal, say a
+        // trailing space): put the canonical text back rather than pushing
+        // an empty undo step.
+        populate(item_);
         return;
+    }
+    authorCandidatesDirty_ = true;
 
     const doc::ChangeItemCommand::State before =
         doc::ChangeItemCommand::State::capture(*item_->item());

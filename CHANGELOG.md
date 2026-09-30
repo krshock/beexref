@@ -21,6 +21,12 @@ project uses [Semantic Versioning](https://semver.org/).
   new selection or a double-click on the image restarts the cycle. It is
   transparent to the mouse, so clicks and the wheel reach the canvas
   under it.
+- The author field autocompletes from the authors already used in the
+  board: the search folds case, accents and other diacritics (typing
+  `jose` suggests `José`), collapses duplicate spellings and skips the
+  entries with nothing printable left. Metadata edits are normalized
+  when saved: trimmed and whitespace runs collapsed, newlines included
+  in the single-line fields, while the notes keep their line breaks.
 
 ## [0.9.0] - 2026-09-28
 

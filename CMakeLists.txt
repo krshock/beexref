@@ -105,6 +105,8 @@ qt_add_library(beexref_core STATIC
     src/ui/export_conflict_dialog.h
     src/ui/export_formats.cpp
     src/ui/export_formats.h
+    src/ui/fuzzy_authors.cpp
+    src/ui/fuzzy_authors.h
     src/ui/crop_tools.h
     src/ui/crop_tool.cpp
     src/ui/crop_tool.h
