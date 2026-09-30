@@ -277,6 +277,7 @@ private slots:
     void windowCarriesTheAppIcon();
     void windowRemembersItsGeometry();
     void selectionOsdShowsTheNameAndPassesClicks();
+    void namePlateShowsYearAndResolution();
     void closeHonoursTheUnsavedSetting();
     void selectingAnImageSchedulesLod();
     void hudToastsAppearAndExpire();
@@ -2405,6 +2406,84 @@ void TestUiScene::windowRemembersItsGeometry()
     settings::setSettingsDir(QString());
 }
 
+void TestUiScene::namePlateShowsYearAndResolution()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    settings::setSettingsDir(dir.path());
+
+    ui::MainWindow window;
+    QImage image(120, 80, QImage::Format_ARGB32);
+    image.fill(Qt::red);
+    QMimeData mime;
+    mime.setImageData(image);
+    window.input()->insertMimeData(mime, QPointF(10, 10));
+    SceneItem *item = window.scene()->pixmapItemViews().first();
+    QVERIFY(item);
+    item->item()->filename = QStringLiteral("poster.png");
+    item->item()->meta.insert(QStringLiteral("author"), QStringLiteral("Ada Lovelace"));
+    item->item()->meta.insert(QStringLiteral("year"), 1985);
+    window.scene()->clearSelection();
+    item->setSelected(true);
+    window.show();
+
+    auto *title = window.findChild<QLabel *>(QStringLiteral("OsdTitle"));
+    auto *caption = window.findChild<QLabel *>(QStringLiteral("OsdCaption"));
+    auto *footer = window.findChild<QLabel *>(QStringLiteral("OsdFooter"));
+    QVERIFY(title && caption && footer);
+    // The three lines: name, author with the year in parentheses above
+    // and the resolution below.
+    QCOMPARE(title->text(), QStringLiteral("poster.png"));
+    QCOMPARE(caption->text(), QStringLiteral("<b>Ada Lovelace</b> (1985)"));
+    QCOMPARE(footer->text(), QStringLiteral("120×80"));
+    QVERIFY(title->isVisible());
+    QVERIFY(caption->isVisible());
+    QVERIFY(footer->isVisible());
+
+    // Without a name or an author, a year still deserves the plate: the
+    // caption reads as the bare year and the name line is hidden.
+    item->item()->filename.clear();
+    item->item()->meta.remove(QStringLiteral("author"));
+    window.scene()->clearSelection();
+    item->setSelected(true);
+    QVERIFY(!title->isVisible());
+    QCOMPARE(caption->text(), QStringLiteral("(1985)"));
+    QVERIFY(caption->isVisible());
+    QCOMPARE(footer->text(), QStringLiteral("120×80"));
+    QVERIFY(footer->isVisible());
+
+    // A lone resolution is not enough: with no name, author or year there
+    // is nothing to show.
+    item->item()->meta.remove(QStringLiteral("year"));
+    window.scene()->clearSelection();
+    item->setSelected(true);
+    QVERIFY(!footer->isVisible());
+
+    // Editing the year in the panel brings the plate back without a new
+    // selection (the content changed), and hides it again when cleared.
+    ui::MetadataPanel *panel = window.metadataPanel();
+    QVERIFY(panel);
+    panel->toggle();
+    QVERIFY(!panel->isHidden());
+    auto *yearEdit = panel->findChild<QLineEdit *>(QStringLiteral("panelYear"));
+    auto *save = panel->findChild<QPushButton *>(QStringLiteral("panelSave"));
+    QVERIFY(yearEdit && save);
+    QTest::keyClicks(yearEdit, QStringLiteral("1999"));
+    save->click();
+    QCOMPARE(caption->text(), QStringLiteral("(1999)"));
+    QVERIFY(caption->isVisible());
+    QCOMPARE(footer->text(), QStringLiteral("120×80"));
+    QVERIFY(footer->isVisible());
+
+    // Clearing the year leaves nothing to show and clears the plate.
+    panel->refresh();
+    yearEdit->clear();
+    save->click();
+    QVERIFY(!footer->isVisible());
+
+    settings::setSettingsDir(QString());
+}
+
 void TestUiScene::selectionOsdShowsTheNameAndPassesClicks()
 {
     QTemporaryDir dir;
@@ -2434,7 +2513,7 @@ void TestUiScene::selectionOsdShowsTheNameAndPassesClicks()
     QVERIFY(title);
     QVERIFY(caption);
     QCOMPARE(title->text(), longName.left(30) + QChar(0x2026));
-    QCOMPARE(caption->text(), QStringLiteral("Ada Lovelace"));
+    QCOMPARE(caption->text(), QStringLiteral("<b>Ada Lovelace</b>"));
     QVERIFY(title->isVisible());
     QVERIFY(caption->isVisible());
     // The caption (author) sits above the main line.

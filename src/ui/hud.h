@@ -38,15 +38,26 @@ struct OsdTiming
     int fadeOutMs = 150;
 };
 
+// The lines of one on-screen display element: the main title, an
+// optional caption above it (an author, a source...) and an optional
+// footer below it (a year, a resolution...). Empty lines are hidden, so
+// an element shows only the lines it has. The caption may carry simple
+// rich text (Qt's auto-detection); callers escape the text they build it
+// from.
+struct OsdContent
+{
+    QString title;
+    QString caption;
+    QString footer;
+};
+
 // Shows or updates one on-screen display element in a corner of host.
-// The id identifies it: setting it again replaces the text and restarts
-// the timing cycle from the start. title is the main line; caption, when
-// not empty, is a smaller line shown above it (an author, a source...).
-// Elements are transparent to the mouse -- clicks, the wheel and hover
-// reach whatever is under them -- and never take focus. Elements sharing
-// an anchor stack away from it.
-void osdSet(QWidget *host, const QString &id, Anchor anchor, const QString &title,
-            const QString &caption = {}, const OsdTiming &timing = {});
+// The id identifies it: setting it again replaces the content and
+// restarts the timing cycle from the start. Elements are transparent to
+// the mouse -- clicks, the wheel and hover reach whatever is under them
+// -- and never take focus. Elements sharing an anchor stack away from it.
+void osdSet(QWidget *host, const QString &id, Anchor anchor, const OsdContent &content,
+            const OsdTiming &timing = {});
 // Cancels an element's cycle and hides it at once.
 void osdClear(QWidget *host, const QString &id);
 

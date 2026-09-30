@@ -213,6 +213,9 @@ MainWindow::MainWindow(bool cacheDisabled, QWidget *parent)
     connect(metadataPanel_, &MetadataPanel::modified, this, [this]() {
         updateActions();
         updateTitle();
+        // Show the edited year or author on the plate, but only when the
+        // lines it displays actually changed.
+        updateSelectionOsd(/*force=*/false);
     });
     connect(scene_, &Scene::itemViewAboutToBeRemoved, this,
             [this](SceneItem *view) { metadataPanel_->forgetItem(view); });
@@ -1564,13 +1567,16 @@ void MainWindow::showContextMenu(const QPoint &globalPos)
     menu.exec(globalPos);
 }
 
-void MainWindow::updateSelectionOsd()
+void MainWindow::updateSelectionOsd(bool force)
 {
-    // The OSD belongs to one image: its name (first 30 characters) with
-    // the author above it, shown for a moment. Any other selection clears
-    // it; each new selection restarts the cycle.
+    // The plate belongs to one image: its name (first 30 characters), the
+    // author with the year in parentheses above it and the resolution
+    // below it. Any other selection clears it; each new selection starts
+    // the cycle, while a metadata edit (non-forced) only refreshes the
+    // content.
     const QVector<SceneItem *> selected = scene_->selectedItemViews();
     if (selected.size() != 1 || !selected.first()->item()->isPixmap()) {
+        lastOsd_.clear();
         hud::osdClear(view_, QStringLiteral("selection"));
         return;
     }
@@ -1578,15 +1584,48 @@ void MainWindow::updateSelectionOsd()
     QString name = item->filename;
     if (name.isEmpty())
         name = item->data.value(QStringLiteral("filename")).toString();
-    if (name.isEmpty()) {
-        hud::osdClear(view_, QStringLiteral("selection"));
-        return;
-    }
     if (name.size() > 30)
         name = name.left(30) + QChar(0x2026);
     const QString author = item->meta.value(QStringLiteral("author")).toString();
-    hud::osdSet(view_, QStringLiteral("selection"), hud::Anchor::BottomLeft, name, author,
-                hud::OsdTiming{300, 3000, 1000});
+
+    // The year is a number; a value another tool wrote as text is shown
+    // as it is, and a missing one is left out.
+    QString year;
+    const QJsonValue storedYear = item->meta.value(QStringLiteral("year"));
+    if (storedYear.isDouble())
+        year = QString::number(qRound64(storedYear.toDouble()));
+    else
+        year = storedYear.toString().trimmed();
+
+    // The year rides with the author, in parentheses; a lone year still
+    // reads as a caption, and the footer keeps only the resolution. The
+    // author is bold, so the caption carries light markup: it is file
+    // data and must be escaped.
+    QString caption;
+    if (!author.isEmpty())
+        caption = QStringLiteral("<b>%1</b>").arg(author.toHtmlEscaped());
+    if (!year.isEmpty()) {
+        const QString bracketed = QStringLiteral("(%1)").arg(year.toHtmlEscaped());
+        caption = caption.isEmpty() ? bracketed : caption + QLatin1Char(' ') + bracketed;
+    }
+    QString footer;
+    const QSize size = item->originalSize();
+    if (size.isValid() && !size.isEmpty())
+        footer = QStringLiteral("%1×%2").arg(size.width()).arg(size.height());
+
+    // A name, an author or a year deserves a plate; a lone resolution does
+    // not (every image has one).
+    if (name.isEmpty() && caption.isEmpty()) {
+        lastOsd_.clear();
+        hud::osdClear(view_, QStringLiteral("selection"));
+        return;
+    }
+    const QString content = name + QChar(0x1F) + caption + QChar(0x1F) + footer;
+    if (!force && content == lastOsd_)
+        return;
+    lastOsd_ = content;
+    hud::osdSet(view_, QStringLiteral("selection"), hud::Anchor::BottomLeft,
+                hud::OsdContent{name, caption, footer}, hud::OsdTiming{300, 3000, 1000});
 }
 
 void MainWindow::updateStatusBar()

@@ -122,9 +122,11 @@ private:
     void buildMenus();
     // Enables and checks every action for the current state.
     void updateActions();
-    // The bottom-left OSD: the selected image's name and author for a
-    // moment; anything else clears it.
-    void updateSelectionOsd();
+    // The bottom-left plate: the selected image's name, author, year and
+    // resolution for a moment; anything else clears it. A non-forced
+    // update (after a metadata edit) only restarts the cycle when the
+    // shown lines actually changed.
+    void updateSelectionOsd(bool force = true);
     // Copies a sampled colour and says so (HUD toast).
     void copySampledColor(const QColor &color);
     // Opens the gamut wheel for the single selected image.
@@ -180,6 +182,9 @@ private:
     ActionRegistry *actions_ = nullptr;
     // The Items/grayscale_method value the canvas and the menu show.
     QString grayscaleMethod_;
+    // The last content handed to the selection plate, so a metadata edit
+    // that does not change it does not restart the animation.
+    QString lastOsd_;
     QMenu *recentMenu_ = nullptr;
     int panelWidth_ = 320;
     QSplitter *splitter_ = nullptr;

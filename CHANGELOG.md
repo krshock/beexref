@@ -14,10 +14,13 @@ project uses [Semantic Versioning](https://semver.org/).
   let go — so you can see how much of the zoomed-out canvas each choice
   will cover.
 - **Selection name plate**: selecting an image shows its name (the first
-  30 characters) in the bottom-left corner, with the author above it. It
-  fades in, holds three seconds and fades out; a new selection or a
-  double-click on the image brings it back, and clicks and the wheel pass
-  through it to the canvas.
+  30 characters) in the bottom-left corner, with the author in bold and
+  the year in parentheses next to it above, and the resolution below. It
+  fades in, holds three seconds and fades out; a new selection, a
+  double-click on the image or a metadata edit that changes what it shows
+  brings it back, and clicks and the wheel pass through it to the canvas.
+  Without a name it still appears when there is an author or a year to
+  show.
 - **Author suggestions**: the Author field completes from the authors
   already used in the board — case and accents don't matter (`jose`
   finds `José`), duplicate spellings collapse, and blank or invisible

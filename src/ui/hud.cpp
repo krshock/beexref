@@ -64,6 +64,7 @@ QString hudStylesheet()
                "QLabel#HUDDisplay { color: %4; font-size: 20pt; font-weight: 600; }"
                "QLabel#OsdTitle { color: %3; font-size: 22pt; font-weight: 600; }"
                "QLabel#OsdCaption { color: rgb(153, 153, 153); font-size: 14pt; }"
+               "QLabel#OsdFooter { color: rgb(153, 153, 153); font-size: 12pt; }"
                "QLabel#HUDSubtitle { color: %3; font-size: 11pt; }"
                "QLabel#HUDHint { color: %5; font-size: 10pt; }"
                "QPushButton#HUDButton { background-color: %6; color: %3;"
@@ -365,25 +366,34 @@ public:
         auto *layout = new QVBoxLayout(this);
         layout->setContentsMargins(12, 8, 12, 8);
         layout->setSpacing(2);
-        // The caption (author, source...) sits above the main line.
+        // The caption (author, source...) sits above the main line and
+        // the footer (year, resolution...) below it.
         caption_ = new QLabel(this);
         caption_->setObjectName(QStringLiteral("OsdCaption"));
         layout->addWidget(caption_);
         title_ = new QLabel(this);
         title_->setObjectName(QStringLiteral("OsdTitle"));
         layout->addWidget(title_);
+        footer_ = new QLabel(this);
+        footer_->setObjectName(QStringLiteral("OsdFooter"));
+        layout->addWidget(footer_);
         // The transparency attribute is repeated on the labels so the
         // contract is explicit at every level.
-        for (QLabel *label : {title_, caption_}) {
+        for (QLabel *label : {title_, caption_, footer_}) {
             label->setAttribute(Qt::WA_TransparentForMouseEvents);
         }
     }
 
-    void setLines(const QString &title, const QString &caption)
+    void setContent(const OsdContent &content)
     {
-        title_->setText(title);
-        caption_->setText(caption);
-        caption_->setVisible(!caption.isEmpty());
+        // Empty lines are hidden: an element shows only what it has.
+        const auto setLine = [](QLabel *label, const QString &text) {
+            label->setText(text);
+            label->setVisible(!text.isEmpty());
+        };
+        setLine(caption_, content.caption);
+        setLine(title_, content.title);
+        setLine(footer_, content.footer);
         adjustSize();
     }
 
@@ -440,6 +450,7 @@ private:
 
     QLabel *title_ = nullptr;
     QLabel *caption_ = nullptr;
+    QLabel *footer_ = nullptr;
     quint64 cycle_ = 0;
 };
 
@@ -457,7 +468,7 @@ public:
         host->installEventFilter(this);
     }
 
-    void set(const QString &id, Anchor anchor, const QString &title, const QString &caption,
+    void set(const QString &id, Anchor anchor, const OsdContent &content,
              const OsdTiming &timing)
     {
         OsdText *item = items_.value(id);
@@ -476,7 +487,7 @@ public:
             }
             static_cast<QVBoxLayout *>(column->layout())->addWidget(item);
         }
-        item->setLines(title, caption);
+        item->setContent(content);
         item->restart(timing);
         relayout();
         // The stylesheet font is applied at polish time, so the sizes the
@@ -548,15 +559,15 @@ OsdManager *osdManager(const QWidget *host)
 
 } // namespace
 
-void osdSet(QWidget *host, const QString &id, Anchor anchor, const QString &title,
-            const QString &caption, const OsdTiming &timing)
+void osdSet(QWidget *host, const QString &id, Anchor anchor, const OsdContent &content,
+            const OsdTiming &timing)
 {
     if (!host)
         return;
     OsdManager *manager = osdManager(host);
     if (!manager)
         manager = new OsdManager(host);
-    manager->set(id, anchor, title, caption, timing);
+    manager->set(id, anchor, content, timing);
 }
 
 void osdClear(QWidget *host, const QString &id)
