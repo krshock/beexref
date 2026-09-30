@@ -27,6 +27,9 @@ project uses [Semantic Versioning](https://semver.org/).
   entries with nothing printable left. Metadata edits are normalized
   when saved: trimmed and whitespace runs collapsed, newlines included
   in the single-line fields, while the notes keep their line breaks.
+- The metadata fields clamp what is typed or pasted at reasonable
+  lengths — name 255, author 128, URL 2048 and notes 4096 characters —
+  while a longer value a board already holds is left as it is.
 
 ## [0.9.0] - 2026-09-28
 

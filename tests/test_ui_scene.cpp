@@ -23,6 +23,7 @@
 #include <QMouseEvent>
 #include <QScrollBar>
 #include <QCheckBox>
+#include <QClipboard>
 #include <QCompleter>
 #include <QElapsedTimer>
 #include <QTabWidget>
@@ -302,6 +303,7 @@ private slots:
     void infoDialogsShowTheExpectedContent();
     void metadataPanelEditsAndCommits();
     void metadataFieldsAreNormalized();
+    void metadataFieldsClampTheirLength();
     void authorCompletionFindsFuzzyMatches();
     void hudPreviewShowsTheStyledPanel();
     void welcomeOverlayTracksTheBoardState();
@@ -2563,6 +2565,77 @@ void TestUiScene::metadataFieldsAreNormalized()
     QCOMPARE(stack->count(), before);
     QCOMPARE(model->meta.value(QStringLiteral("author")).toString(),
              QStringLiteral("José García"));
+
+    settings::setSettingsDir(QString());
+}
+
+void TestUiScene::metadataFieldsClampTheirLength()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    settings::setSettingsDir(dir.path());
+
+    ui::MainWindow window;
+    QImage image(6, 4, QImage::Format_ARGB32);
+    image.fill(Qt::red);
+    QMimeData mime;
+    mime.setImageData(image);
+    window.input()->insertMimeData(mime, QPointF(10, 10));
+    SceneItem *item = window.scene()->pixmapItemViews().first();
+    QVERIFY(item);
+    window.scene()->clearSelection();
+    item->setSelected(true);
+
+    // A stored value longer than the limit opens as it is: the limits
+    // clamp editing, they never rewrite what a board already holds.
+    const QString longAuthor(300, QLatin1Char('a'));
+    item->item()->meta.insert(QStringLiteral("author"), longAuthor);
+
+    ui::MetadataPanel *panel = window.metadataPanel();
+    QVERIFY(panel);
+    panel->toggle();
+    QVERIFY(!panel->isHidden());
+    auto *name = panel->findChild<QLineEdit *>(QStringLiteral("panelName"));
+    auto *author = panel->findChild<QLineEdit *>(QStringLiteral("panelAuthor"));
+    auto *url = panel->findChild<QLineEdit *>(QStringLiteral("panelUrl"));
+    auto *notes = panel->findChild<QPlainTextEdit *>(QStringLiteral("panelNotes"));
+    QVERIFY(name && author && url && notes);
+    QCOMPARE(author->text(), longAuthor);
+    QVERIFY(!panel->isDirty());
+
+    // Pasting over a limit is clamped: name 255, author 128, URL 2048 and
+    // notes 4096 characters.
+    QApplication::clipboard()->setText(QString(400, QLatin1Char('n')));
+    name->clear();
+    name->paste();
+    QCOMPARE(name->text().size(), 255);
+
+    QApplication::clipboard()->setText(QString(200, QLatin1Char('a')));
+    author->clear();
+    author->paste();
+    QCOMPARE(author->text().size(), 128);
+
+    QApplication::clipboard()->setText(QString(3000, QLatin1Char('u')));
+    url->clear();
+    url->paste();
+    QCOMPARE(url->text().size(), 2048);
+
+    QApplication::clipboard()->setText(QString(5000, QLatin1Char('x')));
+    notes->clear();
+    notes->paste();
+    QCOMPARE(notes->toPlainText().size(), 4096);
+
+    // Saving after editing another field leaves the over-long stored value
+    // untouched.
+    item->item()->meta.insert(QStringLiteral("author"), longAuthor);
+    panel->refresh();
+    QCOMPARE(author->text(), longAuthor);
+    name->setText(QStringLiteral("short name"));
+    auto *save = panel->findChild<QPushButton *>(QStringLiteral("panelSave"));
+    QVERIFY(save);
+    save->click();
+    QCOMPARE(item->item()->meta.value(QStringLiteral("author")).toString(), longAuthor);
+    QCOMPARE(item->item()->filename, QStringLiteral("short name"));
 
     settings::setSettingsDir(QString());
 }

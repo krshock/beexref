@@ -19,6 +19,7 @@
 #include <QSignalBlocker>
 #include <QStringListModel>
 #include <QTabWidget>
+#include <QTextCursor>
 #include <QVBoxLayout>
 
 namespace ui {
@@ -31,6 +32,19 @@ const QString kNotes = QStringLiteral("notes");
 
 // How many author suggestions the popup shows.
 constexpr int kAuthorCompletionLimit = 15;
+
+// The edit limits of the metadata fields. They clamp what is typed or
+// pasted, not what a board already holds: populate() writes the stored
+// values with the signals blocked and QLineEdit::maxLength does not
+// truncate setText, so opening and saving a board never rewrites a longer
+// value it did not edit. Name matches the usual filesystem limit, author
+// keeps the completion folding cheap and the OSD readable, URL matches
+// the browsers' practical limit, and notes stay a couple of pages (they
+// live in the items' JSON, so 3000 of them are still small).
+constexpr int kNameLimit = 255;
+constexpr int kAuthorLimit = 128;
+constexpr int kUrlLimit = 2048;
+constexpr int kNotesLimit = 4096;
 
 // The stored text of one metadata field, normalized on commit:
 // single-line fields collapse every whitespace run -- newlines included
@@ -178,7 +192,44 @@ MetadataPanel::MetadataPanel(Scene *scene, doc::UndoStack *stack, QWidget *paren
 
     for (QLineEdit *editor : {nameEdit_, authorEdit_, urlEdit_})
         connect(editor, &QLineEdit::textChanged, this, [this]() { updateDirty(); });
-    connect(notesEdit_, &QPlainTextEdit::textChanged, this, [this]() { updateDirty(); });
+    connect(notesEdit_, &QPlainTextEdit::textChanged, this, [this]() {
+        // The notes have no maxLength: clamp an over-long edit here. The
+        // stored text is written with the signals blocked, so a longer
+        // value from a board is left alone.
+        const QString text = notesEdit_->toPlainText();
+        if (text.size() > kNotesLimit) {
+            const int cursor = notesEdit_->textCursor().position();
+            const QSignalBlocker blocker(notesEdit_);
+            notesEdit_->setPlainText(text.left(kNotesLimit));
+            QTextCursor clamped = notesEdit_->textCursor();
+            clamped.setPosition(qMin(cursor, kNotesLimit));
+            notesEdit_->setTextCursor(clamped);
+        }
+        updateDirty();
+    });
+
+    // The fields clamp what the user types or pastes (textEdited fires
+    // only for user edits), never what a board already holds:
+    // QLineEdit::setMaxLength would also truncate populate()'s
+    // programmatic setText and rewrite a longer stored value just by
+    // opening the panel.
+    const auto clampEdit = [this](QLineEdit *editor, int limit) {
+        connect(editor, &QLineEdit::textEdited, this,
+                [this, editor, limit](const QString &text) {
+                    if (text.size() <= limit)
+                        return;
+                    const int cursor = editor->cursorPosition();
+                    {
+                        const QSignalBlocker blocker(editor);
+                        editor->setText(text.left(limit));
+                        editor->setCursorPosition(qMin(cursor, limit));
+                    }
+                    updateDirty();
+                });
+    };
+    clampEdit(nameEdit_, kNameLimit);
+    clampEdit(authorEdit_, kAuthorLimit);
+    clampEdit(urlEdit_, kUrlLimit);
 
     // The author field autocompletes from the authors already used in the
     // board, matched fuzzily and without diacritics; the candidate list is
