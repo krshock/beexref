@@ -295,6 +295,9 @@ MainWindow::MainWindow(bool cacheDisabled, QWidget *parent)
     // A double-click fits the image; by default it is also spotlighted
     // (view only), so the focused image is not hidden behind others.
     connect(view_, &View::itemDoubleClicked, this, [this](SceneItem *item) {
+        // A double-click on an already selected image must show the OSD
+        // too, and that fires no selection change.
+        updateSelectionOsd();
         settings::File file(settings::iniPath());
         file.load();
         if (settings::valueOrDefault(file, QStringLiteral("Items/double_click_spotlight")).toBool())
@@ -303,6 +306,7 @@ MainWindow::MainWindow(bool cacheDisabled, QWidget *parent)
     connect(scene_, &QGraphicsScene::selectionChanged, this, [this]() {
         updateActions();
         metadataPanel_->refresh();
+        updateSelectionOsd();
     });
     undoStack_.addChangedCallback([this]() {
         updateActions();
@@ -1558,6 +1562,31 @@ void MainWindow::showContextMenu(const QPoint &globalPos)
         copyMenuActions(source, submenu);
     }
     menu.exec(globalPos);
+}
+
+void MainWindow::updateSelectionOsd()
+{
+    // The OSD belongs to one image: its name (first 30 characters) with
+    // the author above it, shown for a moment. Any other selection clears
+    // it; each new selection restarts the cycle.
+    const QVector<SceneItem *> selected = scene_->selectedItemViews();
+    if (selected.size() != 1 || !selected.first()->item()->isPixmap()) {
+        hud::osdClear(view_, QStringLiteral("selection"));
+        return;
+    }
+    const doc::ItemPtr item = selected.first()->item();
+    QString name = item->filename;
+    if (name.isEmpty())
+        name = item->data.value(QStringLiteral("filename")).toString();
+    if (name.isEmpty()) {
+        hud::osdClear(view_, QStringLiteral("selection"));
+        return;
+    }
+    if (name.size() > 30)
+        name = name.left(30) + QChar(0x2026);
+    const QString author = item->meta.value(QStringLiteral("author")).toString();
+    hud::osdSet(view_, QStringLiteral("selection"), hud::Anchor::BottomLeft, name, author,
+                hud::OsdTiming{300, 3000, 1000});
 }
 
 void MainWindow::updateStatusBar()

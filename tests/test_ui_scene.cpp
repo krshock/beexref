@@ -271,6 +271,7 @@ private slots:
     void windowExportsImagesToDirectory();
     void windowCarriesTheAppIcon();
     void windowRemembersItsGeometry();
+    void selectionOsdShowsTheNameAndPassesClicks();
     void closeHonoursTheUnsavedSetting();
     void selectingAnImageSchedulesLod();
     void hudToastsAppearAndExpire();
@@ -2390,6 +2391,108 @@ void TestUiScene::windowRemembersItsGeometry()
     // The next run comes back where the previous one was left.
     ui::MainWindow restored;
     QCOMPARE(restored.size(), QSize(700, 520));
+
+    settings::setSettingsDir(QString());
+}
+
+void TestUiScene::selectionOsdShowsTheNameAndPassesClicks()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    settings::setSettingsDir(dir.path());
+
+    ui::MainWindow window;
+    window.show();
+    // A board big enough for the wheel and the middle drag to matter.
+    QImage image(2000, 1000, QImage::Format_ARGB32);
+    image.fill(Qt::red);
+    QMimeData mime;
+    mime.setImageData(image);
+    window.input()->insertMimeData(mime, QPointF(0, 0));
+
+    SceneItem *first = window.scene()->pixmapItemViews().first();
+    const QString longName = QStringLiteral("a-very-long-reference-image-name-over-30.png");
+    first->item()->filename = longName;
+    first->item()->meta.insert(QStringLiteral("author"), QStringLiteral("Ada Lovelace"));
+    // The insert selected the item before it had a name; re-select it so
+    // the OSD runs with the name and author.
+    window.scene()->clearSelection();
+    first->setSelected(true);
+
+    auto *title = window.findChild<QLabel *>(QStringLiteral("OsdTitle"));
+    auto *caption = window.findChild<QLabel *>(QStringLiteral("OsdCaption"));
+    QVERIFY(title);
+    QVERIFY(caption);
+    QCOMPARE(title->text(), longName.left(30) + QChar(0x2026));
+    QCOMPARE(caption->text(), QStringLiteral("Ada Lovelace"));
+    QVERIFY(title->isVisible());
+    QVERIFY(caption->isVisible());
+    // The caption (author) sits above the main line.
+    QVERIFY(caption->mapTo(window.view(), QPoint(0, 0)).y()
+            < title->mapTo(window.view(), QPoint(0, 0)).y());
+    // Transparent to the mouse by construction, and in the lower left.
+    QVERIFY(title->testAttribute(Qt::WA_TransparentForMouseEvents));
+    // The element must sit fully inside the view vertically: the first
+    // layout runs before the stylesheet font is polished, so the bottom
+    // anchor is re-run once the widgets are measured.
+    QTRY_VERIFY_WITH_TIMEOUT(
+        title->mapTo(window.view(), QPoint(0, title->height())).y()
+            <= window.view()->height(),
+        2000);
+    const QPoint labelTopLeft = title->mapTo(window.view(), QPoint(0, 0));
+    QVERIFY(labelTopLeft.x() < window.view()->width() / 2);
+    QVERIFY(labelTopLeft.y() > window.view()->height() / 2);
+
+    // The wheel over the OSD reaches the canvas and zooms.
+    QPoint overOsd = title->mapTo(window.view()->viewport(), title->rect().center());
+    const double scaleBefore = window.view()->transform().m11();
+    sendWheel(window.view()->viewport(), overOsd, 120, Qt::NoModifier);
+    QVERIFY(window.view()->transform().m11() > scaleBefore);
+
+    // ...and a middle drag started over it pans.
+    overOsd = title->mapTo(window.view()->viewport(), title->rect().center());
+    const int scrollBefore = window.view()->horizontalScrollBar()->value();
+    sendMouse(window.view()->viewport(), QEvent::MouseButtonPress, overOsd, Qt::MiddleButton,
+              Qt::MiddleButton);
+    sendMouse(window.view()->viewport(), QEvent::MouseMove, overOsd + QPoint(30, 0),
+              Qt::NoButton, Qt::MiddleButton);
+    sendMouse(window.view()->viewport(), QEvent::MouseButtonRelease, overOsd + QPoint(30, 0),
+              Qt::MiddleButton, Qt::NoButton);
+    QVERIFY(window.view()->horizontalScrollBar()->value() < scrollBefore);
+
+    // Clearing the selection hides it at once.
+    window.scene()->clearSelection();
+    QVERIFY(!title->isVisible());
+
+    // A new single selection restarts the cycle with the new text.
+    QImage secondImage(60, 40, QImage::Format_ARGB32);
+    secondImage.fill(Qt::blue);
+    QMimeData secondMime;
+    secondMime.setImageData(secondImage);
+    window.input()->insertMimeData(secondMime, QPointF(300, 200));
+    SceneItem *second = nullptr;
+    for (SceneItem *candidate : window.scene()->pixmapItemViews()) {
+        if (candidate != first)
+            second = candidate;
+    }
+    QVERIFY(second);
+    window.scene()->clearSelection();
+    second->item()->filename = QStringLiteral("short.png");
+    second->setSelected(true);
+    QCOMPARE(title->text(), QStringLiteral("short.png"));
+    QVERIFY(title->isVisible());
+    QVERIFY(!caption->isVisible());
+    // ...and the cycle still ends on its own.
+    QTRY_VERIFY_WITH_TIMEOUT(!title->isVisible(), 6000);
+
+    // A double-click on the already selected image shows it again (no
+    // selection change fires for that).
+    const QPoint onItem =
+        window.view()->mapFromScene(second->sceneBoundingRect().center());
+    sendMouse(window.view()->viewport(), QEvent::MouseButtonDblClick, onItem, Qt::LeftButton,
+              Qt::LeftButton);
+    QCOMPARE(title->text(), QStringLiteral("short.png"));
+    QVERIFY(title->isVisible());
 
     settings::setSettingsDir(QString());
 }

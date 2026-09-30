@@ -122,6 +122,9 @@ private:
     void buildMenus();
     // Enables and checks every action for the current state.
     void updateActions();
+    // The bottom-left OSD: the selected image's name and author for a
+    // moment; anything else clears it.
+    void updateSelectionOsd();
     // Copies a sampled colour and says so (HUD toast).
     void copySampledColor(const QColor &color);
     // Opens the gamut wheel for the single selected image.

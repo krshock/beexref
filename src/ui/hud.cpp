@@ -4,9 +4,12 @@
 
 #include <QEvent>
 #include <QGraphicsOpacityEffect>
+#include <QHash>
 #include <QLabel>
 #include <QPainter>
 #include <QPropertyAnimation>
+#include <QStyle>
+#include <QStyleOption>
 #include <QTimer>
 #include <QVBoxLayout>
 
@@ -54,10 +57,13 @@ QString hudStylesheet()
     return QStringLiteral(
                "QWidget#HUDPanel, QWidget#HUDToast {"
                " background-color: %1; border: 1px solid %2; border-radius: 8px; }"
+               "QWidget#OsdItem { background-color: rgba(0, 0, 0, 0.65); border-radius: 8px; }"
                "QLabel { background: transparent; border: none; color: %3; }"
                "QLabel#HUDTitle { color: %4; font-weight: bold; }"
                "QLabel#HUDMuted { color: %5; }"
                "QLabel#HUDDisplay { color: %4; font-size: 20pt; font-weight: 600; }"
+               "QLabel#OsdTitle { color: %3; font-size: 22pt; font-weight: 600; }"
+               "QLabel#OsdCaption { color: rgb(153, 153, 153); font-size: 14pt; }"
                "QLabel#HUDSubtitle { color: %3; font-size: 11pt; }"
                "QLabel#HUDHint { color: %5; font-size: 10pt; }"
                "QPushButton#HUDButton { background-color: %6; color: %3;"
@@ -195,12 +201,17 @@ private:
 QPoint anchoredPos(const QWidget *host, const QSize &size, Anchor anchor, int margin)
 {
     const int hostWidth = host ? host->width() : 0;
+    const int hostHeight = host ? host->height() : 0;
     int x = margin;
-    if (anchor == Anchor::TopCenter)
+    if (anchor == Anchor::TopCenter || anchor == Anchor::BottomCenter)
         x = (hostWidth - size.width()) / 2;
-    else if (anchor == Anchor::TopRight)
+    else if (anchor == Anchor::TopRight || anchor == Anchor::BottomRight)
         x = hostWidth - size.width() - margin;
-    return QPoint(qMax(0, x), qMax(0, margin));
+    int y = margin;
+    if (anchor == Anchor::BottomLeft || anchor == Anchor::BottomCenter
+        || anchor == Anchor::BottomRight)
+        y = hostHeight - size.height() - margin;
+    return QPoint(qMax(0, x), qMax(0, y));
 }
 
 HudPanel::HudPanel(QWidget *parent, bool shadow)
@@ -327,6 +338,231 @@ void toast(QWidget *host, const QString &text, int timeoutMs)
         stack->setObjectName(QStringLiteral("hudToastStack"));
     }
     stack->add(text, timeoutMs);
+}
+
+// --- on-screen displays -----------------------------------------------
+
+namespace {
+
+// The OSD geometry.
+constexpr int kOsdMargin = 16;
+constexpr int kOsdSpacing = 4;
+
+// One OSD element: a main line with an optional smaller caption above
+// it, drawn without a background and transparent to the mouse by
+// construction, so clicks, the wheel and hover reach the canvas under it.
+class OsdText : public QWidget
+{
+public:
+    explicit OsdText(QWidget *parent)
+        : QWidget(parent)
+    {
+        setObjectName(QStringLiteral("OsdItem"));
+        setAttribute(Qt::WA_TransparentForMouseEvents);
+        setAttribute(Qt::WA_TranslucentBackground);
+        setFocusPolicy(Qt::NoFocus);
+        setStyleSheet(hudStylesheet());
+        auto *layout = new QVBoxLayout(this);
+        layout->setContentsMargins(12, 8, 12, 8);
+        layout->setSpacing(2);
+        // The caption (author, source...) sits above the main line.
+        caption_ = new QLabel(this);
+        caption_->setObjectName(QStringLiteral("OsdCaption"));
+        layout->addWidget(caption_);
+        title_ = new QLabel(this);
+        title_->setObjectName(QStringLiteral("OsdTitle"));
+        layout->addWidget(title_);
+        // The transparency attribute is repeated on the labels so the
+        // contract is explicit at every level.
+        for (QLabel *label : {title_, caption_}) {
+            label->setAttribute(Qt::WA_TransparentForMouseEvents);
+        }
+    }
+
+    void setLines(const QString &title, const QString &caption)
+    {
+        title_->setText(title);
+        caption_->setText(caption);
+        caption_->setVisible(!caption.isEmpty());
+        adjustSize();
+    }
+
+    // Starts the cycle from zero: a running fade or hold is dropped, the
+    // opacity goes back to 0 and the fade-in begins again. The cycle
+    // counter makes the stale timers of an interrupted cycle harmless.
+    void restart(const OsdTiming &timing)
+    {
+        const quint64 cycle = ++cycle_;
+        stopAnimations();
+        if (auto *effect = qobject_cast<QGraphicsOpacityEffect *>(graphicsEffect()))
+            effect->setOpacity(0.0);
+        adjustSize();
+        show();
+        fadeIn(this, timing.fadeInMs);
+        if (timing.holdMs < 0)
+            return;
+        QTimer::singleShot(timing.holdMs, this, [this, cycle, timing]() {
+            if (cycle != cycle_)
+                return;
+            fadeOut(this, timing.fadeOutMs);
+            QTimer::singleShot(timing.fadeOutMs, this, [this, cycle]() {
+                if (cycle == cycle_)
+                    hide();
+            });
+        });
+    }
+
+    void cancel()
+    {
+        ++cycle_;
+        stopAnimations();
+        hide();
+    }
+
+protected:
+    // A QWidget subclass must paint its stylesheet background itself (the
+    // #OsdItem glass pill); the labels are styled by Qt.
+    void paintEvent(QPaintEvent *event) override
+    {
+        Q_UNUSED(event);
+        QStyleOption option;
+        option.initFrom(this);
+        QPainter painter(this);
+        style()->drawPrimitive(QStyle::PE_Widget, &option, &painter, this);
+    }
+
+private:
+    void stopAnimations()
+    {
+        for (QPropertyAnimation *animation : findChildren<QPropertyAnimation *>())
+            animation->stop();
+    }
+
+    QLabel *title_ = nullptr;
+    QLabel *caption_ = nullptr;
+    quint64 cycle_ = 0;
+};
+
+// The OSD elements of one host: a transparent column per anchor, so
+// elements sharing a corner stack away from it, repositioned on every
+// host resize (the toast stack's pattern).
+class OsdManager : public QObject
+{
+public:
+    explicit OsdManager(QWidget *host)
+        : QObject(host)
+        , host_(host)
+    {
+        setObjectName(QStringLiteral("hudOsdManager"));
+        host->installEventFilter(this);
+    }
+
+    void set(const QString &id, Anchor anchor, const QString &title, const QString &caption,
+             const OsdTiming &timing)
+    {
+        OsdText *item = items_.value(id);
+        if (!item) {
+            item = new OsdText(host_);
+            items_.insert(id, item);
+        }
+        QWidget *column = columnFor(anchor);
+        if (item->parentWidget() != column) {
+            // The item must live in the column's layout, or the column
+            // measures 0 and the anchor maths put the element outside the
+            // host (the stacking also comes from that layout).
+            if (QWidget *oldParent = item->parentWidget()) {
+                if (QLayout *oldLayout = oldParent->layout())
+                    oldLayout->removeWidget(item);
+            }
+            static_cast<QVBoxLayout *>(column->layout())->addWidget(item);
+        }
+        item->setLines(title, caption);
+        item->restart(timing);
+        relayout();
+        // The stylesheet font is applied at polish time, so the sizes the
+        // first relayout sees may still be zero (the element would hang
+        // below its anchor, clipped). Lay out again once the event loop
+        // has polished the new widgets.
+        QTimer::singleShot(0, this, [this]() { relayout(); });
+    }
+
+    void clear(const QString &id)
+    {
+        OsdText *item = items_.value(id);
+        if (!item)
+            return;
+        item->cancel();
+        relayout();
+    }
+
+protected:
+    bool eventFilter(QObject *watched, QEvent *event) override
+    {
+        if (watched == host_ && event->type() == QEvent::Resize)
+            relayout();
+        return QObject::eventFilter(watched, event);
+    }
+
+private:
+    QWidget *columnFor(Anchor anchor)
+    {
+        QWidget *&column = columns_[int(anchor)];
+        if (!column) {
+            column = new QWidget(host_);
+            column->setAttribute(Qt::WA_TransparentForMouseEvents);
+            column->setAttribute(Qt::WA_TranslucentBackground);
+            auto *layout = new QVBoxLayout(column);
+            layout->setContentsMargins(0, 0, 0, 0);
+            layout->setSpacing(kOsdSpacing);
+            // A new child of an already visible host needs an explicit
+            // show; the items inside show themselves when they appear.
+            column->show();
+        }
+        return column;
+    }
+
+    void relayout()
+    {
+        for (auto it = columns_.constBegin(); it != columns_.constEnd(); ++it) {
+            QWidget *column = it.value();
+            if (!column)
+                continue;
+            column->ensurePolished();
+            column->adjustSize();
+            column->move(anchoredPos(host_, column->size(), Anchor(it.key()), kOsdMargin));
+        }
+    }
+
+    QWidget *host_ = nullptr;
+    QHash<QString, OsdText *> items_;
+    QHash<int, QWidget *> columns_;
+};
+
+OsdManager *osdManager(const QWidget *host)
+{
+    return host
+        ? dynamic_cast<OsdManager *>(
+              host->findChild<QObject *>(QStringLiteral("hudOsdManager")))
+        : nullptr;
+}
+
+} // namespace
+
+void osdSet(QWidget *host, const QString &id, Anchor anchor, const QString &title,
+            const QString &caption, const OsdTiming &timing)
+{
+    if (!host)
+        return;
+    OsdManager *manager = osdManager(host);
+    if (!manager)
+        manager = new OsdManager(host);
+    manager->set(id, anchor, title, caption, timing);
+}
+
+void osdClear(QWidget *host, const QString &id)
+{
+    if (OsdManager *manager = osdManager(host))
+        manager->clear(id);
 }
 
 } // namespace ui::hud

@@ -15,6 +15,12 @@ project uses [Semantic Versioning](https://semver.org/).
   zoomed-out canvas that view will cover. A saturated peek also stops
   reapplying an unchanged view, so moving the pointer there no longer
   repaints the canvas.
+- Selecting a single image shows its name (the first 30 characters) in a
+  small on-screen display in the bottom-left corner, with the author in a
+  smaller line above: it fades in, holds three seconds, fades out, and a
+  new selection or a double-click on the image restarts the cycle. It is
+  transparent to the mouse, so clicks and the wheel reach the canvas
+  under it.
 
 ## [0.9.0] - 2026-09-28
 
