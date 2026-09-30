@@ -6,6 +6,7 @@
 #include <QPointF>
 #include <QTransform>
 
+class QKeyEvent;
 class QMouseEvent;
 
 namespace ui {
@@ -36,8 +37,17 @@ public:
 
     bool mouseMove(QMouseEvent *event) override;
     bool mouseRelease(QMouseEvent *event) override;
+    // Shift going up or down switches the preview between the commit
+    // destination and the cancel one, so it is handled even while the
+    // pointer does not move.
+    bool keyPress(QKeyEvent *event) override;
+    bool keyRelease(QKeyEvent *event) override;
 
 private:
+    // Shows the destination the release would pick: with Shift held the
+    // commit lands on the pointer, with Shift let go the peek returns to
+    // where it started.
+    void updatePreview();
     View *view_ = nullptr;
     bool active_ = false;
     QPoint origin_;
@@ -47,6 +57,14 @@ private:
     QPointF baseCenter_;
     int baseHorizontal_ = 0;
     int baseVertical_ = 0;
+    // The view target applied last, so a saturated peek (nothing left to
+    // change) does not repaint the viewport on every pointer move.
+    double appliedScale_ = 0.0;
+    QPointF appliedCenter_;
+    // The pointer's last viewport position and whether Shift is held:
+    // together they pick which destination the preview marks.
+    QPoint lastPosition_;
+    bool shiftHeld_ = true;
 };
 
 } // namespace ui

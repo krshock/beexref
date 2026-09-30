@@ -336,6 +336,26 @@ void View::commitPeekView(const QTransform &transform, const QPointF &sceneCente
     lod_->schedule();
 }
 
+void View::setPeekPreview(const QRectF &sceneRect)
+{
+    if (sceneRect == peekPreview_)
+        return;
+    // The overlay's old pixels must be repainted where they were: the
+    // scene's dirty regions do not track drawForeground output. A
+    // transform change repaints everything anyway; this region update is
+    // what keeps a scroll-only frame (same zoom, moved centre) correct.
+    const QRect nextRegion = sceneRect.isNull()
+        ? QRect()
+        : mapFromScene(sceneRect).boundingRect().adjusted(-2, -2, 2, 2);
+    const QRect dirty = peekPreviewRegion_.isNull() ? nextRegion
+        : nextRegion.isNull()                ? peekPreviewRegion_
+                                             : peekPreviewRegion_.united(nextRegion);
+    peekPreview_ = sceneRect;
+    peekPreviewRegion_ = nextRegion;
+    if (!dirty.isNull() && viewport())
+        viewport()->update(dirty);
+}
+
 double View::scaleFor(const SceneItem *item) const
 {
     const double viewScale = transform().m11();
@@ -1118,6 +1138,18 @@ void View::keyPressEvent(QKeyEvent *event)
     QGraphicsView::keyPressEvent(event);
 }
 
+void View::keyReleaseEvent(QKeyEvent *event)
+{
+    // A modifier going up can change the feedback an active tool shows
+    // (the peek's commit and cancel destinations), so it is forwarded
+    // even though no mode ends here.
+    if (tools_->keyRelease(event)) {
+        event->accept();
+        return;
+    }
+    QGraphicsView::keyReleaseEvent(event);
+}
+
 bool View::eventFilter(QObject *watched, QEvent *event)
 {
     // The text editor's keys (Enter/Esc/focus-out) are the text tool's.
@@ -1174,6 +1206,22 @@ void View::drawForeground(QPainter *painter, const QRectF &rect)
         drawSpotlight(painter);
     if (cropActive())
         return;
+
+    // The peek's promise: the area the committed view will cover, shown
+    // while the peek is active so the zoomed-out canvas can be judged
+    // against it.
+    if (!peekPreview_.isNull()) {
+        painter->save();
+        QPen previewPen(theme::selection, selection::kLineWidth);
+        previewPen.setCosmetic(true);
+        previewPen.setStyle(Qt::DashLine);
+        painter->setPen(previewPen);
+        QColor previewFill = theme::selection;
+        previewFill.setAlpha(24);
+        painter->setBrush(previewFill);
+        painter->drawRect(peekPreview_);
+        painter->restore();
+    }
 
     const QRectF bounds = boardScene_->selectionBounds();
     if (bounds.isEmpty())

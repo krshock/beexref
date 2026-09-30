@@ -224,6 +224,8 @@ private slots:
     void shiftMiddlePeekSaturates();
     void peekNormalizesPerViewportAxis();
     void releasingWithShiftCommitsThePeek();
+    void peekPreviewShowsTheCommitFootprint();
+    void peekPreviewMarksTheCancelTarget();
     void cancelModesRestoresThePeek();
     void wheelPanAxesMatchReference();
     void windowOpensBoardAndLoadsLevel();
@@ -4139,6 +4141,131 @@ void TestUiScene::releasingWithShiftCommitsThePeek()
                             .arg(committedCenter.x())
                             .arg(committedCenter.y())));
     QVERIFY(committedCenter.x() > baseCenter.x() + 100.0);
+}
+
+void TestUiScene::peekPreviewShowsTheCommitFootprint()
+{
+    // While peeking, a rectangle shows the area the committed view will
+    // cover: the base-zoom viewport, centred on the pointer.
+    auto document = std::make_shared<doc::Document>(doc::Document::create());
+    document->addItem(pixmapItem(2000, 1000, Qt::darkGreen));
+
+    ui::View view;
+    auto *scene = new ui::Scene(&view);
+    scene->setDocument(document);
+    view.setBoardScene(scene);
+    view.resize(200, 150);
+    view.fitScene();
+    view.zoomAt(500, view.viewport()->rect().center());
+    view.centerOn(1000, 500);
+
+    const QPoint start = view.viewport()->rect().center();
+    const QSize viewport = view.viewport()->size();
+    const double baseScale = view.transform().m11();
+    QVERIFY(view.peekPreviewRect().isNull());
+
+    sendMouse(view.viewport(), QEvent::MouseButtonPress, start, Qt::MiddleButton,
+              Qt::MiddleButton, Qt::ShiftModifier);
+    // A move too small to zoom out does not open the preview.
+    sendMouse(view.viewport(), QEvent::MouseMove, start + QPoint(2, 0), Qt::NoButton,
+              Qt::MiddleButton, Qt::ShiftModifier);
+    QVERIFY(view.peekPreviewRect().isNull());
+
+    const QPoint dragged = start + QPoint(120, 0);
+    sendMouse(view.viewport(), QEvent::MouseMove, dragged, Qt::NoButton, Qt::MiddleButton,
+              Qt::ShiftModifier);
+    const QRectF preview = view.peekPreviewRect();
+    QVERIFY(!preview.isNull());
+    QVERIFY2(qFuzzyCompare(preview.width(), viewport.width() / baseScale),
+             qPrintable(QStringLiteral("width=%1 expected=%2")
+                            .arg(preview.width())
+                            .arg(viewport.width() / baseScale)));
+    QVERIFY2(qFuzzyCompare(preview.height(), viewport.height() / baseScale),
+             qPrintable(QStringLiteral("height=%1 expected=%2")
+                            .arg(preview.height())
+                            .arg(viewport.height() / baseScale)));
+    const QPointF target = view.mapToScene(dragged);
+    const QPointF offset = preview.center() - target;
+    QVERIFY2(std::hypot(offset.x(), offset.y()) < 5.0,
+             qPrintable(QStringLiteral("preview=(%1, %2) target=(%3, %4)")
+                            .arg(preview.center().x())
+                            .arg(preview.center().y())
+                            .arg(target.x())
+                            .arg(target.y())));
+
+    // Cancelling clears it...
+    sendMouse(view.viewport(), QEvent::MouseButtonRelease, dragged, Qt::MiddleButton, Qt::NoButton);
+    QVERIFY(view.peekPreviewRect().isNull());
+
+    // ...and so does committing.
+    sendMouse(view.viewport(), QEvent::MouseButtonPress, start, Qt::MiddleButton,
+              Qt::MiddleButton, Qt::ShiftModifier);
+    sendMouse(view.viewport(), QEvent::MouseMove, dragged, Qt::NoButton, Qt::MiddleButton,
+              Qt::ShiftModifier);
+    QVERIFY(!view.peekPreviewRect().isNull());
+    sendMouse(view.viewport(), QEvent::MouseButtonRelease, dragged, Qt::MiddleButton,
+              Qt::NoButton, Qt::ShiftModifier);
+    QVERIFY(view.peekPreviewRect().isNull());
+}
+
+void TestUiScene::peekPreviewMarksTheCancelTarget()
+{
+    // Shift held previews where the commit lands (the pointer); Shift let
+    // go previews where the cancel returns to (the original centre).
+    auto document = std::make_shared<doc::Document>(doc::Document::create());
+    document->addItem(pixmapItem(2000, 1000, Qt::darkGreen));
+
+    ui::View view;
+    auto *scene = new ui::Scene(&view);
+    scene->setDocument(document);
+    view.setBoardScene(scene);
+    view.resize(200, 150);
+    view.fitScene();
+    view.zoomAt(500, view.viewport()->rect().center());
+    view.centerOn(1000, 500);
+
+    const QPoint start = view.viewport()->rect().center();
+    const QPointF baseCenter = view.mapToScene(view.viewport()->rect().center());
+
+    sendMouse(view.viewport(), QEvent::MouseButtonPress, start, Qt::MiddleButton,
+              Qt::MiddleButton, Qt::ShiftModifier);
+    const QPoint dragged = start + QPoint(120, 0);
+    sendMouse(view.viewport(), QEvent::MouseMove, dragged, Qt::NoButton, Qt::MiddleButton,
+              Qt::ShiftModifier);
+    const QPointF commitCenter = view.peekPreviewRect().center();
+    QVERIFY(std::hypot(commitCenter.x() - baseCenter.x(), commitCenter.y() - baseCenter.y())
+            > 50.0);
+
+    // Letting Shift go without moving the pointer must switch the
+    // feedback at once: the rectangle jumps back to the original centre.
+    QKeyEvent shiftRelease(QEvent::KeyRelease, Qt::Key_Shift, Qt::NoModifier);
+    QApplication::sendEvent(&view, &shiftRelease);
+    const QPointF cancelCenter = view.peekPreviewRect().center();
+    QVERIFY2(std::hypot(cancelCenter.x() - baseCenter.x(), cancelCenter.y() - baseCenter.y())
+                 < 5.0,
+             qPrintable(QStringLiteral("cancel=(%1, %2) base=(%3, %4)")
+                            .arg(cancelCenter.x())
+                            .arg(cancelCenter.y())
+                            .arg(baseCenter.x())
+                            .arg(baseCenter.y())));
+
+    // The cancel destination does not follow the pointer.
+    sendMouse(view.viewport(), QEvent::MouseMove, dragged + QPoint(40, 0), Qt::NoButton,
+              Qt::MiddleButton);
+    const QPointF stillCancel = view.peekPreviewRect().center();
+    QVERIFY(std::hypot(stillCancel.x() - baseCenter.x(), stillCancel.y() - baseCenter.y())
+            < 5.0);
+
+    // Pressing Shift again previews the commit destination.
+    QKeyEvent shiftPress(QEvent::KeyPress, Qt::Key_Shift, Qt::ShiftModifier);
+    QApplication::sendEvent(&view, &shiftPress);
+    const QPointF backToCommit = view.peekPreviewRect().center();
+    QVERIFY(std::hypot(backToCommit.x() - baseCenter.x(), backToCommit.y() - baseCenter.y())
+            > 50.0);
+
+    sendMouse(view.viewport(), QEvent::MouseButtonRelease, dragged + QPoint(40, 0),
+              Qt::MiddleButton, Qt::NoButton, Qt::ShiftModifier);
+    QVERIFY(view.peekPreviewRect().isNull());
 }
 
 void TestUiScene::cancelModesRestoresThePeek()

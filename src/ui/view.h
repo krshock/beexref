@@ -160,6 +160,14 @@ public:
     // release): the given transform comes back, centered on a scene
     // point -- the canvas spot the pointer was looking at.
     void commitPeekView(const QTransform &transform, const QPointF &sceneCenter);
+    // The peek preview: the scene rectangle the committed view will
+    // cover, drawn while a peek is active and cleared with an empty
+    // rect. Only the changed region is repainted, so a moving preview
+    // never forces a full viewport update on its own.
+    void setPeekPreview(const QRectF &sceneRect);
+    // The preview currently drawn, in scene coordinates (empty when
+    // none); tests read it to check the peek's promise.
+    QRectF peekPreviewRect() const { return peekPreview_; }
     // The on-screen scale of an item: the view transform times the
     // item's own scale (fixed length for the viewport
     // denominator). A null item gives the plain view scale.
@@ -188,6 +196,7 @@ protected:
     void mouseReleaseEvent(QMouseEvent *event) override;
     void mouseDoubleClickEvent(QMouseEvent *event) override;
     void keyPressEvent(QKeyEvent *event) override;
+    void keyReleaseEvent(QKeyEvent *event) override;
     bool eventFilter(QObject *watched, QEvent *event) override;
     void leaveEvent(QEvent *event) override;
     void resizeEvent(QResizeEvent *event) override;
@@ -270,6 +279,11 @@ private:
 
     // Last region the selection overlay was known to occupy.
     QRectF overlayRegion_;
+
+    // The peek preview, in scene coordinates, and the widget region it
+    // last occupied, so a change repaints only the affected strip.
+    QRectF peekPreview_;
+    QRect peekPreviewRegion_;
 
     // The view-only raised items (spotlight), in ascending stacking
     // order: exactly the order the foreground pass draws them in. Never

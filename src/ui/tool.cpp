@@ -58,4 +58,10 @@ bool ToolController::keyPress(QKeyEvent *event)
     return tool && tool->keyPress(event);
 }
 
+bool ToolController::keyRelease(QKeyEvent *event)
+{
+    Tool *tool = active();
+    return tool && tool->keyRelease(event);
+}
+
 } // namespace ui

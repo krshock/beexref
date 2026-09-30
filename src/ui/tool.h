@@ -50,6 +50,11 @@ public:
         Q_UNUSED(event);
         return false;
     }
+    virtual bool keyRelease(QKeyEvent *event)
+    {
+        Q_UNUSED(event);
+        return false;
+    }
 };
 
 // Owns the view's tools and dispatches to whichever is active. The tools
@@ -78,6 +83,7 @@ public:
     bool mouseMove(QMouseEvent *event);
     bool mouseRelease(QMouseEvent *event);
     bool keyPress(QKeyEvent *event);
+    bool keyRelease(QKeyEvent *event);
 
 private:
     View *view_ = nullptr;

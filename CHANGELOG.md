@@ -6,6 +6,16 @@ project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- While peeking, a dashed rectangle shows the view the release will
+  pick: with Shift held, the commit destination (the original zoom,
+  centered where the pointer is); with Shift let go, the original view
+  the cancel returns to. Either way it is clear how much of the
+  zoomed-out canvas that view will cover. A saturated peek also stops
+  reapplying an unchanged view, so moving the pointer there no longer
+  repaints the canvas.
+
 ## [0.9.0] - 2026-09-28
 
 ### Added
