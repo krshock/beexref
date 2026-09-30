@@ -8,48 +8,44 @@ project uses [Semantic Versioning](https://semver.org/).
 
 ### Added
 
-- While peeking, a dashed rectangle shows the view the release will
-  pick: with Shift held, the commit destination (the original zoom,
-  centered where the pointer is); with Shift let go, the original view
-  the cancel returns to. Either way it is clear how much of the
-  zoomed-out canvas that view will cover. A saturated peek also stops
-  reapplying an unchanged view, so moving the pointer there no longer
-  repaints the canvas.
-- Selecting a single image shows its name (the first 30 characters) in a
-  small on-screen display in the bottom-left corner, with the author in a
-  smaller line above: it fades in, holds three seconds, fades out, and a
-  new selection or a double-click on the image restarts the cycle. It is
-  transparent to the mouse, so clicks and the wheel reach the canvas
-  under it.
-- The author field autocompletes from the authors already used in the
-  board: the search folds case, accents and other diacritics (typing
-  `jose` suggests `José`), collapses duplicate spellings and skips the
-  entries with nothing printable left. Metadata edits are normalized
-  when saved: trimmed and whitespace runs collapsed, newlines included
-  in the single-line fields, while the notes keep their line breaks.
-- The metadata fields clamp what is typed or pasted at reasonable
-  lengths — name 255, author 128, URL 2048 and notes 4096 characters —
-  while a longer value a board already holds is left as it is.
-- Two more metadata fields, `Year` and `Collection`. Year is stored as a
-  JSON number from -999999 to 999999 (an empty field removes the key;
-  a value another tool wrote as text is shown as it is and only replaced
-  when edited), and Collection holds a series, franchise or film title
-  with the same fuzzy autocomplete as the author. The panel's fields now
-  come from one small spec table, so a new field is a row plus its
-  constant.
+- **Peek Scene preview**: while peeking, a dashed rectangle shows the
+  view the release will land on — the commit destination under the
+  pointer with `Shift` held, or the view you return to when `Shift` is
+  let go — so you can see how much of the zoomed-out canvas each choice
+  will cover.
+- **Selection name plate**: selecting an image shows its name (the first
+  30 characters) in the bottom-left corner, with the author above it. It
+  fades in, holds three seconds and fades out; a new selection or a
+  double-click on the image brings it back, and clicks and the wheel pass
+  through it to the canvas.
+- **Author suggestions**: the Author field completes from the authors
+  already used in the board — case and accents don't matter (`jose`
+  finds `José`), duplicate spellings collapse, and blank or invisible
+  names are left out.
+- **Year and Collection**: two new metadata fields. Year takes a number
+  from -999999 to 999999 (leave it empty for none); Collection names the
+  series, franchise or film an image belongs to, with the same
+  suggestions as the Author field.
+
+### Changed
+
+- **Metadata fields tidy themselves up when saved**: surrounding spaces
+  are trimmed and repeated spaces collapse, while the notes keep their
+  line breaks. The fields stop taking input past name 255, author 128,
+  collection 128, URL 2048 and notes 4096 characters, and a longer value
+  a board already holds is left untouched.
 
 ## [0.9.0] - 2026-09-28
 
 ### Added
 
-- The main window remembers its size, position and maximized state
-  across runs (the `Window/geometry` value in the settings file). With
-  nothing saved yet it starts at 600x450.
+- **Window memory**: the main window comes back the size, position and
+  state it was left in; with nothing saved yet it opens at 600x450.
 
 ### Fixed
 
-- The About box opens at a readable size; the wrapped text used to
-  collapse it to its narrowest line.
+- The About box opens at a readable size; its wrapped text used to
+  collapse it into a narrow column.
 
 ## [0.8.0] - 2026-09-28
 
@@ -58,53 +54,46 @@ project uses [Semantic Versioning](https://semver.org/).
 - **Panning has momentum**: a fast pan release lets the canvas glide to a
   stop instead of stopping dead; a slow release (or a pause before
   releasing) stops where the cursor left it, and any new press or wheel
-  step ends the glide. A deliberate, subtle deviation from the reference.
+  step ends the glide. A deliberate, subtle deviation from BeeRef, which
+  stops dead.
 - **Grayscale methods**: the grayscale toggle can render with Classic
   (the look BeeXRef always had), BT.601 luma, BT.709 luma, Average,
   Lightness, Max or Min — picked from `Images ▸ Grayscale Method` (also
   in the right-click menu). The choice applies instantly and is
   remembered.
 - **Peek Scene** (`Shift`+middle-drag): a temporary look at the
-  neighbourhood without losing the current view. The pointer's travel
-  from where the drag started zooms the canvas out — at a constant
-  proportional rate, down to 20% of the starting zoom by the time the
-  pointer reaches the window edge — and leans it in the pointer's
-  direction, so the canvas "looks at the horizon"; travel is normalized
-  per viewport axis, so the window's size and aspect ratio do not change
-  the feel. Releasing with Shift still held commits the look — the
-  original zoom, centered on the canvas point under the pointer; letting
-  Shift go first cancels and restores the exact view. Any mode cancel or
-  wheel step cancels. Rebindable in Controls like the other mouse
-  actions.
-- Windows: `beexref.exe` carries the BeeXRef icon and its file version
-  information, so Explorer, the taskbar and the Properties dialog show
-  them.
+  neighbourhood without losing the current view. Travel from where the
+  drag started zooms the canvas out (down to 20% by the time the pointer
+  reaches the window edge) and leans it toward the pointer, so the canvas
+  looks at the horizon; the feel is the same in any window size.
+  Releasing with `Shift` still held keeps the look — your usual zoom,
+  centered on the point under the pointer; letting `Shift` go first
+  cancels it. Rebindable in Controls like the other mouse actions.
+- **Windows icon and file details**: `beexref.exe` carries the BeeXRef
+  icon and its version, so Explorer, the taskbar and the file's
+  Properties show them.
 
 ### Changed
 
-- **Decoded levels are written to the disk cache only when they are
-  evicted from RAM** — previously every decoded level was written
-  immediately, even if it never left memory. A session that keeps its
-  levels in RAM now writes nothing to the cache; after an eviction the
-  level is still served from disk instead of being decoded again. The
-  decoded-level RAM cache also defaults to 512 MB instead of 150 MB
-  (still tunable in Settings ▸ Performance), and a single cache entry is
-  never larger than 16 MB — one huge level or payload is not worth the
-  disk it would hold for the session.
-- The session cache setting is labelled for what it does — Session disk
-  cache, covering decoded levels and detached payloads — instead of
-  mentioning only the undo history.
-- Deleting or cutting a large image no longer stalls the window: its
-  payload is encoded and moved to the session cache on a worker, and the
-  item picks up the cache-backed source when the write lands. An undo
-  that arrives before that still restores the image.
+- **The session disk cache writes less**: decoded levels go to disk only
+  once they leave memory, so a session that keeps its levels in RAM
+  writes nothing, and a level that left memory still loads from disk
+  instead of being decoded again. The in-RAM level cache now holds up to
+  512 MB (Settings ▸ Performance), and single entries above 16 MB are not
+  written.
+- **Session disk cache setting**: the option is labelled for what it
+  covers — decoded levels and images kept for undo — instead of only the
+  undo history.
+- **Deleting or cutting a large image no longer freezes the window**: its
+  bytes move to the session cache in the background, and an undo that
+  arrives before the move finishes still restores the image.
 
 ### Fixed
 
-- Windows: a save that rewrites the whole file can replace a board the
-  app has open (with `Save/incremental` off it used to fail and keep a
-  `.tmp`), stale temporary and session files are swept again, and a
-  failed save leaves no temporary file behind.
+- **Windows saves**: a full save (with `Save/incremental` off) can now
+  replace a board the app has open instead of failing and leaving a
+  `.tmp` behind; stale temporary and session files are cleaned up again;
+  and a failed save leaves no temporary file behind.
 
 ## [0.7.0] - 2026-09-27
 
@@ -129,19 +118,16 @@ project uses [Semantic Versioning](https://semver.org/).
 
 - Board files stay compatible with the other ports; a recovered copy
   marks its imageless items so they are not mistaken for damage.
-- Internal: the extensibility pass (tool host, item-type traits,
-  incremental scene sync, menu table, insertion handlers, export and
-  LOD-method registries).
 
 ### Fixed
 
-- A save can no longer write less than it promises: an image row is never
-  written without its image, the written file is verified before it
-  replaces the target (and an in-place update before it commits), and a
-  failed replace keeps the complete new file and reports its path.
-- Saving refuses when the file changed on disk since it was opened
-  (another instance, a sync client) instead of overwriting it; a failed
-  post-save reopen is logged instead of swallowed.
+- **Saves are verified**: an image row is never written without its
+  image, the written file is checked before it replaces the target (and
+  an update before it commits), and a failed replace keeps the complete
+  new file and reports its path.
+- Saving refuses to overwrite a file that changed on disk since it was
+  opened (another instance, a sync client) and reports a failed reopen
+  instead of ignoring it.
 
 ## [0.6.0] - 2026-09-26
 
@@ -152,15 +138,15 @@ project uses [Semantic Versioning](https://semver.org/).
 - `Insert ▸ Text` and in-place text editing (double-click a note).
 - A user-level README, the GPLv3 license text, and the free-software
   notice with the logo in the About box.
-- A Windows build guide and a packaging script that bundles every
-  non-system DLL and the Qt plugins.
+- A Windows build guide and a packaging script that bundles everything
+  the app needs to run without a development environment.
 
 ### Fixed
 
 - The multi-second startup stall on Windows.
-- A Windows session-cache lock when the schema is recreated.
-- The Windows portability issues found by the first native build
-  (atomic save, RSS accounting, settings paths).
+- A Windows startup failure that could lock the session cache.
+- The Windows issues found by the first native build (saving, memory
+  accounting, settings paths).
 
 ## [0.5.0] - 2026-09-25
 
