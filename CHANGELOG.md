@@ -26,6 +26,11 @@ project uses [Semantic Versioning](https://semver.org/).
   from -999999 to 999999 (leave it empty for none); Collection names the
   series, franchise or film an image belongs to, with the same
   suggestions as the Author field.
+- **Open the source link**: with a web address in the URL field, the URL
+  caption underlines itself and gains a `↗` (keeping your theme's label
+  colour), and double-clicking it opens the address in your browser. Only
+  `http` and `https` links are handed over — a file path or a script
+  never launches anything.
 
 ### Changed
 

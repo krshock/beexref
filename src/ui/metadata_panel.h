@@ -3,6 +3,7 @@
 #include "doc/undo.h"
 #include "fuzzy_authors.h"
 
+#include <QUrl>
 #include <QVector>
 #include <QWidget>
 
@@ -76,6 +77,8 @@ private:
         bool multiline = false;   // a QPlainTextEdit instead of a QLineEdit
         int limit = 0;            // editing cap in characters
         bool suggestions = false; // fuzzy completion from the board's values
+        QLabel *label = nullptr;
+        QString labelText;      // the caption's text, without the link glyph
         QWidget *editor = nullptr;
         QCompleter *completer = nullptr;
         QStringListModel *model = nullptr;
@@ -100,6 +103,14 @@ private:
     QVector<QPair<QString, QString>> draftEdits() const;
     void updateDirty();
     void setPanelVisible(bool visible);
+    // The URL field: the caption turns into a link and a double-click on
+    // it opens the field's web address.
+    void updateUrlAffordance(Field &field);
+    void openFieldUrl(const Field &field);
+
+protected:
+    // The URL caption's double-click (a QLabel has no signal for it).
+    bool eventFilter(QObject *watched, QEvent *event) override;
 
     Scene *scene_ = nullptr;
     doc::UndoStack *stack_ = nullptr;
@@ -122,5 +133,11 @@ private:
 // The Go port's read-only Info rows (Source, Size, Format, Position,
 // Z-order, Scale, Rotation, Flipped, Opacity, Grayscale, Crop, Save ID).
 QVector<QPair<QString, QString>> itemInfoRows(const SceneItem *view);
+
+// The URL a metadata field can open: only the schemes this app is willing
+// to hand to the desktop are accepted (http and https for now); anything
+// else -- empty text, a missing or unknown scheme, file://, javascript: --
+// yields an invalid QUrl. One place to widen later.
+QUrl openableWebUrl(const QString &text);
 
 } // namespace ui

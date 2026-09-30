@@ -1,5 +1,6 @@
 #include "metadata_panel.h"
 
+#include "hud.h"
 #include "scene.h"
 #include "scene_item.h"
 #include "selection_ops.h"
@@ -7,6 +8,9 @@
 
 #include <QAbstractItemView>
 #include <QCheckBox>
+#include <QDesktopServices>
+#include <QEvent>
+#include <QMouseEvent>
 #include <QCompleter>
 #include <QFormLayout>
 #include <QHBoxLayout>
@@ -86,6 +90,14 @@ const QVector<FieldSpec> &fieldSpecs()
         {kNotes, FieldKind::Multiline, kNotesLimit, false, QStringLiteral("Notes")},
     };
     return specs;
+}
+
+// The schemes the app is willing to hand to the desktop. http and https
+// only: a file path or a script in a metadata field must never launch.
+const QStringList &openableSchemes()
+{
+    static const QStringList schemes = {QStringLiteral("http"), QStringLiteral("https")};
+    return schemes;
 }
 
 // The stored text of one metadata field, normalized on commit:
@@ -355,6 +367,8 @@ void MetadataPanel::populate(SceneItem *item)
     for (Field &field : fields_)
         field.editor->blockSignals(false);
     populating_ = false;
+    if (Field *url = fieldFor(kOriginUrl))
+        updateUrlAffordance(*url);
 
     saveButton_->setEnabled(false);
     titleLabel_->setText(QStringLiteral("Image"));
@@ -495,7 +509,9 @@ void MetadataPanel::buildMetaFields(QVBoxLayout *layout)
         field.limit = spec.limit;
         field.suggestions = spec.suggestions;
 
-        layout->addWidget(new QLabel(spec.label, page));
+        field.labelText = spec.label;
+        field.label = new QLabel(field.labelText, page);
+        layout->addWidget(field.label);
         const QString editorName = QStringLiteral("panel") + spec.label.at(0).toUpper()
             + spec.label.mid(1).toLower();
         if (field.multiline) {
@@ -517,8 +533,13 @@ void MetadataPanel::buildMetaFields(QVBoxLayout *layout)
     }
     // Wire once every field exists, so the lambdas keep a stable pointer
     // into the table.
-    for (Field &field : fields_)
+    for (Field &field : fields_) {
         wireField(field);
+        if (field.key == kOriginUrl) {
+            field.label->installEventFilter(this);
+            updateUrlAffordance(field);
+        }
+    }
 }
 
 void MetadataPanel::wireField(Field &field)
@@ -534,6 +555,10 @@ void MetadataPanel::wireField(Field &field)
     }
     auto *editor = static_cast<QLineEdit *>(field.editor);
     connect(editor, &QLineEdit::textChanged, this, [this]() { updateDirty(); });
+    if (field.key == kOriginUrl) {
+        connect(editor, &QLineEdit::textChanged, this,
+                [this, entry]() { updateUrlAffordance(*entry); });
+    }
     // The clamp only covers user edits (textEdited): a longer value a
     // board already holds is shown as it is and only clamped if edited.
     connect(editor, &QLineEdit::textEdited, this, [this, entry](const QString &text) {
@@ -586,6 +611,57 @@ void MetadataPanel::clampField(Field &field)
     QTextCursor clamped = editor->textCursor();
     clamped.setPosition(qMin(cursor, field.limit));
     editor->setTextCursor(clamped);
+}
+
+QUrl openableWebUrl(const QString &text)
+{
+    const QString trimmed = text.trimmed();
+    if (trimmed.isEmpty())
+        return {};
+    const QUrl url(trimmed, QUrl::StrictMode);
+    if (!url.isValid() || !openableSchemes().contains(url.scheme().toLower()))
+        return {};
+    return url;
+}
+
+void MetadataPanel::updateUrlAffordance(Field &field)
+{
+    if (!field.label || field.key != kOriginUrl)
+        return;
+    const bool openable = openableWebUrl(editorText(field)).isValid();
+    // The affordance is the underline and a small glyph: the caption keeps
+    // the normal label colour, so it never clashes with a dark theme.
+    QFont font = field.label->font();
+    font.setUnderline(openable);
+    field.label->setFont(font);
+    field.label->setText(openable ? field.labelText + QStringLiteral(" ↗") : field.labelText);
+    field.label->setCursor(openable ? Qt::PointingHandCursor : Qt::ArrowCursor);
+    field.label->setToolTip(openable ? QStringLiteral("Double-click to open in the browser")
+                                     : QString());
+}
+
+void MetadataPanel::openFieldUrl(const Field &field)
+{
+    const QUrl url = openableWebUrl(editorText(field));
+    if (!url.isValid())
+        return;
+    if (!QDesktopServices::openUrl(url)) {
+        if (QWidget *host = window())
+            hud::toast(host, QStringLiteral("Couldn't open the link"));
+    }
+}
+
+bool MetadataPanel::eventFilter(QObject *watched, QEvent *event)
+{
+    if (event->type() == QEvent::MouseButtonDblClick) {
+        for (const Field &field : fields_) {
+            if (field.label == watched && field.key == kOriginUrl) {
+                openFieldUrl(field);
+                return true;
+            }
+        }
+    }
+    return QWidget::eventFilter(watched, event);
 }
 
 void MetadataPanel::commitDraft()

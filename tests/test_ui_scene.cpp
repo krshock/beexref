@@ -25,6 +25,7 @@
 #include <QCheckBox>
 #include <QClipboard>
 #include <QCompleter>
+#include <QPalette>
 #include <QElapsedTimer>
 #include <QTabWidget>
 #include <QComboBox>
@@ -305,6 +306,7 @@ private slots:
     void metadataFieldsAreNormalized();
     void metadataFieldsClampTheirLength();
     void metadataYearAndCollection();
+    void metadataUrlCaptionOpensWebLinks();
     void authorCompletionFindsFuzzyMatches();
     void hudPreviewShowsTheStyledPanel();
     void welcomeOverlayTracksTheBoardState();
@@ -2735,6 +2737,80 @@ void TestUiScene::metadataYearAndCollection()
         rows.append(collection->completer()->model()->index(row, 0).data().toString());
     QVERIFY2(rows.contains(QStringLiteral("Star Wars (Original Trilogy)")),
              qPrintable(rows.join(QLatin1Char('|'))));
+
+    settings::setSettingsDir(QString());
+}
+
+void TestUiScene::metadataUrlCaptionOpensWebLinks()
+{
+    // Only the web schemes are handed to the desktop; anything else --
+    // no scheme, file paths, scripts, other protocols -- is refused.
+    QVERIFY(ui::openableWebUrl(QStringLiteral("https://example.test/")).isValid());
+    QVERIFY(ui::openableWebUrl(QStringLiteral("http://example.test/x?y=1")).isValid());
+    QVERIFY(ui::openableWebUrl(QStringLiteral("HTTPS://EXAMPLE.TEST/")).isValid());
+    QVERIFY(!ui::openableWebUrl(QString()).isValid());
+    QVERIFY(!ui::openableWebUrl(QStringLiteral("   ")).isValid());
+    QVERIFY(!ui::openableWebUrl(QStringLiteral("example.test/x")).isValid());
+    QVERIFY(!ui::openableWebUrl(QStringLiteral("file:///etc/passwd")).isValid());
+    QVERIFY(!ui::openableWebUrl(QStringLiteral("javascript:alert(1)")).isValid());
+    QVERIFY(!ui::openableWebUrl(QStringLiteral("ftp://example.test/")).isValid());
+
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    settings::setSettingsDir(dir.path());
+
+    ui::MainWindow window;
+    QImage image(6, 4, QImage::Format_ARGB32);
+    image.fill(Qt::red);
+    QMimeData mime;
+    mime.setImageData(image);
+    window.input()->insertMimeData(mime, QPointF(10, 10));
+    window.scene()->clearSelection();
+    window.scene()->pixmapItemViews().first()->setSelected(true);
+
+    ui::MetadataPanel *panel = window.metadataPanel();
+    QVERIFY(panel);
+    panel->toggle();
+    QVERIFY(!panel->isHidden());
+
+    auto *url = panel->findChild<QLineEdit *>(QStringLiteral("panelUrl"));
+    QLabel *caption = nullptr;
+    QLabel *authorCaption = nullptr;
+    for (QLabel *label : panel->findChildren<QLabel *>()) {
+        if (label->text().startsWith(QStringLiteral("URL")))
+            caption = label;
+        if (label->text() == QStringLiteral("Author"))
+            authorCaption = label;
+    }
+    QVERIFY(url && caption && authorCaption);
+    // An empty field leaves the caption plain, in the normal label colour
+    // (no link colour that could clash with a dark theme).
+    QCOMPARE(caption->text(), QStringLiteral("URL"));
+    QVERIFY(!caption->font().underline());
+    QVERIFY(caption->toolTip().isEmpty());
+    QCOMPARE(caption->palette().color(QPalette::WindowText),
+             authorCaption->palette().color(QPalette::WindowText));
+
+    // A web link underlines the caption and adds the link glyph...
+    url->setText(QStringLiteral("https://example.test/"));
+    QVERIFY(caption->font().underline());
+    QCOMPARE(caption->text(), QStringLiteral("URL ↗"));
+    QCOMPARE(caption->cursor().shape(), Qt::PointingHandCursor);
+    QVERIFY(!caption->toolTip().isEmpty());
+    QCOMPARE(caption->palette().color(QPalette::WindowText),
+             authorCaption->palette().color(QPalette::WindowText));
+
+    // ...and anything else leaves it plain again. A double click on a
+    // non-web value does nothing (a valid one would launch a browser,
+    // which tests never do).
+    url->setText(QStringLiteral("file:///etc/passwd"));
+    QVERIFY(!caption->font().underline());
+    QCOMPARE(caption->text(), QStringLiteral("URL"));
+    QVERIFY(caption->toolTip().isEmpty());
+    QMouseEvent doubleClick(QEvent::MouseButtonDblClick, QPointF(4, 4),
+                            QPointF(caption->mapToGlobal(QPoint(4, 4))), Qt::LeftButton,
+                            Qt::LeftButton, Qt::NoModifier);
+    QApplication::sendEvent(caption, &doubleClick);
 
     settings::setSettingsDir(QString());
 }
