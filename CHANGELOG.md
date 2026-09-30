@@ -30,6 +30,13 @@ project uses [Semantic Versioning](https://semver.org/).
 - The metadata fields clamp what is typed or pasted at reasonable
   lengths — name 255, author 128, URL 2048 and notes 4096 characters —
   while a longer value a board already holds is left as it is.
+- Two more metadata fields, `Year` and `Collection`. Year is stored as a
+  JSON number from -999999 to 999999 (an empty field removes the key;
+  a value another tool wrote as text is shown as it is and only replaced
+  when edited), and Collection holds a series, franchise or film title
+  with the same fuzzy autocomplete as the author. The panel's fields now
+  come from one small spec table, so a new field is a row plus its
+  constant.
 
 ## [0.9.0] - 2026-09-28
 

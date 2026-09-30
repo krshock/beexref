@@ -304,6 +304,7 @@ private slots:
     void metadataPanelEditsAndCommits();
     void metadataFieldsAreNormalized();
     void metadataFieldsClampTheirLength();
+    void metadataYearAndCollection();
     void authorCompletionFindsFuzzyMatches();
     void hudPreviewShowsTheStyledPanel();
     void welcomeOverlayTracksTheBoardState();
@@ -2636,6 +2637,104 @@ void TestUiScene::metadataFieldsClampTheirLength()
     save->click();
     QCOMPARE(item->item()->meta.value(QStringLiteral("author")).toString(), longAuthor);
     QCOMPARE(item->item()->filename, QStringLiteral("short name"));
+
+    settings::setSettingsDir(QString());
+}
+
+void TestUiScene::metadataYearAndCollection()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    settings::setSettingsDir(dir.path());
+
+    ui::MainWindow window;
+    QImage image(6, 4, QImage::Format_ARGB32);
+    image.fill(Qt::red);
+    for (const QPointF &at : {QPointF(10, 10), QPointF(40, 40)}) {
+        QMimeData mime;
+        mime.setImageData(image);
+        window.input()->insertMimeData(mime, at);
+    }
+    const QList<SceneItem *> views = window.scene()->pixmapItemViews();
+    QCOMPARE(views.size(), 2);
+    views.last()->item()->meta.insert(QStringLiteral("collection"),
+                                      QStringLiteral("Star Wars (Original Trilogy)"));
+    window.scene()->clearSelection();
+    views.first()->setSelected(true);
+
+    ui::MetadataPanel *panel = window.metadataPanel();
+    QVERIFY(panel);
+    panel->toggle();
+    QVERIFY(!panel->isHidden());
+    window.show();
+
+    auto *author = panel->findChild<QLineEdit *>(QStringLiteral("panelAuthor"));
+    auto *year = panel->findChild<QLineEdit *>(QStringLiteral("panelYear"));
+    auto *collection = panel->findChild<QLineEdit *>(QStringLiteral("panelCollection"));
+    auto *url = panel->findChild<QLineEdit *>(QStringLiteral("panelUrl"));
+    auto *save = panel->findChild<QPushButton *>(QStringLiteral("panelSave"));
+    QVERIFY(author && year && collection && url && save);
+
+    // The Meta tab order: Author, Year, Collection, URL.
+    const auto top = [&panel](QWidget *widget) {
+        return widget->mapTo(panel, QPoint(0, 0)).y();
+    };
+    QVERIFY(top(author) < top(year));
+    QVERIFY(top(year) < top(collection));
+    QVERIFY(top(collection) < top(url));
+
+    // The year is stored as a JSON number, negatives included.
+    SceneItem *item = views.first();
+    QTest::keyClicks(year, QStringLiteral("1880"));
+    // keyClicks cannot type non-ASCII, so the accented name is set as a
+    // draft edit (same textChanged path).
+    collection->setText(QStringLiteral("Les Nymphéas"));
+    QVERIFY(save->isEnabled());
+    save->click();
+    QVERIFY(item->item()->meta.value(QStringLiteral("year")).isDouble());
+    QCOMPARE(item->item()->meta.value(QStringLiteral("year")).toInt(), 1880);
+    QCOMPARE(item->item()->meta.value(QStringLiteral("collection")).toString(),
+             QStringLiteral("Les Nymphéas"));
+
+    year->clear();
+    QTest::keyClicks(year, QStringLiteral("-5000"));
+    save->click();
+    QCOMPARE(item->item()->meta.value(QStringLiteral("year")).toInt(), -5000);
+
+    // The validator refuses to go past the range while typing: the digit
+    // that would make 1,200,000 is rejected.
+    year->clear();
+    QTest::keyClicks(year, QStringLiteral("1200000"));
+    QCOMPARE(year->text(), QStringLiteral("120000"));
+
+    // An empty year removes the key.
+    year->clear();
+    save->click();
+    QVERIFY(!item->item()->meta.contains(QStringLiteral("year")));
+
+    // A string year written by another tool shows as it is, does not dirty
+    // the panel and survives saving another field.
+    item->item()->meta.insert(QStringLiteral("year"), QStringLiteral("c. 1880"));
+    panel->refresh();
+    QCOMPARE(year->text(), QStringLiteral("c. 1880"));
+    QVERIFY(!panel->isDirty());
+    collection->setText(QStringLiteral("Star Wars"));
+    QVERIFY(save->isEnabled());
+    save->click();
+    QCOMPARE(item->item()->meta.value(QStringLiteral("year")).toString(),
+             QStringLiteral("c. 1880"));
+    QCOMPARE(item->item()->meta.value(QStringLiteral("collection")).toString(),
+             QStringLiteral("Star Wars"));
+
+    // The collection field suggests the collections already in the board
+    // (the second item carries one), accents and all.
+    collection->clear();
+    QTest::keyClicks(collection, QStringLiteral("star"));
+    QStringList rows;
+    for (int row = 0; row < collection->completer()->model()->rowCount(); ++row)
+        rows.append(collection->completer()->model()->index(row, 0).data().toString());
+    QVERIFY2(rows.contains(QStringLiteral("Star Wars (Original Trilogy)")),
+             qPrintable(rows.join(QLatin1Char('|'))));
 
     settings::setSettingsDir(QString());
 }

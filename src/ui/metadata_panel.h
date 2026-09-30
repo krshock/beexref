@@ -3,6 +3,7 @@
 #include "doc/undo.h"
 #include "fuzzy_authors.h"
 
+#include <QVector>
 #include <QWidget>
 
 class QCheckBox;
@@ -14,6 +15,7 @@ class QPlainTextEdit;
 class QPushButton;
 class QStringListModel;
 class QTabWidget;
+class QVBoxLayout;
 
 namespace ui {
 
@@ -22,7 +24,8 @@ class SceneItem;
 
 // The Go port's right-hand metadata panel: a docked side panel with an
 // Info tab (read-only item rows) and a Meta tab (a draft of name,
-// author, URL and notes), plus a Keep/Close/Save footer.
+// author, year, collection, URL and notes), plus a Keep/Close/Save
+// footer.
 //
 // Without Keep it is a one-shot for the image it was opened on: any
 // other selection commits the draft and closes it. With Keep it follows
@@ -63,16 +66,40 @@ signals:
     void visibilityChanged();
 
 private:
+    // One editable metadata field. The specs in the .cpp drive creation,
+    // populate, comparison, commit and, where asked, the fuzzy
+    // suggestions, so a new field is one row plus its constant.
+    struct Field
+    {
+        QString key;
+        bool integer = false;     // a JSON number; empty removes the key
+        bool multiline = false;   // a QPlainTextEdit instead of a QLineEdit
+        int limit = 0;            // editing cap in characters
+        bool suggestions = false; // fuzzy completion from the board's values
+        QWidget *editor = nullptr;
+        QCompleter *completer = nullptr;
+        QStringListModel *model = nullptr;
+        QVector<fuzzy::Candidate> candidates;
+        bool candidatesDirty = true;
+    };
+
+    void buildMetaFields(QVBoxLayout *layout);
+    void wireField(Field &field);
+    void setupSuggestions(Field &field);
+    void showSuggestions(Field &field, const QString &text);
+    void markSuggestionsDirty();
+    void clampField(Field &field);
+    QString editorText(const Field &field) const;
+    void setEditorText(const Field &field, const QString &text);
+    QString storedValue(const Field &field) const;
+    Field *fieldFor(const QString &key);
+
     void commitDraft();
     void populate(SceneItem *item);
     void rebuildInfoRows(SceneItem *item);
     QVector<QPair<QString, QString>> draftEdits() const;
-    QString currentValue(const QString &field) const;
     void updateDirty();
     void setPanelVisible(bool visible);
-    // The author field's suggestions: the unique authors already used in
-    // the board, filtered by a fuzzy (diacritic-insensitive) search.
-    void showAuthorCompletions(const QString &text);
 
     Scene *scene_ = nullptr;
     doc::UndoStack *stack_ = nullptr;
@@ -86,16 +113,7 @@ private:
     QTabWidget *tabs_ = nullptr;
     QWidget *infoPage_ = nullptr;
     QFormLayout *infoForm_ = nullptr;
-    QLineEdit *nameEdit_ = nullptr;
-    QLineEdit *authorEdit_ = nullptr;
-    QLineEdit *urlEdit_ = nullptr;
-    QPlainTextEdit *notesEdit_ = nullptr;
-    // The author suggestions are cached per board (rebuilt when the
-    // document changes, never per selection or per keystroke).
-    QCompleter *authorCompleter_ = nullptr;
-    QStringListModel *authorModel_ = nullptr;
-    QVector<fuzzy::Candidate> authorCandidates_;
-    bool authorCandidatesDirty_ = true;
+    QVector<Field> fields_;
     QCheckBox *keepBox_ = nullptr;
     QPushButton *closeButton_ = nullptr;
     QPushButton *saveButton_ = nullptr;

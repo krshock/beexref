@@ -10,6 +10,8 @@
 #include <QCompleter>
 #include <QFormLayout>
 #include <QHBoxLayout>
+#include <QIntValidator>
+#include <QJsonValue>
 #include <QLabel>
 #include <QLineEdit>
 #include <QPlainTextEdit>
@@ -27,24 +29,64 @@ namespace {
 
 const QString kName = QStringLiteral("name");
 const QString kAuthor = QStringLiteral("author");
+const QString kYear = QStringLiteral("year");
+const QString kCollection = QStringLiteral("collection");
 const QString kOriginUrl = QStringLiteral("origin_url");
 const QString kNotes = QStringLiteral("notes");
 
-// How many author suggestions the popup shows.
-constexpr int kAuthorCompletionLimit = 15;
+// How many suggestions a completion popup shows.
+constexpr int kCompletionLimit = 15;
 
 // The edit limits of the metadata fields. They clamp what is typed or
 // pasted, not what a board already holds: populate() writes the stored
-// values with the signals blocked and QLineEdit::maxLength does not
-// truncate setText, so opening and saving a board never rewrites a longer
-// value it did not edit. Name matches the usual filesystem limit, author
-// keeps the completion folding cheap and the OSD readable, URL matches
-// the browsers' practical limit, and notes stay a couple of pages (they
-// live in the items' JSON, so 3000 of them are still small).
+// values with the signals blocked and the line edits are not limited by
+// property (setMaxLength truncates setText too), so opening and saving a
+// board never rewrites a longer value it did not edit. Name matches the
+// usual filesystem limit, author and collection keep the completion
+// folding cheap and the OSD readable, URL matches the browsers'
+// practical limit, the year holds a sign and six digits, and notes stay
+// a couple of pages (they live in the items' JSON, so 3000 of them are
+// still small).
 constexpr int kNameLimit = 255;
 constexpr int kAuthorLimit = 128;
+constexpr int kCollectionLimit = 128;
 constexpr int kUrlLimit = 2048;
 constexpr int kNotesLimit = 4096;
+constexpr int kYearLimit = 7;
+constexpr int kYearMax = 999999;
+
+// How one field is stored and edited.
+enum class FieldKind {
+    Text,      // a single-line string
+    Multiline, // a string with line breaks
+    Integer,   // a JSON number; an empty editor removes the key
+};
+
+// The metadata fields, in the order the Meta tab shows them. This table
+// is the single place a field is declared: buildMetaFields, populate,
+// draftEdits, commitDraft and the suggestion setup all iterate it. The
+// label names both the field and its editor widget (panel + label).
+struct FieldSpec
+{
+    QString key;
+    FieldKind kind;
+    int limit;
+    bool suggestions;
+    QString label;
+};
+
+const QVector<FieldSpec> &fieldSpecs()
+{
+    static const QVector<FieldSpec> specs = {
+        {kName, FieldKind::Text, kNameLimit, false, QStringLiteral("Name")},
+        {kAuthor, FieldKind::Text, kAuthorLimit, true, QStringLiteral("Author")},
+        {kYear, FieldKind::Integer, kYearLimit, false, QStringLiteral("Year")},
+        {kCollection, FieldKind::Text, kCollectionLimit, true, QStringLiteral("Collection")},
+        {kOriginUrl, FieldKind::Text, kUrlLimit, false, QStringLiteral("URL")},
+        {kNotes, FieldKind::Multiline, kNotesLimit, false, QStringLiteral("Notes")},
+    };
+    return specs;
+}
 
 // The stored text of one metadata field, normalized on commit:
 // single-line fields collapse every whitespace run -- newlines included
@@ -149,26 +191,7 @@ MetadataPanel::MetadataPanel(Scene *scene, doc::UndoStack *stack, QWidget *paren
     metaScroll->setWidgetResizable(true);
     auto *metaPage = new QWidget(metaScroll);
     auto *metaLayout = new QVBoxLayout(metaPage);
-    nameEdit_ = new QLineEdit(metaPage);
-    nameEdit_->setObjectName(QStringLiteral("panelName"));
-    nameEdit_->setPlaceholderText(QStringLiteral("Name"));
-    authorEdit_ = new QLineEdit(metaPage);
-    authorEdit_->setObjectName(QStringLiteral("panelAuthor"));
-    authorEdit_->setPlaceholderText(QStringLiteral("Author"));
-    urlEdit_ = new QLineEdit(metaPage);
-    urlEdit_->setObjectName(QStringLiteral("panelUrl"));
-    urlEdit_->setPlaceholderText(QStringLiteral("URL"));
-    notesEdit_ = new QPlainTextEdit(metaPage);
-    notesEdit_->setObjectName(QStringLiteral("panelNotes"));
-    notesEdit_->setPlaceholderText(QStringLiteral("Notes"));
-    metaLayout->addWidget(new QLabel(QStringLiteral("Name"), metaPage));
-    metaLayout->addWidget(nameEdit_);
-    metaLayout->addWidget(new QLabel(QStringLiteral("Author"), metaPage));
-    metaLayout->addWidget(authorEdit_);
-    metaLayout->addWidget(new QLabel(QStringLiteral("URL"), metaPage));
-    metaLayout->addWidget(urlEdit_);
-    metaLayout->addWidget(new QLabel(QStringLiteral("Notes"), metaPage));
-    metaLayout->addWidget(notesEdit_, 1);
+    buildMetaFields(metaLayout);
     metaScroll->setWidget(metaPage);
     tabs_->addTab(metaScroll, QStringLiteral("Meta"));
     layout->addWidget(tabs_, 1);
@@ -190,65 +213,6 @@ MetadataPanel::MetadataPanel(Scene *scene, doc::UndoStack *stack, QWidget *paren
     footer->addWidget(saveButton_);
     layout->addLayout(footer);
 
-    for (QLineEdit *editor : {nameEdit_, authorEdit_, urlEdit_})
-        connect(editor, &QLineEdit::textChanged, this, [this]() { updateDirty(); });
-    connect(notesEdit_, &QPlainTextEdit::textChanged, this, [this]() {
-        // The notes have no maxLength: clamp an over-long edit here. The
-        // stored text is written with the signals blocked, so a longer
-        // value from a board is left alone.
-        const QString text = notesEdit_->toPlainText();
-        if (text.size() > kNotesLimit) {
-            const int cursor = notesEdit_->textCursor().position();
-            const QSignalBlocker blocker(notesEdit_);
-            notesEdit_->setPlainText(text.left(kNotesLimit));
-            QTextCursor clamped = notesEdit_->textCursor();
-            clamped.setPosition(qMin(cursor, kNotesLimit));
-            notesEdit_->setTextCursor(clamped);
-        }
-        updateDirty();
-    });
-
-    // The fields clamp what the user types or pastes (textEdited fires
-    // only for user edits), never what a board already holds:
-    // QLineEdit::setMaxLength would also truncate populate()'s
-    // programmatic setText and rewrite a longer stored value just by
-    // opening the panel.
-    const auto clampEdit = [this](QLineEdit *editor, int limit) {
-        connect(editor, &QLineEdit::textEdited, this,
-                [this, editor, limit](const QString &text) {
-                    if (text.size() <= limit)
-                        return;
-                    const int cursor = editor->cursorPosition();
-                    {
-                        const QSignalBlocker blocker(editor);
-                        editor->setText(text.left(limit));
-                        editor->setCursorPosition(qMin(cursor, limit));
-                    }
-                    updateDirty();
-                });
-    };
-    clampEdit(nameEdit_, kNameLimit);
-    clampEdit(authorEdit_, kAuthorLimit);
-    clampEdit(urlEdit_, kUrlLimit);
-
-    // The author field autocompletes from the authors already used in the
-    // board, matched fuzzily and without diacritics; the candidate list is
-    // cached and rebuilt only when the document changes, never per
-    // selection or keystroke.
-    authorModel_ = new QStringListModel(this);
-    authorCompleter_ = new QCompleter(authorModel_, this);
-    authorCompleter_->setWidget(authorEdit_);
-    // Unfiltered: the model already holds the fuzzy matches, and the
-    // line edit overwrites the completion prefix with the typed text, so
-    // a prefix-filtered popup would drop them (it matches on the display
-    // text, accents and all).
-    authorCompleter_->setCompletionMode(QCompleter::UnfilteredPopupCompletion);
-    authorCompleter_->setCaseSensitivity(Qt::CaseInsensitive);
-    authorEdit_->setCompleter(authorCompleter_);
-    connect(authorEdit_, &QLineEdit::textEdited, this,
-            [this](const QString &text) { showAuthorCompletions(text); });
-    connect(authorCompleter_, QOverload<const QString &>::of(&QCompleter::activated), this,
-            [this](const QString &text) { authorEdit_->setText(text); });
     connect(saveButton_, &QPushButton::clicked, this, [this]() { commitDraft(); });
     connect(closeButton_, &QPushButton::clicked, this, [this]() { closePanel(); });
     connect(keepBox_, &QCheckBox::checkStateChanged, this,
@@ -257,7 +221,7 @@ MetadataPanel::MetadataPanel(Scene *scene, doc::UndoStack *stack, QWidget *paren
     // Undo and redo must be reflected in an open panel.
     if (stack_) {
         stack_->addChangedCallback([this]() {
-            authorCandidatesDirty_ = true;
+            markSuggestionsDirty();
             if (item_)
                 populate(item_);
         });
@@ -273,11 +237,10 @@ void MetadataPanel::setScene(Scene *scene)
     if (scene_)
         disconnect(scene_, nullptr, this, nullptr);
     scene_ = scene;
-    authorCandidatesDirty_ = true;
+    markSuggestionsDirty();
     if (scene_) {
         connect(scene_, &QGraphicsScene::selectionChanged, this, [this]() { refresh(); });
-        connect(scene_, &Scene::itemsChanged, this,
-                [this]() { authorCandidatesDirty_ = true; });
+        connect(scene_, &Scene::itemsChanged, this, [this]() { markSuggestionsDirty(); });
     }
     closePanel();
 }
@@ -385,14 +348,12 @@ void MetadataPanel::populate(SceneItem *item)
     if (!item_)
         return;
     populating_ = true;
-    const QSignalBlocker nameBlocker(nameEdit_);
-    const QSignalBlocker authorBlocker(authorEdit_);
-    const QSignalBlocker urlBlocker(urlEdit_);
-    const QSignalBlocker notesBlocker(notesEdit_);
-    nameEdit_->setText(item->item()->filename);
-    authorEdit_->setText(item->item()->meta.value(kAuthor).toString());
-    urlEdit_->setText(item->item()->meta.value(kOriginUrl).toString());
-    notesEdit_->setPlainText(item->item()->meta.value(kNotes).toString());
+    for (Field &field : fields_)
+        field.editor->blockSignals(true);
+    for (Field &field : fields_)
+        setEditorText(field, storedValue(field));
+    for (Field &field : fields_)
+        field.editor->blockSignals(false);
     populating_ = false;
 
     saveButton_->setEnabled(false);
@@ -422,27 +383,59 @@ QVector<QPair<QString, QString>> MetadataPanel::draftEdits() const
     if (!item_)
         return changes;
     // The values are normalized here, so what is compared (and stored) is
-    // the canonical form.
-    const QVector<QPair<QString, QString>> texts = {
-        {kName, normalizedFieldText(nameEdit_->text(), true)},
-        {kAuthor, normalizedFieldText(authorEdit_->text(), true)},
-        {kOriginUrl, normalizedFieldText(urlEdit_->text(), true)},
-        {kNotes, normalizedFieldText(notesEdit_->toPlainText(), false)},
-    };
-    for (const auto &entry : texts) {
-        if (entry.second != currentValue(entry.first))
-            changes.append(entry);
+    // the canonical form. The integer fields keep their text as typed
+    // (only trimmed) and are parsed when they are written.
+    for (const Field &field : fields_) {
+        const QString edited = field.integer
+            ? editorText(field).trimmed()
+            : normalizedFieldText(editorText(field), !field.multiline);
+        if (edited != storedValue(field))
+            changes.append({field.key, edited});
     }
     return changes;
 }
 
-QString MetadataPanel::currentValue(const QString &field) const
+QString MetadataPanel::editorText(const Field &field) const
+{
+    if (field.multiline)
+        return static_cast<QPlainTextEdit *>(field.editor)->toPlainText();
+    return static_cast<QLineEdit *>(field.editor)->text();
+}
+
+void MetadataPanel::setEditorText(const Field &field, const QString &text)
+{
+    if (field.multiline)
+        static_cast<QPlainTextEdit *>(field.editor)->setPlainText(text);
+    else
+        static_cast<QLineEdit *>(field.editor)->setText(text);
+}
+
+QString MetadataPanel::storedValue(const Field &field) const
 {
     if (!item_)
         return {};
-    if (field == kName)
-        return item_->item()->filename;
-    return item_->item()->meta.value(field).toString();
+    const doc::ItemPtr item = item_->item();
+    if (field.key == kName)
+        return item->filename;
+    const QJsonValue value = item->meta.value(field.key);
+    if (field.integer) {
+        // A number round-trips as it was typed; a foreign string (another
+        // tool's "c. 1880") is shown as it is and only replaced when the
+        // field is edited.
+        if (value.isDouble())
+            return QString::number(qRound64(value.toDouble()));
+        return value.toString();
+    }
+    return value.toString();
+}
+
+MetadataPanel::Field *MetadataPanel::fieldFor(const QString &key)
+{
+    for (Field &field : fields_) {
+        if (field.key == key)
+            return &field;
+    }
+    return nullptr;
 }
 
 void MetadataPanel::updateDirty()
@@ -451,36 +444,148 @@ void MetadataPanel::updateDirty()
         return;
     const bool dirty = isDirty();
     saveButton_->setEnabled(dirty);
-    titleLabel_->setText(dirty ? QStringLiteral("Image •") : QStringLiteral("Image"));
+    titleLabel_->setText(dirty ? QStringLiteral("Image \u2022") : QStringLiteral("Image"));
 }
 
-void MetadataPanel::showAuthorCompletions(const QString &text)
+void MetadataPanel::markSuggestionsDirty()
 {
-    if (!authorCompleter_ || !scene_)
+    for (Field &field : fields_)
+        field.candidatesDirty = true;
+}
+
+void MetadataPanel::showSuggestions(Field &field, const QString &text)
+{
+    if (!field.completer || !scene_)
         return;
-    if (authorCandidatesDirty_) {
+    if (field.candidatesDirty) {
         QStringList raw;
         const QList<SceneItem *> views = scene_->itemViews();
         raw.reserve(views.size());
         for (SceneItem *view : views)
-            raw.append(view->item()->meta.value(kAuthor).toString());
-        authorCandidates_ = fuzzy::candidates(raw);
-        authorCandidatesDirty_ = false;
+            raw.append(view->item()->meta.value(field.key).toString());
+        field.candidates = fuzzy::candidates(raw);
+        field.candidatesDirty = false;
     }
     const QVector<fuzzy::Candidate> matches =
-        fuzzy::search(authorCandidates_, text, kAuthorCompletionLimit);
+        fuzzy::search(field.candidates, text, kCompletionLimit);
     QStringList rows;
     rows.reserve(matches.size());
     for (const fuzzy::Candidate &candidate : matches)
         rows.append(candidate.display);
-    authorModel_->setStringList(rows);
+    field.model->setStringList(rows);
     if (rows.isEmpty()) {
-        authorCompleter_->popup()->hide();
+        field.completer->popup()->hide();
         return;
     }
     // UnfilteredPopupCompletion shows the model as it is: the fuzzy
     // matches, no prefix filtering on top.
-    authorCompleter_->complete();
+    field.completer->complete();
+}
+
+void MetadataPanel::buildMetaFields(QVBoxLayout *layout)
+{
+    QWidget *page = layout->parentWidget();
+    const QVector<FieldSpec> &specs = fieldSpecs();
+    fields_.reserve(specs.size());
+    for (const FieldSpec &spec : specs) {
+        Field field;
+        field.key = spec.key;
+        field.integer = spec.kind == FieldKind::Integer;
+        field.multiline = spec.kind == FieldKind::Multiline;
+        field.limit = spec.limit;
+        field.suggestions = spec.suggestions;
+
+        layout->addWidget(new QLabel(spec.label, page));
+        const QString editorName = QStringLiteral("panel") + spec.label.at(0).toUpper()
+            + spec.label.mid(1).toLower();
+        if (field.multiline) {
+            auto *editor = new QPlainTextEdit(page);
+            editor->setObjectName(editorName);
+            editor->setPlaceholderText(spec.label);
+            field.editor = editor;
+            layout->addWidget(editor, 1);
+        } else {
+            auto *editor = new QLineEdit(page);
+            editor->setObjectName(editorName);
+            editor->setPlaceholderText(spec.label);
+            if (field.integer)
+                editor->setValidator(new QIntValidator(-kYearMax, kYearMax, editor));
+            field.editor = editor;
+            layout->addWidget(editor);
+        }
+        fields_.append(field);
+    }
+    // Wire once every field exists, so the lambdas keep a stable pointer
+    // into the table.
+    for (Field &field : fields_)
+        wireField(field);
+}
+
+void MetadataPanel::wireField(Field &field)
+{
+    Field *entry = &field;
+    if (field.multiline) {
+        auto *editor = static_cast<QPlainTextEdit *>(field.editor);
+        connect(editor, &QPlainTextEdit::textChanged, this, [this, entry]() {
+            clampField(*entry);
+            updateDirty();
+        });
+        return;
+    }
+    auto *editor = static_cast<QLineEdit *>(field.editor);
+    connect(editor, &QLineEdit::textChanged, this, [this]() { updateDirty(); });
+    // The clamp only covers user edits (textEdited): a longer value a
+    // board already holds is shown as it is and only clamped if edited.
+    connect(editor, &QLineEdit::textEdited, this, [this, entry](const QString &text) {
+        if (!entry->integer && text.size() > entry->limit) {
+            const int cursor = static_cast<QLineEdit *>(entry->editor)->cursorPosition();
+            {
+                const QSignalBlocker blocker(entry->editor);
+                static_cast<QLineEdit *>(entry->editor)->setText(text.left(entry->limit));
+                static_cast<QLineEdit *>(entry->editor)
+                    ->setCursorPosition(qMin(cursor, entry->limit));
+            }
+            updateDirty();
+            return;
+        }
+        if (entry->suggestions)
+            showSuggestions(*entry, text);
+    });
+    if (field.suggestions)
+        setupSuggestions(field);
+}
+
+void MetadataPanel::setupSuggestions(Field &field)
+{
+    auto *editor = static_cast<QLineEdit *>(field.editor);
+    field.model = new QStringListModel(this);
+    field.completer = new QCompleter(field.model, this);
+    field.completer->setWidget(editor);
+    // Unfiltered: the model already holds the fuzzy matches, and the line
+    // edit overwrites the completion prefix with the typed text, so a
+    // prefix-filtered popup would drop them (it matches on the display
+    // text, accents and all).
+    field.completer->setCompletionMode(QCompleter::UnfilteredPopupCompletion);
+    field.completer->setCaseSensitivity(Qt::CaseInsensitive);
+    editor->setCompleter(field.completer);
+    connect(field.completer, QOverload<const QString &>::of(&QCompleter::activated), this,
+            [editor](const QString &text) { editor->setText(text); });
+}
+
+void MetadataPanel::clampField(Field &field)
+{
+    if (!field.multiline)
+        return;
+    auto *editor = static_cast<QPlainTextEdit *>(field.editor);
+    const QString text = editor->toPlainText();
+    if (text.size() <= field.limit)
+        return;
+    const int cursor = editor->textCursor().position();
+    const QSignalBlocker blocker(editor);
+    editor->setPlainText(text.left(field.limit));
+    QTextCursor clamped = editor->textCursor();
+    clamped.setPosition(qMin(cursor, field.limit));
+    editor->setTextCursor(clamped);
 }
 
 void MetadataPanel::commitDraft()
@@ -495,15 +600,29 @@ void MetadataPanel::commitDraft()
         populate(item_);
         return;
     }
-    authorCandidatesDirty_ = true;
+    markSuggestionsDirty();
 
     const doc::ChangeItemCommand::State before =
         doc::ChangeItemCommand::State::capture(*item_->item());
     for (const auto &change : changes) {
-        if (change.first == kName)
+        Field *field = fieldFor(change.first);
+        if (field && field->integer) {
+            // An empty year removes the key; a half-typed leftover ("-")
+            // stores nothing.
+            if (change.second.isEmpty()) {
+                item_->item()->meta.remove(change.first);
+                continue;
+            }
+            bool ok = false;
+            const int year = change.second.toInt(&ok);
+            if (!ok)
+                continue;
+            item_->item()->meta.insert(change.first, QJsonValue(year));
+        } else if (change.first == kName) {
             item_->item()->filename = change.second;
-        else
+        } else {
             item_->item()->meta.insert(change.first, change.second);
+        }
     }
     if (stack_) {
         stack_->push(std::make_unique<doc::ChangeItemCommand>(
