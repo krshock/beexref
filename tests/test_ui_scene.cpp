@@ -304,6 +304,7 @@ private slots:
     void grayscaleMethodMenuSwitchesTheLook();
     void infoDialogsShowTheExpectedContent();
     void metadataPanelEditsAndCommits();
+    void batchMetadataEditsTheSelection();
     void metadataFieldsAreNormalized();
     void metadataFieldsClampTheirLength();
     void metadataYearAndCollection();
@@ -4066,10 +4067,12 @@ void TestUiScene::metadataPanelEditsAndCommits()
     first->setSelected(true);
     QCOMPARE(panel->item(), first);
     QVERIFY(!panel->isHidden());
-    // Several items: it commits and hides even with Keep.
+    // Several images: with Keep the panel switches to the batch fields.
     second->setSelected(true);
-    QVERIFY(panel->isHidden());
+    QVERIFY(!panel->isHidden());
     QVERIFY(panel->item() == nullptr);
+    QCOMPARE(panel->findChild<QLabel *>(QStringLiteral("panelTitle"))->text(),
+             QStringLiteral("2 images"));
 
     // Deleting the shown item closes the panel instead of dangling.
     keepBox->setChecked(false);
@@ -4080,6 +4083,138 @@ void TestUiScene::metadataPanelEditsAndCommits()
     actionByText(window, QStringLiteral("&Delete"))->trigger();
     QVERIFY(panel->item() == nullptr);
     QVERIFY(panel->isHidden());
+
+    settings::setSettingsDir(QString());
+}
+
+void TestUiScene::batchMetadataEditsTheSelection()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    settings::setSettingsDir(dir.path());
+
+    ui::MainWindow window;
+    const auto insert = [&window](int x, Qt::GlobalColor color) {
+        QImage image(20, 10, QImage::Format_ARGB32);
+        image.fill(color);
+        QMimeData mime;
+        mime.setImageData(image);
+        window.input()->insertMimeData(mime, QPointF(x, 10));
+    };
+    insert(10, Qt::red);
+    insert(60, Qt::green);
+    insert(110, Qt::blue);
+    const QVector<SceneItem *> images = window.scene()->pixmapItemViews();
+    QCOMPARE(images.size(), 3);
+    const QStringList authors = {QStringLiteral("Ada"), QStringLiteral("Bob"),
+                                 QStringLiteral("Eve")};
+    for (int i = 0; i < images.size(); ++i) {
+        images.at(i)->item()->meta.insert(QStringLiteral("author"), authors.at(i));
+        images.at(i)->item()->meta.insert(QStringLiteral("year"), 1900 + i);
+        images.at(i)->item()->meta.insert(QStringLiteral("collection"),
+                                          QStringLiteral("Shared"));
+    }
+
+    ui::MetadataPanel *panel = window.metadataPanel();
+    QVERIFY(panel);
+    window.scene()->clearSelection();
+    for (SceneItem *view : images)
+        view->setSelected(true);
+
+    // The panel action is enabled for a whole selection, and the real
+    // shortcut opens the batch.
+    QAction *metadataAction = actionByText(window, QStringLiteral("Edit Image &Metadata"));
+    QVERIFY(metadataAction);
+    QVERIFY(metadataAction->isEnabled());
+    window.show();
+    QT_WARNING_PUSH
+    QT_WARNING_DISABLE_DEPRECATED
+    QApplication::setActiveWindow(&window);
+    QT_WARNING_POP
+    QTest::keyClick(&window, Qt::Key_I);
+    QVERIFY(!panel->isHidden());
+    QVERIFY(panel->item() == nullptr);
+
+    auto *title = panel->findChild<QLabel *>(QStringLiteral("panelTitle"));
+    auto *author = panel->findChild<QLineEdit *>(QStringLiteral("panelAuthor"));
+    auto *year = panel->findChild<QLineEdit *>(QStringLiteral("panelYear"));
+    auto *collection = panel->findChild<QLineEdit *>(QStringLiteral("panelCollection"));
+    auto *name = panel->findChild<QLineEdit *>(QStringLiteral("panelName"));
+    auto *url = panel->findChild<QLineEdit *>(QStringLiteral("panelUrl"));
+    auto *notes = panel->findChild<QPlainTextEdit *>(QStringLiteral("panelNotes"));
+    auto *save = panel->findChild<QPushButton *>(QStringLiteral("panelSave"));
+    auto *tabs = panel->findChild<QTabWidget *>();
+    QVERIFY(title && author && year && collection && name && url && notes && save && tabs);
+    QCOMPARE(title->text(), QStringLiteral("3 images"));
+
+    // The Info tab and the per-image fields are out of the way.
+    QVERIFY(!tabs->isTabVisible(0));
+    QVERIFY(tabs->isTabVisible(1));
+    QVERIFY(!name->isVisible());
+    QVERIFY(!url->isVisible());
+    QVERIFY(!notes->isVisible());
+    QVERIFY(author->isVisible());
+    QVERIFY(year->isVisible());
+    QVERIFY(collection->isVisible());
+
+    // Mixed fields start empty and say so; a shared value shows.
+    QVERIFY(author->text().isEmpty());
+    QCOMPARE(author->placeholderText(), QStringLiteral("(multiple)"));
+    QCOMPARE(year->placeholderText(), QStringLiteral("(multiple)"));
+    QCOMPARE(collection->text(), QStringLiteral("Shared"));
+
+    // What is typed goes to every image; the fields left alone stay.
+    author->setText(QStringLiteral("Ada"));
+    QVERIFY(save->isEnabled());
+    QCOMPARE(title->text(), QStringLiteral("3 images •"));
+    save->click();
+    for (int i = 0; i < images.size(); ++i) {
+        QCOMPARE(images.at(i)->item()->meta.value(QStringLiteral("author")).toString(),
+                 QStringLiteral("Ada"));
+        QCOMPARE(images.at(i)->item()->meta.value(QStringLiteral("year")).toInt(), 1900 + i);
+        QCOMPARE(images.at(i)->item()->meta.value(QStringLiteral("collection")).toString(),
+                 QStringLiteral("Shared"));
+    }
+    QVERIFY(!save->isEnabled());
+    QCOMPARE(author->text(), QStringLiteral("Ada"));
+    QCOMPARE(author->placeholderText(), QStringLiteral("Author"));
+
+    // One undo brings the three authors back.
+    actionByText(window, QStringLiteral("&Undo"))->trigger();
+    for (int i = 0; i < images.size(); ++i) {
+        QCOMPARE(images.at(i)->item()->meta.value(QStringLiteral("author")).toString(),
+                 authors.at(i));
+    }
+    QCOMPARE(author->placeholderText(), QStringLiteral("(multiple)"));
+
+    // The shared collection clears for the whole batch...
+    collection->clear();
+    QVERIFY(save->isEnabled());
+    save->click();
+    for (SceneItem *view : images)
+        QVERIFY(view->item()->meta.value(QStringLiteral("collection")).toString().isEmpty());
+
+    // ...and a mixed field clears by being touched and emptied.
+    QTest::keyClicks(author, QStringLiteral("x"));
+    QTest::keyClick(author, Qt::Key_Backspace);
+    QVERIFY(save->isEnabled());
+    save->click();
+    for (SceneItem *view : images)
+        QVERIFY(view->item()->meta.value(QStringLiteral("author")).toString().isEmpty());
+
+    // Reopened on one image, the panel is the single-image editor again.
+    panel->closePanel();
+    window.scene()->clearSelection();
+    images.first()->setSelected(true);
+    metadataAction->trigger();
+    QVERIFY(!panel->isHidden());
+    QCOMPARE(panel->item(), images.first());
+    QCOMPARE(title->text(), QStringLiteral("Image"));
+    QVERIFY(tabs->isTabVisible(0));
+    QVERIFY(name->isVisible());
+    QVERIFY(url->isVisible());
+    QVERIFY(notes->isVisible());
+    QCOMPARE(author->placeholderText(), QStringLiteral("Author"));
 
     settings::setSettingsDir(QString());
 }

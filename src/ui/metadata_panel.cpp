@@ -41,6 +41,10 @@ const QString kNotes = QStringLiteral("notes");
 // How many suggestions a completion popup shows.
 constexpr int kCompletionLimit = 15;
 
+// What a batch field whose images disagree shows, so the panel never
+// claims a shared value it does not have.
+const QString kMixed = QStringLiteral("(multiple)");
+
 // The edit limits of the metadata fields. They clamp what is typed or
 // pasted, not what a board already holds: populate() writes the stored
 // values with the signals blocked and the line edits are not limited by
@@ -76,18 +80,22 @@ struct FieldSpec
     FieldKind kind;
     int limit;
     bool suggestions;
+    // Shared fields can be written to a whole selection at once; the
+    // per-image ones (name, URL, notes) stay single-image.
+    bool batch;
     QString label;
 };
 
 const QVector<FieldSpec> &fieldSpecs()
 {
     static const QVector<FieldSpec> specs = {
-        {kName, FieldKind::Text, kNameLimit, false, QStringLiteral("Name")},
-        {kAuthor, FieldKind::Text, kAuthorLimit, true, QStringLiteral("Author")},
-        {kYear, FieldKind::Integer, kYearLimit, false, QStringLiteral("Year")},
-        {kCollection, FieldKind::Text, kCollectionLimit, true, QStringLiteral("Collection")},
-        {kOriginUrl, FieldKind::Text, kUrlLimit, false, QStringLiteral("URL")},
-        {kNotes, FieldKind::Multiline, kNotesLimit, false, QStringLiteral("Notes")},
+        {kName, FieldKind::Text, kNameLimit, false, false, QStringLiteral("Name")},
+        {kAuthor, FieldKind::Text, kAuthorLimit, true, true, QStringLiteral("Author")},
+        {kYear, FieldKind::Integer, kYearLimit, false, true, QStringLiteral("Year")},
+        {kCollection, FieldKind::Text, kCollectionLimit, true, true,
+         QStringLiteral("Collection")},
+        {kOriginUrl, FieldKind::Text, kUrlLimit, false, false, QStringLiteral("URL")},
+        {kNotes, FieldKind::Multiline, kNotesLimit, false, false, QStringLiteral("Notes")},
     };
     return specs;
 }
@@ -119,6 +127,30 @@ QString normalizedFieldText(QString text, bool singleLine)
 QString number(double value, int precision)
 {
     return QString::number(value, 'f', precision);
+}
+
+// Applies one edited value to a stored (filename, meta) pair: a name
+// replaces the filename, a year is a JSON number (an empty year removes
+// the key) and anything else is a string in the meta object. A year
+// that cannot be parsed (a half-typed leftover) is left alone.
+void applyMetadataChange(QString &filename, QJsonObject &meta, const QString &key,
+                         const QString &text, bool integer)
+{
+    if (integer) {
+        if (text.isEmpty()) {
+            meta.remove(key);
+            return;
+        }
+        bool ok = false;
+        const int year = text.toInt(&ok);
+        if (ok)
+            meta.insert(key, QJsonValue(year));
+        return;
+    }
+    if (key == kName)
+        filename = text;
+    else
+        meta.insert(key, text);
 }
 
 } // namespace
@@ -234,7 +266,9 @@ MetadataPanel::MetadataPanel(Scene *scene, doc::UndoStack *stack, QWidget *paren
     if (stack_) {
         stack_->addChangedCallback([this]() {
             markSuggestionsDirty();
-            if (item_)
+            if (!batchItems_.isEmpty())
+                populateBatch(batchItems_);
+            else if (item_)
                 populate(item_);
         });
     }
@@ -289,26 +323,40 @@ void MetadataPanel::refresh()
         return;
     }
     const QVector<SceneItem *> selected = selection::selectionItems(*scene_);
-    const bool one =
-        selected.size() == 1 && selected.first()->isPixmap() && !selected.first()->isError();
+    const QVector<SceneItem *> images = selection::imageSelection(*scene_);
+    const bool one = selected.size() == 1 && images.size() == 1;
+    const bool batch = images.size() >= 2;
 
-    // A manual panel with no item yet is the one just opened.
-    bool manual = false;
-    if (manual_)
-        manual = item_ == nullptr || (one && item_ == selected.first());
-
-    if (one && (keep_ || manual)) {
-        if (item_ && item_ != selected.first())
-            commitDraft();
-        setPanelVisible(true);
-        populate(selected.first());
-        return;
+    if (one) {
+        // A manual panel with no item yet is the one just opened; with
+        // Keep it follows whichever single image is selected.
+        const bool mine =
+            keep_ || (manual_ && (item_ == nullptr || item_ == selected.first()));
+        if (mine) {
+            if (item_ != selected.first())
+                commitDraft();
+            setPanelVisible(true);
+            populate(selected.first());
+            return;
+        }
+    } else if (batch) {
+        // A batch panel edits whichever images are selected: a new batch
+        // commits the draft and repopulates instead of closing, so a
+        // selection can be built one image at a time.
+        if (keep_ || manual_) {
+            if (batchItems_ != images)
+                commitDraft();
+            setPanelVisible(true);
+            populateBatch(images);
+            return;
+        }
     }
 
     // Any other selection commits the draft and closes the panel, as
     // the Go port's one-shot panel does.
     commitDraft();
     item_ = nullptr;
+    batchItems_.clear();
     manual_ = false;
     setPanelVisible(false);
 }
@@ -316,6 +364,7 @@ void MetadataPanel::refresh()
 void MetadataPanel::closePanel()
 {
     item_ = nullptr;
+    batchItems_.clear();
     manual_ = false;
     saveButton_->setEnabled(false);
     titleLabel_->setText(QStringLiteral("Item"));
@@ -324,13 +373,13 @@ void MetadataPanel::closePanel()
 
 void MetadataPanel::forgetItem(SceneItem *view)
 {
-    if (item_ == view)
+    if (item_ == view || batchItems_.contains(view))
         closePanel();
 }
 
 bool MetadataPanel::isDirty() const
 {
-    return item_ != nullptr && !draftEdits().isEmpty();
+    return (item_ != nullptr || !batchItems_.isEmpty()) && !draftEdits().isEmpty();
 }
 
 void MetadataPanel::setPanelVisible(bool visible)
@@ -359,6 +408,14 @@ void MetadataPanel::populate(SceneItem *item)
     item_ = item;
     if (!item_)
         return;
+    batchItems_.clear();
+    applyFieldVisibility();
+    for (Field &field : fields_) {
+        if (field.batch) {
+            if (auto *line = qobject_cast<QLineEdit *>(field.editor))
+                line->setPlaceholderText(field.labelText);
+        }
+    }
     populating_ = true;
     for (Field &field : fields_)
         field.editor->blockSignals(true);
@@ -372,7 +429,80 @@ void MetadataPanel::populate(SceneItem *item)
 
     saveButton_->setEnabled(false);
     titleLabel_->setText(QStringLiteral("Image"));
+    tabs_->setTabVisible(0, true);
     rebuildInfoRows(item);
+}
+
+void MetadataPanel::populateBatch(const QVector<SceneItem *> &items)
+{
+    item_ = nullptr;
+    batchItems_ = items;
+    if (batchItems_.isEmpty())
+        return;
+    applyFieldVisibility();
+
+    populating_ = true;
+    for (Field &field : fields_)
+        field.editor->blockSignals(true);
+    for (Field &field : fields_) {
+        field.touched = false;
+        if (!field.batch)
+            continue;
+        // The value the whole batch shares, if any; a mixed field starts
+        // empty and says so, and only what was typed is written back.
+        bool same = true;
+        const QString value = itemValue(*items.first()->item(), field);
+        for (SceneItem *view : items) {
+            if (itemValue(*view->item(), field) != value) {
+                same = false;
+                break;
+            }
+        }
+        field.baseline = same ? value : QString();
+        setEditorText(field, field.baseline);
+        if (auto *line = qobject_cast<QLineEdit *>(field.editor))
+            line->setPlaceholderText(same ? field.labelText : kMixed);
+    }
+    for (Field &field : fields_)
+        field.editor->blockSignals(false);
+    populating_ = false;
+
+    // The per-image fields and the Info tab do not describe a batch.
+    tabs_->setTabVisible(0, false);
+    tabs_->setCurrentIndex(1);
+    saveButton_->setEnabled(false);
+    titleLabel_->setText(baseTitle());
+}
+
+// Shows only the fields that apply to the current mode, rebuilding the
+// row order so a hidden field leaves no gap behind; the batch keeps its
+// rows packed at the top, like the single-image page.
+void MetadataPanel::applyFieldVisibility()
+{
+    const bool batch = !batchItems_.isEmpty();
+    while (QLayoutItem *item = metaLayout_->takeAt(0)) {
+        if (QWidget *widget = item->widget())
+            widget->hide();
+        delete item;
+    }
+    for (Field &field : fields_) {
+        const bool visible = !batch || field.batch;
+        field.label->setVisible(visible);
+        field.editor->setVisible(visible);
+        if (!visible)
+            continue;
+        metaLayout_->addWidget(field.label);
+        metaLayout_->addWidget(field.editor, field.multiline ? 1 : 0);
+    }
+    if (batch)
+        metaLayout_->addStretch(1);
+}
+
+QString MetadataPanel::baseTitle() const
+{
+    if (!batchItems_.isEmpty())
+        return QStringLiteral("%1 images").arg(batchItems_.size());
+    return QStringLiteral("Image");
 }
 
 void MetadataPanel::rebuildInfoRows(SceneItem *item)
@@ -394,16 +524,21 @@ void MetadataPanel::rebuildInfoRows(SceneItem *item)
 QVector<QPair<QString, QString>> MetadataPanel::draftEdits() const
 {
     QVector<QPair<QString, QString>> changes;
-    if (!item_)
+    const bool batch = !batchItems_.isEmpty();
+    if (!batch && !item_)
         return changes;
     // The values are normalized here, so what is compared (and stored) is
     // the canonical form. The integer fields keep their text as typed
     // (only trimmed) and are parsed when they are written.
     for (const Field &field : fields_) {
+        if (batch && !field.batch)
+            continue;
         const QString edited = field.integer
             ? editorText(field).trimmed()
             : normalizedFieldText(editorText(field), !field.multiline);
-        if (edited != storedValue(field))
+        // In a batch a touched field applies even when it went back to
+        // its starting value: that is how a mixed field is cleared.
+        if (edited != storedValue(field) || (batch && field.touched))
             changes.append({field.key, edited});
     }
     return changes;
@@ -426,12 +561,21 @@ void MetadataPanel::setEditorText(const Field &field, const QString &text)
 
 QString MetadataPanel::storedValue(const Field &field) const
 {
+    // A batch draft compares against the value the batch started from.
+    if (!batchItems_.isEmpty())
+        return field.baseline;
     if (!item_)
         return {};
-    const doc::ItemPtr item = item_->item();
+    return itemValue(*item_->item(), field);
+}
+
+// The stored text of one field on one item: what populate() shows and
+// the batch compares across images.
+QString MetadataPanel::itemValue(const doc::Item &item, const Field &field) const
+{
     if (field.key == kName)
-        return item->filename;
-    const QJsonValue value = item->meta.value(field.key);
+        return item.filename;
+    const QJsonValue value = item.meta.value(field.key);
     if (field.integer) {
         // A number round-trips as it was typed; a foreign string (another
         // tool's "c. 1880") is shown as it is and only replaced when the
@@ -454,11 +598,12 @@ MetadataPanel::Field *MetadataPanel::fieldFor(const QString &key)
 
 void MetadataPanel::updateDirty()
 {
-    if (populating_ || !item_)
+    if (populating_ || (batchItems_.isEmpty() && !item_))
         return;
     const bool dirty = isDirty();
     saveButton_->setEnabled(dirty);
-    titleLabel_->setText(dirty ? QStringLiteral("Image \u2022") : QStringLiteral("Image"));
+    const QString base = baseTitle();
+    titleLabel_->setText(dirty ? base + QStringLiteral(" \u2022") : base);
 }
 
 void MetadataPanel::markSuggestionsDirty()
@@ -498,6 +643,7 @@ void MetadataPanel::showSuggestions(Field &field, const QString &text)
 
 void MetadataPanel::buildMetaFields(QVBoxLayout *layout)
 {
+    metaLayout_ = layout;
     QWidget *page = layout->parentWidget();
     const QVector<FieldSpec> &specs = fieldSpecs();
     fields_.reserve(specs.size());
@@ -508,6 +654,7 @@ void MetadataPanel::buildMetaFields(QVBoxLayout *layout)
         field.multiline = spec.kind == FieldKind::Multiline;
         field.limit = spec.limit;
         field.suggestions = spec.suggestions;
+        field.batch = spec.batch;
 
         field.labelText = spec.label;
         field.label = new QLabel(field.labelText, page);
@@ -555,6 +702,7 @@ void MetadataPanel::wireField(Field &field)
     }
     auto *editor = static_cast<QLineEdit *>(field.editor);
     connect(editor, &QLineEdit::textChanged, this, [this]() { updateDirty(); });
+    connect(editor, &QLineEdit::textEdited, this, [entry]() { entry->touched = true; });
     if (field.key == kOriginUrl) {
         connect(editor, &QLineEdit::textChanged, this,
                 [this, entry]() { updateUrlAffordance(*entry); });
@@ -666,6 +814,10 @@ bool MetadataPanel::eventFilter(QObject *watched, QEvent *event)
 
 void MetadataPanel::commitDraft()
 {
+    if (!batchItems_.isEmpty()) {
+        commitBatchDraft();
+        return;
+    }
     if (!item_)
         return;
     const QVector<QPair<QString, QString>> changes = draftEdits();
@@ -682,23 +834,8 @@ void MetadataPanel::commitDraft()
         doc::ChangeItemCommand::State::capture(*item_->item());
     for (const auto &change : changes) {
         Field *field = fieldFor(change.first);
-        if (field && field->integer) {
-            // An empty year removes the key; a half-typed leftover ("-")
-            // stores nothing.
-            if (change.second.isEmpty()) {
-                item_->item()->meta.remove(change.first);
-                continue;
-            }
-            bool ok = false;
-            const int year = change.second.toInt(&ok);
-            if (!ok)
-                continue;
-            item_->item()->meta.insert(change.first, QJsonValue(year));
-        } else if (change.first == kName) {
-            item_->item()->filename = change.second;
-        } else {
-            item_->item()->meta.insert(change.first, change.second);
-        }
+        applyMetadataChange(item_->item()->filename, item_->item()->meta, change.first,
+                            change.second, field && field->integer);
     }
     if (stack_) {
         stack_->push(std::make_unique<doc::ChangeItemCommand>(
@@ -714,6 +851,49 @@ void MetadataPanel::commitDraft()
     saveButton_->setEnabled(false);
     titleLabel_->setText(QStringLiteral("Image"));
     populating_ = false;
+    emit modified();
+}
+
+// The batch commit: each selected image gets the fields that were
+// edited, all of it one undo step.
+void MetadataPanel::commitBatchDraft()
+{
+    const QVector<SceneItem *> items = batchItems_;
+    const QVector<QPair<QString, QString>> changes = draftEdits();
+    if (changes.isEmpty()) {
+        populateBatch(items);
+        return;
+    }
+    markSuggestionsDirty();
+
+    if (stack_)
+        stack_->beginMacro(QStringLiteral("Edit metadata"));
+    for (SceneItem *view : items) {
+        const doc::ItemPtr item = view->item();
+        const doc::ChangeItemCommand::State before =
+            doc::ChangeItemCommand::State::capture(*item);
+        doc::ChangeItemCommand::State after = before;
+        for (const auto &change : changes) {
+            Field *field = fieldFor(change.first);
+            applyMetadataChange(after.filename, after.meta, change.first, change.second,
+                                field && field->integer);
+        }
+        if (after == before)
+            continue;
+        if (stack_) {
+            stack_->push(std::make_unique<doc::ChangeItemCommand>(
+                item, before, after, QStringLiteral("Edit metadata")));
+        } else {
+            after.apply(*item);
+        }
+    }
+    if (stack_)
+        stack_->endMacro();
+    if (scene_ && scene_->document())
+        scene_->document()->setModified(true);
+
+    // Back to a clean draft: the fields now hold the applied values.
+    populateBatch(items);
     emit modified();
 }
 

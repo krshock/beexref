@@ -768,6 +768,29 @@ public:
                 snapshot(QStringLiteral("36-metadata-panel"));
                 QTest::keyClick(&window_, Qt::Key_I);
                 QTest::qWait(300);
+
+                // Several images: the panel turns into the batch editor.
+                window_.scene()->clearSelection();
+                const QVector<ui::SceneItem *> picks =
+                    window_.scene()->pixmapItemViews().mid(0, 3);
+                for (ui::SceneItem *view : picks)
+                    view->setSelected(true);
+                QTest::qWait(200);
+                window_.activateWindow();
+                QTest::qWait(50);
+                // The copied settings may carry Keep, which opens the
+                // panel on its own; only press I when it is closed.
+                if (panel && panel->isHidden()) {
+                    QTest::keyClick(&window_, Qt::Key_I);
+                    QTest::qWait(500);
+                }
+                out() << "metadata panel batch: "
+                      << (panel && !panel->isHidden() && panel->item() == nullptr)
+                      << " images=" << picks.size() << "\n";
+                snapshot(QStringLiteral("36b-metadata-batch"));
+                if (panel && !panel->isHidden())
+                    actionByText(QStringLiteral("Edit Image &Metadata"))->trigger();
+                QTest::qWait(300);
             }
         }
 

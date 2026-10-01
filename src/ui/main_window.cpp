@@ -1429,8 +1429,10 @@ void MainWindow::buildActions()
     // reference) and the info window.
     // The Go port's binding: the panel owns the I key, and its Info tab
     // replaces the old Image Info window.
+    // The panel edits one image or a whole selection, so it is enabled
+    // whenever the selection carries an image.
     actions_->add(QStringLiteral("metadata_panel"), QStringLiteral("Edit Image &Metadata"),
-                  QKeySequence(Qt::Key_I), G::SingleImage,
+                  QKeySequence(Qt::Key_I), G::ImageSelection,
                   [this](bool) { metadataPanel_->toggle(); });
 
     // A runtime preview of the HUD style, shortcut only like the
@@ -1508,6 +1510,7 @@ void MainWindow::updateActions()
     state.itemsInScene = document_ && !document_->items().isEmpty();
     const QVector<SceneItem *> selected = selection::selectionItems(*scene_);
     state.selection = !selected.isEmpty();
+    state.imageSelection = !selection::imageSelection(*scene_).isEmpty();
     state.singleImage =
         selected.size() == 1 && selected.first()->isPixmap() && !selected.first()->isError();
     state.canUndo = undoStack_.canUndo();

@@ -34,6 +34,11 @@ project uses [Semantic Versioning](https://semver.org/).
   colour), and double-clicking it opens the address in your browser. Only
   `http` and `https` links are handed over — a file path or a script
   never launches anything.
+- **Edit several images at once**: with more than one image selected,
+  the metadata panel (`I`) shows the fields that can be shared — Author,
+  Collection and Year — and writes the ones you edit to every selected
+  image in a single step, undo included. A field with different values
+  shows `(multiple)`, and the fields you leave alone are left alone.
 
 ### Changed
 

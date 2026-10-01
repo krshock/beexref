@@ -28,9 +28,16 @@ class SceneItem;
 // author, year, collection, URL and notes), plus a Keep/Close/Save
 // footer.
 //
-// Without Keep it is a one-shot for the image it was opened on: any
-// other selection commits the draft and closes it. With Keep it follows
-// the selection (single image only) and persists as View/panel_keep.
+// Without Keep it is a one-shot: editing another single image commits
+// the draft and closes it, while a batch keeps editing whatever images
+// are selected (so a selection can be grown one image at a time). With
+// Keep it follows the selection and persists as View/panel_keep.
+//
+// Several selected images turn the Meta tab into a batch editor: only
+// the shared fields (Author, Year, Collection) show, a field every
+// image shares starts at that value, a mixed one starts empty and says
+// "(multiple)", and Save writes what was edited to every selected image
+// in one undo step. The fields left untouched are left alone.
 class MetadataPanel : public QWidget
 {
     Q_OBJECT
@@ -77,6 +84,9 @@ private:
         bool multiline = false;   // a QPlainTextEdit instead of a QLineEdit
         int limit = 0;            // editing cap in characters
         bool suggestions = false; // fuzzy completion from the board's values
+        bool batch = false;       // offered when several images are edited together
+        QString baseline;         // batch: the value the draft compares against
+        bool touched = false;     // batch: the editor was edited by hand
         QLabel *label = nullptr;
         QString labelText;      // the caption's text, without the link glyph
         QWidget *editor = nullptr;
@@ -98,7 +108,12 @@ private:
     Field *fieldFor(const QString &key);
 
     void commitDraft();
+    void commitBatchDraft();
     void populate(SceneItem *item);
+    void populateBatch(const QVector<SceneItem *> &items);
+    void applyFieldVisibility();
+    QString baseTitle() const;
+    QString itemValue(const doc::Item &item, const Field &field) const;
     void rebuildInfoRows(SceneItem *item);
     QVector<QPair<QString, QString>> draftEdits() const;
     void updateDirty();
@@ -115,6 +130,9 @@ protected:
     Scene *scene_ = nullptr;
     doc::UndoStack *stack_ = nullptr;
     SceneItem *item_ = nullptr;
+    // The images a batch edit covers; empty while the panel is on one
+    // image (or closed).
+    QVector<SceneItem *> batchItems_;
     bool keep_ = false;
     bool manual_ = false;
     bool populating_ = false;
@@ -122,6 +140,7 @@ protected:
 
     QLabel *titleLabel_ = nullptr;
     QTabWidget *tabs_ = nullptr;
+    QVBoxLayout *metaLayout_ = nullptr;
     QWidget *infoPage_ = nullptr;
     QFormLayout *infoForm_ = nullptr;
     QVector<Field> fields_;

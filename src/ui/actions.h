@@ -17,6 +17,7 @@ enum class ActionGroup {
     Always,
     ItemsInScene,
     Selection,
+    ImageSelection,
     SingleImage,
     CanUndo,
     CanRedo,
@@ -27,6 +28,7 @@ struct ActionState
 {
     bool itemsInScene = false;
     bool selection = false;
+    bool imageSelection = false;
     bool singleImage = false;
     bool canUndo = false;
     bool canRedo = false;

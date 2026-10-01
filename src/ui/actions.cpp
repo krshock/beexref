@@ -14,6 +14,8 @@ bool groupEnabled(ActionGroup group, const ActionState &state)
         return state.itemsInScene;
     case ActionGroup::Selection:
         return state.selection;
+    case ActionGroup::ImageSelection:
+        return state.imageSelection;
     case ActionGroup::SingleImage:
         return state.singleImage;
     case ActionGroup::CanUndo:
