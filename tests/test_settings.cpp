@@ -173,6 +173,17 @@ void TestSettings::fieldsDefaultsAndCasts()
              30);
     QCOMPARE(settings::valueOrDefault(file, QStringLiteral("Items/arrange_gap")).toInt(), 0);
 
+    // The window theme: an unknown value falls back to following the
+    // desktop.
+    QCOMPARE(settings::valueOrDefault(file, QStringLiteral("View/theme")).toString(),
+             QStringLiteral("system"));
+    file.setValue(QStringLiteral("View"), QStringLiteral("theme"), QStringLiteral("bogus"));
+    QCOMPARE(settings::valueOrDefault(file, QStringLiteral("View/theme")).toString(),
+             QStringLiteral("system"));
+    file.setValue(QStringLiteral("View"), QStringLiteral("theme"), QStringLiteral("light"));
+    QCOMPARE(settings::valueOrDefault(file, QStringLiteral("View/theme")).toString(),
+             QStringLiteral("light"));
+
     file.setValue(QStringLiteral("Items"), QStringLiteral("lod_method"),
                   QStringLiteral("ram_budget"));
     QCOMPARE(settings::valueOrDefault(file, QStringLiteral("Items/lod_method")).toString(),

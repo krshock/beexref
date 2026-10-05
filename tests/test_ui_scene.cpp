@@ -72,6 +72,7 @@
 #include "ui/fuzzy_authors.h"
 #include "ui/move_handle.h"
 #include "ui/new_instance.h"
+#include "ui/theme.h"
 #include "ui/settings_dialog.h"
 #include "ui/grayscale.h"
 #include "ui/opacity_dialog.h"
@@ -308,6 +309,7 @@ private slots:
     void metadataPanelEditsAndCommits();
     void batchMetadataEditsTheSelection();
     void newWindowRunsTheRightProgram();
+    void themeModesFollowTheSetting();
     void metadataFieldsAreNormalized();
     void metadataFieldsClampTheirLength();
     void metadataYearAndCollection();
@@ -4309,6 +4311,45 @@ void TestUiScene::newWindowRunsTheRightProgram()
     QVERIFY(newWindow->isEnabled());
 
     settings::setSettingsDir(QString());
+}
+
+void TestUiScene::themeModesFollowTheSetting()
+{
+    // The setting and the platform's colour scheme map to a mode.
+    QCOMPARE(ui::theme::modeForSetting(QStringLiteral("dark")), ui::theme::Mode::Dark);
+    QCOMPARE(ui::theme::modeForSetting(QStringLiteral("light")), ui::theme::Mode::Light);
+    QCOMPARE(ui::theme::modeForSetting(QStringLiteral("system")), ui::theme::Mode::System);
+    QCOMPARE(ui::theme::modeForSetting(QStringLiteral("bogus")), ui::theme::Mode::System);
+    QCOMPARE(ui::theme::resolve(ui::theme::Mode::System, Qt::ColorScheme::Dark),
+             ui::theme::Mode::Dark);
+    QCOMPARE(ui::theme::resolve(ui::theme::Mode::System, Qt::ColorScheme::Light),
+             ui::theme::Mode::Light);
+    // A platform that reports nothing lands on the app's own dark look.
+    QCOMPARE(ui::theme::resolve(ui::theme::Mode::System, Qt::ColorScheme::Unknown),
+             ui::theme::Mode::Dark);
+    // An explicit mode ignores the platform.
+    QCOMPARE(ui::theme::resolve(ui::theme::Mode::Light, Qt::ColorScheme::Dark),
+             ui::theme::Mode::Light);
+
+    // Applying them swaps the window palette; the canvas keeps its dark
+    // colour in every mode.
+    const QColor startupWindow = QApplication::palette().color(QPalette::Window);
+    ui::theme::captureStartup();
+    ui::theme::apply(ui::theme::Mode::Dark, Qt::ColorScheme::Dark);
+    const QColor darkWindow = QApplication::palette().color(QPalette::Window);
+    QCOMPARE(ui::theme::canvas, QColor(60, 60, 60));
+    ui::theme::apply(ui::theme::Mode::Light, Qt::ColorScheme::Dark);
+    const QColor lightWindow = QApplication::palette().color(QPalette::Window);
+    QVERIFY(darkWindow.lightness() < lightWindow.lightness());
+    QCOMPARE(ui::theme::canvas, QColor(60, 60, 60));
+
+    // System with a scheme the platform reports keeps the platform's own
+    // palette (the one the application started with)...
+    ui::theme::apply(ui::theme::Mode::System, Qt::ColorScheme::Light);
+    QCOMPARE(QApplication::palette().color(QPalette::Window), startupWindow);
+    // ...and a platform that reports nothing falls back to the app's dark.
+    ui::theme::apply(ui::theme::Mode::System, Qt::ColorScheme::Unknown);
+    QCOMPARE(QApplication::palette().color(QPalette::Window), darkWindow);
 }
 
 void TestUiScene::hudPreviewShowsTheStyledPanel()

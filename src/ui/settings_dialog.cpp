@@ -71,6 +71,17 @@ const QVector<FieldUi> &fieldTable()
                                      "rewriting all of it. Faster on large boards; turn this off "
                                      "to always write a complete new file."),
                       QStringLiteral("Write only what changed")),
+        // The window colours.
+        radioField(QStringLiteral("View/theme"), QStringLiteral("Theme:"),
+                   QStringLiteral("The colours of the window, menus and dialogs. 'Follow the "
+                                  "system' uses the desktop's light or dark setting; the canvas "
+                                  "and the HUD keep their dark look in every mode."),
+                   {{QStringLiteral("system"), QStringLiteral("Follow the system"),
+                     QStringLiteral("Use the desktop's light or dark setting")},
+                    {QStringLiteral("dark"), QStringLiteral("Dark"),
+                     QStringLiteral("A dark window around the dark canvas")},
+                    {QStringLiteral("light"), QStringLiteral("Light"),
+                     QStringLiteral("A light window around the dark canvas")}}),
         radioField(QStringLiteral("Items/lod_method"), QStringLiteral("LOD Method:"),
                    QStringLiteral("How image levels of detail are generated. Applies to images "
                                   "that have been saved to a bee file."),
@@ -365,6 +376,7 @@ SettingsDialog::SettingsDialog(QWidget *parent)
     misc->setLayout(miscLayout);
     miscLayout->addWidget(group(QStringLiteral("Save/confirm_close_unsaved")), 0, 0);
     miscLayout->addWidget(group(QStringLiteral("Save/incremental")), 1, 0);
+    miscLayout->addWidget(group(QStringLiteral("View/theme")), 2, 0);
     tabs->addTab(misc, QStringLiteral("&Miscellaneous"));
 
     auto *perf = new QWidget(tabs);

@@ -177,6 +177,16 @@ if [ "$with_wayland" = true ]; then
 fi
 "$TOOLS_DIR/linuxdeploy-x86_64.AppImage" --appdir "$appdir"
 
+# The Qt plugin's generated hook forces QT_QPA_PLATFORMTHEME=gtk2 on
+# GNOME and XFCE, a Qt 5 name that no longer exists: Qt 6 would load no
+# platform theme at all and the desktop's dark mode would be ignored.
+# The app activates the XDG portal theme itself (see src/main.cpp), so
+# the hook only says so.
+cat > "$appdir/apprun-hooks/linuxdeploy-plugin-qt-hook.sh" <<'HOOK'
+#!/bin/sh
+# Empty on purpose: the app chooses the platform theme (src/main.cpp).
+HOOK
+
 if [ -n "$suffix" ]; then
     # A labeled build is a test build: dist/dev/ keeps it out of
     # dist/SHA256SUMS and out of the release artifacts.

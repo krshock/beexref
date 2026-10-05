@@ -11,6 +11,7 @@
 #include "logging.h"
 #include "settings.h"
 #include "ui/main_window.h"
+#include "ui/theme.h"
 #include "util/memory.h"
 
 namespace {
@@ -52,6 +53,17 @@ public:
 int main(int argc, char *argv[])
 {
     util::configureAllocator();
+
+#ifdef Q_OS_LINUX
+    // The desktop's dark or light preference reaches Qt through the XDG
+    // portal; without a named platform theme Qt shows its own default
+    // (light) and the AppImage, which carries no GTK, never learns the
+    // desktop's setting. Distributions, Flatpak and Snap choose their
+    // own theme here.
+    if (qEnvironmentVariableIsEmpty("QT_QPA_PLATFORMTHEME")
+        && qEnvironmentVariableIsSet("DBUS_SESSION_BUS_ADDRESS"))
+        qputenv("QT_QPA_PLATFORMTHEME", "xdgdesktopportal");
+#endif
 
     QApplication app(argc, argv);
     QCoreApplication::setApplicationName(QString::fromLatin1(constants::AppName));
@@ -95,6 +107,10 @@ int main(int argc, char *argv[])
     logging::info(QStringLiteral("Starting"),
                   {{QStringLiteral("name"), QString::fromLatin1(constants::AppName)},
                    {QStringLiteral("version"), QString::fromLatin1(constants::Version)}});
+
+    // The theme reaches every widget at construction, and the settings
+    // directory is known by now.
+    ui::theme::applyFromSettings();
 
     QElapsedTimer startup;
     startup.start();

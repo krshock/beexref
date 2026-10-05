@@ -288,6 +288,12 @@ const QVector<FieldSpec> &fields()
     static const QVector<FieldSpec> specs = {
         {QStringLiteral("Save/confirm_close_unsaved"), true, boolCast(), nullptr},
         {QStringLiteral("Save/incremental"), true, boolCast(), nullptr},
+        // The window colours: 'system' follows the desktop's light or
+        // dark preference; the canvas and the HUD keep their dark look
+        // in every mode.
+        {QStringLiteral("View/theme"), QStringLiteral("system"), nullptr,
+         oneOf({QStringLiteral("system"), QStringLiteral("dark"),
+                QStringLiteral("light")})},
         {QStringLiteral("Items/grayscale_method"), QStringLiteral("classic"), nullptr, nullptr},
         {QStringLiteral("Items/image_storage_format"), QStringLiteral("best"), nullptr,
          oneOf({QStringLiteral("png"), QStringLiteral("jpg"), QStringLiteral("best")})},

@@ -39,6 +39,11 @@ project uses [Semantic Versioning](https://semver.org/).
   board never holds up the other window. From an AppImage the new window
   starts from the `.AppImage` file itself, and closing the window you
   started from never affects it.
+- **The window follows your desktop's light or dark mode**: the window,
+  menus and dialogs take the desktop setting — the AppImage included,
+  which used to ignore it. Settings ▸ Miscellaneous ▸ Theme picks
+  between Follow the system, Dark and Light; the canvas and the HUD keep
+  their dark look in every mode.
 - **Edit several images at once**: with more than one image selected,
   the metadata panel (`I`) shows the fields that can be shared — Author,
   Collection and Year — and writes the ones you edit to every selected

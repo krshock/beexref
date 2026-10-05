@@ -11,6 +11,7 @@
 #include "metadata_panel.h"
 #include "menu_layout.h"
 #include "new_instance.h"
+#include "theme.h"
 #include "constants.h"
 #include "input_controller.h"
 #include "layout_ops.h"
@@ -778,6 +779,7 @@ void MainWindow::openSettingsDialog()
         applyAllocationLimit();
         view_->setLodSettings(loadLodSettings());
         view_->lodManager()->evaluateNow();
+        theme::applyFromSettings();
     });
     dialog->show();
 }
@@ -895,6 +897,11 @@ void MainWindow::setGrayscaleMethod(const QString &id)
 
 void MainWindow::applySettingChanged(const QString &key)
 {
+    if (key == QLatin1String("View/theme")) {
+        // The window colours and the palette behind them apply at once.
+        theme::applyFromSettings();
+        return;
+    }
     if (key == QLatin1String("Items/image_allocation_limit")) {
         applyAllocationLimit();
         return;

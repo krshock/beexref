@@ -24,6 +24,7 @@
 #include <QAction>
 #include <QDialog>
 #include <QPushButton>
+#include <QRadioButton>
 #include <QSlider>
 #include <QTabWidget>
 #include <QTextEdit>
@@ -32,6 +33,7 @@
 #include <QTextStream>
 #include <QWheelEvent>
 #include <QtTest>
+#include <QPalette>
 #include <csignal>
 
 #include <cmath>
@@ -823,6 +825,51 @@ public:
                       << "\n";
             }
 #endif
+        }
+
+        // Settings ▸ Miscellaneous ▸ Theme: the window colours follow
+        // the setting at once, while the canvas and the HUD stay dark.
+        {
+            const auto actionByText = [&](const QString &text) -> QAction * {
+                for (QAction *action : window_.findChildren<QAction *>()) {
+                    if (action->text() == text)
+                        return action;
+                }
+                return nullptr;
+            };
+            actionByText(QStringLiteral("&Settings"))->trigger();
+            QTest::qWait(400);
+            QDialog *dialog = nullptr;
+            for (QDialog *candidate : window_.findChildren<QDialog *>()) {
+                if (candidate->windowTitle().endsWith(QStringLiteral("Settings")))
+                    dialog = candidate;
+            }
+            QRadioButton *light = nullptr;
+            QRadioButton *system = nullptr;
+            if (dialog) {
+                for (QRadioButton *radio : dialog->findChildren<QRadioButton *>()) {
+                    if (radio->text() == QStringLiteral("Light"))
+                        light = radio;
+                    else if (radio->text() == QStringLiteral("Follow the system"))
+                        system = radio;
+                }
+            }
+            out() << "theme radios: light=" << (light != nullptr)
+                  << " system=" << (system != nullptr) << "\n";
+            if (light && system) {
+                light->click();
+                QTest::qWait(300);
+                out() << "theme light: window="
+                      << QApplication::palette().color(QPalette::Window).name() << "\n";
+                snapshot(QStringLiteral("42-theme-light"));
+                system->click();
+                QTest::qWait(300);
+                out() << "theme system: window="
+                      << QApplication::palette().color(QPalette::Window).name() << "\n";
+            }
+            if (dialog)
+                dialog->close();
+            QTest::qWait(200);
         }
 
         // Stress the RAM cache: pan far away so the visible items are
