@@ -61,6 +61,11 @@ public:
     void setKeep(bool keep);
     SceneItem *item() const { return item_; }
     bool isDirty() const;
+    // Commits the draft, if any, as one undo step. The window calls this
+    // before it reads the document (saving, exporting) or replaces it (a
+    // new scene, another board, quitting), so what is still in the panel
+    // is never left out of a file or dropped without a prompt.
+    void commitPendingDraft();
 
     // The minimum width of the right-hand slot, and the last width the
     // panel had (kept while hidden, runtime only).

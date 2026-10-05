@@ -167,6 +167,9 @@ private:
     // Asks before dropping unsaved changes, honouring
     // Save/confirm_close_unsaved.
     bool confirmDiscardChanges(const QString &message);
+    // Saves and replacements read the document: a draft still open in
+    // the metadata panel becomes part of it first.
+    void commitPendingMetadataDraft();
     // Items and Arrange menu handlers (Items/* settings are read at use
     // time).
     void normalizeSelection(int mode); // 0 height, 1 width, 2 size

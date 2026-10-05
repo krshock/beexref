@@ -50,6 +50,16 @@ project uses [Semantic Versioning](https://semver.org/).
   image in a single step, undo included. A field with different values
   shows `(multiple)`, and the fields you leave alone are left alone.
 
+### Fixed
+
+- **Unsaved metadata edits are no longer dropped by Save**: `Ctrl+S` (and
+  Save As, the `.bee` export, New Scene, Open and quitting) commits what
+  is still open in the metadata panel first, so it lands in the saved
+  file — and the unsaved-changes prompt now sees it too.
+- **Open asks before discarding unsaved changes**: opening another board
+  used to replace the current one without a word; it now offers the same
+  confirmation as New Scene and quitting.
+
 ### Changed
 
 - **Metadata fields tidy themselves up when saved**: surrounding spaces

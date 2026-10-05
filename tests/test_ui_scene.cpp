@@ -310,6 +310,8 @@ private slots:
     void batchMetadataEditsTheSelection();
     void newWindowRunsTheRightProgram();
     void themeModesFollowTheSetting();
+    void metadataDraftIsCommittedBeforeSaving();
+    void openingABoardConfirmsUnsavedChanges();
     void metadataFieldsAreNormalized();
     void metadataFieldsClampTheirLength();
     void metadataYearAndCollection();
@@ -4352,6 +4354,116 @@ void TestUiScene::themeModesFollowTheSetting()
     QCOMPARE(QApplication::palette().color(QPalette::Window), darkWindow);
 }
 
+void TestUiScene::metadataDraftIsCommittedBeforeSaving()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    settings::setSettingsDir(dir.path());
+
+    ui::MainWindow window;
+    QImage image(40, 30, QImage::Format_ARGB32);
+    image.fill(Qt::green);
+    QMimeData mime;
+    mime.setImageData(image);
+    window.input()->insertMimeData(mime, QPointF(0, 0));
+    SceneItem *item = window.scene()->pixmapItemViews().first();
+    QVERIFY(item);
+    item->item()->filename = QStringLiteral("poster.png");
+
+    const QString path = dir.filePath(QStringLiteral("board.beex"));
+    QVERIFY(window.saveDocumentTo(path, false));
+
+    // A draft belongs to the panel until it is committed: typing does not
+    // touch the document.
+    window.scene()->clearSelection();
+    item->setSelected(true);
+    ui::MetadataPanel *panel = window.metadataPanel();
+    QVERIFY(panel);
+    panel->toggle();
+    QVERIFY(!panel->isHidden());
+    auto *author = panel->findChild<QLineEdit *>(QStringLiteral("panelAuthor"));
+    QVERIFY(author);
+    author->setText(QStringLiteral("Ada Lovelace"));
+    QVERIFY(panel->isDirty());
+    QVERIFY(!window.scene()->document()->isModified());
+
+    // Ctrl+S commits it first and then saves: the edit is in the document
+    // and in the file, and the panel is clean again.
+    QAction *save = actionByText(window, QStringLiteral("&Save"));
+    QVERIFY(save);
+    save->trigger();
+    QCOMPARE(item->item()->meta.value(QStringLiteral("author")).toString(),
+             QStringLiteral("Ada Lovelace"));
+    QVERIFY(!panel->isDirty());
+
+    auto reopened = doc::Document::open(path, dir.filePath(QStringLiteral("cache")));
+    QVERIFY(reopened.isOk());
+    QCOMPARE(reopened.value().items().size(), 1);
+    QCOMPARE(reopened.value().items().first()->meta.value(QStringLiteral("author")).toString(),
+             QStringLiteral("Ada Lovelace"));
+
+    settings::setSettingsDir(QString());
+}
+
+void TestUiScene::openingABoardConfirmsUnsavedChanges()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    settings::setSettingsDir(dir.path());
+
+    QImage image(6, 4, QImage::Format_ARGB32);
+    image.fill(Qt::red);
+    QMimeData mime;
+    mime.setImageData(image);
+
+    // Board A holds one named image; board B is empty.
+    ui::MainWindow window;
+    window.input()->insertMimeData(mime, QPointF(10, 10));
+    SceneItem *item = window.scene()->pixmapItemViews().first();
+    QVERIFY(item);
+    item->item()->filename = QStringLiteral("poster.png");
+    const QString pathA = dir.filePath(QStringLiteral("a.beex"));
+    QVERIFY(window.saveDocumentTo(pathA, false));
+    const QString pathB = dir.filePath(QStringLiteral("b.beex"));
+    {
+        auto document = doc::Document::create();
+        QVERIFY(document.save(pathB, false));
+    }
+
+    // A change plus an open draft: opening another board would lose both.
+    window.input()->insertMimeData(mime, QPointF(40, 10));
+    window.scene()->clearSelection();
+    item->setSelected(true);
+    ui::MetadataPanel *panel = window.metadataPanel();
+    QVERIFY(panel);
+    panel->toggle();
+    auto *author = panel->findChild<QLineEdit *>(QStringLiteral("panelAuthor"));
+    QVERIFY(author);
+    author->setText(QStringLiteral("Ada Lovelace"));
+    QVERIFY(panel->isDirty());
+
+    // Cancelling keeps the board; the draft was committed before the
+    // question, so the typed edit is not lost by answering no either.
+    QTimer::singleShot(0, [&]() {
+        if (auto *box = qobject_cast<QMessageBox *>(QApplication::activeModalWidget()))
+            box->button(QMessageBox::Cancel)->click();
+    });
+    QVERIFY(!window.openBoard(pathB));
+    QCOMPARE(window.scene()->document()->path(), pathA);
+    QCOMPARE(item->item()->meta.value(QStringLiteral("author")).toString(),
+             QStringLiteral("Ada Lovelace"));
+
+    // Answering yes opens the other board.
+    QTimer::singleShot(0, [&]() {
+        if (auto *box = qobject_cast<QMessageBox *>(QApplication::activeModalWidget()))
+            box->button(QMessageBox::Yes)->click();
+    });
+    QVERIFY(window.openBoard(pathB));
+    QCOMPARE(window.scene()->document()->path(), pathB);
+
+    settings::setSettingsDir(QString());
+}
+
 void TestUiScene::hudPreviewShowsTheStyledPanel()
 {
     ui::MainWindow window;
@@ -4464,7 +4576,9 @@ void TestUiScene::welcomeOverlayTracksTheBoardState()
     QVERIFY(!overlay->isHidden());
     QCOMPARE(overlay->mode(), ui::WelcomeOverlay::Mode::Start);
 
-    // An opened board with no items shows the empty-board state.
+    // An opened board with no items shows the empty-board state. The
+    // document still has history from the insert and the delete, so
+    // Open asks first; answering lets the board load.
     QTemporaryDir dir;
     QVERIFY(dir.isValid());
     const QString path = dir.filePath(QStringLiteral("empty.beex"));
@@ -4472,6 +4586,10 @@ void TestUiScene::welcomeOverlayTracksTheBoardState()
         auto document = doc::Document::create();
         QVERIFY(document.save(path, false));
     }
+    QTimer::singleShot(0, [&]() {
+        if (auto *box = qobject_cast<QMessageBox *>(QApplication::activeModalWidget()))
+            box->button(QMessageBox::Yes)->click();
+    });
     QVERIFY(window.openBoard(path));
     QVERIFY(!overlay->isHidden());
     QCOMPARE(overlay->mode(), ui::WelcomeOverlay::Mode::Empty);

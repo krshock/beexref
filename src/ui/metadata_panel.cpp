@@ -812,6 +812,12 @@ bool MetadataPanel::eventFilter(QObject *watched, QEvent *event)
     return QWidget::eventFilter(watched, event);
 }
 
+void MetadataPanel::commitPendingDraft()
+{
+    if (isDirty())
+        commitDraft();
+}
+
 void MetadataPanel::commitDraft()
 {
     if (!batchItems_.isEmpty()) {

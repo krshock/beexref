@@ -366,6 +366,13 @@ MainWindow::~MainWindow()
 
 bool MainWindow::openBoard(const QString &path)
 {
+    commitPendingMetadataDraft();
+    // Opening replaces the document: ask when it has unsaved changes.
+    // The startup call and an untouched document go straight through.
+    if (!confirmDiscardChanges(
+            QStringLiteral("There are unsaved changes. Are you sure you want to open \"%1\"?")
+                .arg(QFileInfo(path).fileName())))
+        return false;
     auto opened = doc::Document::open(path, settings::cacheDir());
     if (!opened) {
         logging::error(QStringLiteral("Cannot open board"),
@@ -487,6 +494,7 @@ void MainWindow::exportBee()
 
 bool MainWindow::exportBeeTo(const QString &path)
 {
+    commitPendingMetadataDraft();
     if (!document_)
         return false;
 
@@ -648,7 +656,9 @@ bool MainWindow::exportImagesTo(
 }
 
 bool MainWindow::saveDocumentTo(const QString &path, bool createNew)
-{    if (!document_)
+{
+    commitPendingMetadataDraft();
+    if (!document_)
         return false;
 
     // Native saves always use .beex; .bee is import only.
@@ -715,6 +725,7 @@ bool MainWindow::saveDocumentTo(const QString &path, bool createNew)
 
 void MainWindow::closeEvent(QCloseEvent *event)
 {
+    commitPendingMetadataDraft();
     if (!confirmDiscardChanges(
             QStringLiteral("There are unsaved changes. Are you sure you want to quit?"))) {
         event->ignore();
@@ -939,6 +950,16 @@ void MainWindow::applyAllocationLimit()
     QImageReader::setAllocationLimit(limit);
 }
 
+// Saving, exporting and replacing the document all read it: whatever is
+// still a draft in the metadata panel belongs in the file first. The
+// commit is one undo step and marks the document modified, so the
+// unsaved-changes prompt protects a draft the user never committed.
+void MainWindow::commitPendingMetadataDraft()
+{
+    if (metadataPanel_)
+        metadataPanel_->commitPendingDraft();
+}
+
 bool MainWindow::confirmDiscardChanges(const QString &message)
 {
     if (!document_ || !document_->isModified())
@@ -954,6 +975,7 @@ bool MainWindow::confirmDiscardChanges(const QString &message)
 
 void MainWindow::newScene()
 {
+    commitPendingMetadataDraft();
     if (!confirmDiscardChanges(
             QStringLiteral("There are unsaved changes. Are you sure you want to open a new "
                            "scene?")))
