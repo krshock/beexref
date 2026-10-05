@@ -8,10 +8,25 @@ project(BeeXRef
 # The version is the single source of truth: it reaches the app as
 # constants::Version (--version, the About dialog, the startup log).
 # Bump MAJOR.MINOR.PATCH here and tag the release commit vX.Y.Z
-# (annotated), like the Python reference's tags.
+# (annotated), like the Python reference's tags. Test and pre-release
+# builds decorate the reported version with BEEXREF_VERSION_SUFFIX
+# instead of changing it.
 if(NOT PROJECT_VERSION MATCHES "^[0-9]+\\.[0-9]+\\.[0-9]+$")
     message(FATAL_ERROR
         "project VERSION must be MAJOR.MINOR.PATCH, got '${PROJECT_VERSION}'")
+endif()
+
+# A label for test and pre-release builds ("-dev", "-rc.1"), separator
+# included; empty for releases. The release scripts pass it through
+# their --suffix flag, and it only shows in what the app reports: the
+# project version the release tooling reads stays MAJOR.MINOR.PATCH.
+set(BEEXREF_VERSION_SUFFIX "" CACHE STRING
+    "Suffix appended to the reported version, separator included (e.g. -rc.1)")
+if(NOT BEEXREF_VERSION_SUFFIX STREQUAL ""
+   AND NOT BEEXREF_VERSION_SUFFIX MATCHES "^[-+][-+.0-9A-Za-z_]*$")
+    message(FATAL_ERROR
+        "BEEXREF_VERSION_SUFFIX must start with '-' or '+' and hold only "
+        "letters, digits, '.', '+' and '-', got '${BEEXREF_VERSION_SUFFIX}'")
 endif()
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
@@ -190,7 +205,8 @@ qt_add_library(beexref_core STATIC
     src/util/process.h)
 target_include_directories(beexref_core PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>)
-target_compile_definitions(beexref_core PUBLIC BEEXREF_VERSION="${PROJECT_VERSION}")
+target_compile_definitions(beexref_core PUBLIC
+    BEEXREF_VERSION="${PROJECT_VERSION}${BEEXREF_VERSION_SUFFIX}")
 qt_add_resources(beexref_core "beexref_assets"
     PREFIX "/"
     FILES

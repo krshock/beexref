@@ -86,6 +86,22 @@ notes, checksums) and creates the release as a **draft** so a human can
 review it before pressing Publish. Running it again uploads to the
 existing release instead.
 
+## Test builds
+
+A labeled build of the current tree reports a decorated version and
+never touches the release artifacts:
+
+```
+sg docker -c 'tools/release/linux-appimage.sh --suffix newwin'
+QT_DIR=... tools/release/linux-appimage.sh --host --suffix newwin
+```
+
+`--suffix LABEL` appends `-LABEL` to the version the app reports
+(`--version`, the About dialog, the startup log) and writes the AppImage
+to `dist/dev/BeeXRef-<version>-<label>-x86_64.AppImage`, which stays out
+of `dist/SHA256SUMS` and out of `verify.sh`'s all-of-dist pass. The
+project version in `CMakeLists.txt` is unchanged.
+
 ## Decisions and limits
 
 - Release artifacts are pinned to **Qt 6.8.3 LTS**; the development
@@ -95,4 +111,8 @@ existing release instead.
   the stable phase, the same `windows-zip.sh` runs on `windows-latest`
   with the Qt-installer toolchain.
 - Checksums are not signed yet; artifacts have no auto-updater.
+- Labeled builds (`--suffix`) are tests, not releases: they have no tag,
+  no checksums and no GitHub release. Pre-release labels (`-alpha.1`,
+  `-beta.2`, `-rc.1`) for an upcoming version will come with the release
+  scripts' `--pre` support in the 1.0 cycle.
 - `dist/` is gitignored; never commit artifacts.

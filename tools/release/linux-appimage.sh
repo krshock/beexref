@@ -10,7 +10,11 @@
 # the 20.04 toolchain (gcc-10/g++-10); --fetch-tools downloads the pinned
 # AppImage tools into APPIMAGE_TOOLS first.
 #
-# Usage: linux-appimage.sh [--container|--host] [--with-wayland] [--fetch-tools]
+# --suffix LABEL builds a labeled test build instead of a release one:
+# the app reports <version>-LABEL and the artifact lands in dist/dev/, so
+# it never enters dist/SHA256SUMS or the release path.
+#
+# Usage: linux-appimage.sh [--container|--host] [--with-wayland] [--fetch-tools] [--suffix LABEL]
 #   container:  tools/release/linux-appimage.sh
 #   host (VM):  QT_DIR=$HOME/Qt/6.8.3/gcc_64 tools/release/linux-appimage.sh --host
 set -eu
@@ -20,6 +24,7 @@ mode=container
 inner=false
 with_wayland=false
 fetch_tools=false
+suffix=
 while [ "$#" -gt 0 ]; do
     case "$1" in
         --container) mode=container; shift ;;
@@ -27,9 +32,18 @@ while [ "$#" -gt 0 ]; do
         --inner) inner=true; shift ;; # internal: the container re-invokes this
         --with-wayland) with_wayland=true; shift ;;
         --fetch-tools) fetch_tools=true; shift ;;
+        --suffix)
+            [ "$#" -ge 2 ] || release_die "--suffix needs a label"
+            suffix=$2
+            shift 2
+            ;;
         *) release_die "unknown option: $1" ;;
     esac
 done
+if [ -n "$suffix" ]; then
+    printf '%s' "$suffix" | grep -Eq '^[0-9A-Za-z][0-9A-Za-z._+-]*$' || release_die \
+        "the suffix must start with a letter or digit and hold only letters, digits, '.', '+' and '-' (got '$suffix')"
+fi
 
 root=$(release_root)
 version=$(release_version)
@@ -49,11 +63,13 @@ if [ "$mode" = container ] && [ "$inner" = false ]; then
     image="beexref-appimage:qt6.8.3-wayland-$with_wayland_arg"
     "$runtime" build --build-arg "WITH_WAYLAND=$with_wayland_arg" \
         -t "$image" -f "$root/tools/release/Dockerfile.appimage" "$root/tools/release"
+    set -- "$image" tools/release/linux-appimage.sh --inner
+    [ -n "$suffix" ] && set -- "$@" --suffix "$suffix"
     exec "$runtime" run --rm \
         --user "$(id -u):$(id -g)" \
         -e HOME=/tmp \
         -v "$root:/src" -w /src \
-        "$image" tools/release/linux-appimage.sh --inner
+        "$@"
 fi
 
 # Inside the container (--inner) or on a prepared host. The container
@@ -110,11 +126,17 @@ cxx=${CXX:-g++-10}
 
 build="$root/build/appimage"
 echo "linux-appimage: configuring in $build"
+# The suffix goes in on every configure, empty included, so a labeled
+# build cannot leak into a later release build through the cache.
+suffix_flag=
+[ -n "$suffix" ] && suffix_flag="-$suffix"
+
 cmake -S "$root" -B "$build" -G Ninja \
     -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_C_COMPILER="$cc" \
     -DCMAKE_CXX_COMPILER="$cxx" \
     -DCMAKE_PREFIX_PATH="$QT_DIR" \
+    -DBEEXREF_VERSION_SUFFIX="$suffix_flag" \
     -DBUILD_TESTING=ON
 cmake --build "$build"
 ( cd "$build" && QT_QPA_PLATFORM=offscreen ctest --output-on-failure )
@@ -155,7 +177,16 @@ if [ "$with_wayland" = true ]; then
 fi
 "$TOOLS_DIR/linuxdeploy-x86_64.AppImage" --appdir "$appdir"
 
-target="$dist/BeeXRef-$version-x86_64.AppImage"
+if [ -n "$suffix" ]; then
+    # A labeled build is a test build: dist/dev/ keeps it out of
+    # dist/SHA256SUMS and out of the release artifacts.
+    outdir="$dist/dev"
+    [ -d "$outdir" ] || mkdir -p "$outdir"
+    target="$outdir/BeeXRef-$version-$suffix-x86_64.AppImage"
+    echo "linux-appimage: test build (not for release): $version-$suffix"
+else
+    target="$dist/BeeXRef-$version-x86_64.AppImage"
+fi
 echo "linux-appimage: building $target"
 "$TOOLS_DIR/appimagetool-x86_64.AppImage" "$appdir" "$target"
 echo "linux-appimage: wrote $target"
