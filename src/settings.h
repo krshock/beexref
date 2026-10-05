@@ -20,6 +20,12 @@ QString iniPath();
 QString logPath();
 QString cacheDir();
 
+// The directory set through --settings-dir, or empty when the default
+// locations are in use. A new window only passes it on when it is set:
+// naming the default directory would move the cache next to the
+// configuration.
+QString customSettingsDir();
+
 // INI file in the format shared by the Python and Go ports: sections,
 // key=value lines, arrays as "1\path=..." plus "size". Writes are
 // deferred to sync().

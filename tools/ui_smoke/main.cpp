@@ -32,6 +32,7 @@
 #include <QTextStream>
 #include <QWheelEvent>
 #include <QtTest>
+#include <csignal>
 
 #include <cmath>
 
@@ -43,6 +44,7 @@
 #include "ui/hud_preview.h"
 #include "ui/main_window.h"
 #include "ui/metadata_panel.h"
+#include "ui/new_instance.h"
 #include "ui/scene.h"
 #include "ui/rendering.h"
 #include "ui/selection_ops.h"
@@ -792,6 +794,35 @@ public:
                     actionByText(QStringLiteral("Edit Image &Metadata"))->trigger();
                 QTest::qWait(300);
             }
+        }
+
+        // A new window is a new process. This harness cannot spawn
+        // itself (that would run the harness again), so it launches the
+        // real beexref next to it -- with this run's settings copy --
+        // checks it is alive and kills it by the pid it started, never
+        // by name.
+        {
+#ifdef Q_OS_WIN
+            const QString sibling = QDir(QCoreApplication::applicationDirPath())
+                                        .filePath(QStringLiteral("beexref.exe"));
+#else
+            const QString sibling = QDir(QCoreApplication::applicationDirPath())
+                                        .filePath(QStringLiteral("beexref"));
+#endif
+            qint64 pid = 0;
+            const qint64 launched = ui::launchNewInstance(&pid, sibling);
+            out() << "new window: pid=" << launched << " program=" << sibling << "\n";
+#ifdef Q_OS_UNIX
+            if (pid > 0) {
+                QTest::qWait(1500);
+                const bool alive = ::kill(static_cast<int>(pid), 0) == 0;
+                out() << "new window alive: " << alive << "\n";
+                ::kill(static_cast<int>(pid), SIGTERM);
+                QTest::qWait(600);
+                out() << "new window gone: " << (::kill(static_cast<int>(pid), 0) != 0)
+                      << "\n";
+            }
+#endif
         }
 
         // Stress the RAM cache: pan far away so the visible items are

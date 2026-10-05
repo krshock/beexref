@@ -10,6 +10,7 @@
 #include "info_dialogs.h"
 #include "metadata_panel.h"
 #include "menu_layout.h"
+#include "new_instance.h"
 #include "constants.h"
 #include "input_controller.h"
 #include "layout_ops.h"
@@ -1193,6 +1194,13 @@ void MainWindow::buildActions()
     actions_->add(QStringLiteral("new_scene"), QStringLiteral("&New Scene"),
                   QKeySequence(QStringLiteral("Ctrl+N")), G::Always,
                   [this](bool) { newScene(); });
+    // A second window runs a second process: its own board, undo
+    // history and memory. new_instance.cpp decides how it starts (a
+    // fresh AppImage mount, LaunchServices on macOS, the executable
+    // everywhere else).
+    actions_->add(QStringLiteral("new_window"), QStringLiteral("New &Window"),
+                  QKeySequence(QStringLiteral("Ctrl+Shift+N")), G::Always,
+                  [](bool) { launchNewInstance(); });
     actions_->add(QStringLiteral("open"), QStringLiteral("&Open"), QKeySequence::Open, G::Always,
                   [this](bool) { openFileDialog(); });
     actions_->add(QStringLiteral("save"), QStringLiteral("&Save"),

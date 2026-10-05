@@ -62,6 +62,11 @@ QString configDir()
     return g_settingsDir.isEmpty() ? defaultConfigDir() : g_settingsDir;
 }
 
+QString customSettingsDir()
+{
+    return g_settingsDir;
+}
+
 QString iniPath()
 {
     return configDir() + QStringLiteral("/BeeXRef.ini");

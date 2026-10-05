@@ -34,6 +34,11 @@ project uses [Semantic Versioning](https://semver.org/).
   colour), and double-clicking it opens the address in your browser. Only
   `http` and `https` links are handed over — a file path or a script
   never launches anything.
+- **A new window**: File ▸ New Window (`Ctrl+Shift+N`) opens a second
+  BeeXRef window with its own board, undo history and memory, so a heavy
+  board never holds up the other window. From an AppImage the new window
+  starts from the `.AppImage` file itself, and closing the window you
+  started from never affects it.
 - **Edit several images at once**: with more than one image selected,
   the metadata panel (`I`) shows the fields that can be shared — Author,
   Collection and Year — and writes the ones you edit to every selected

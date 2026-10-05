@@ -47,6 +47,7 @@ const QVector<MenuDef> &menuLayout()
         {QStringLiteral("&File"),
          {
              action("new_scene"),
+             action("new_window"),
              action("open"),
              recentFiles(),
              separator(),

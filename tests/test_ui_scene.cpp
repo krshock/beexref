@@ -37,6 +37,7 @@
 #include <QTabWidget>
 #include <QTableWidget>
 #include <QTemporaryDir>
+#include <QProcessEnvironment>
 #include <QTextEdit>
 #include <QToolButton>
 #include <QtTest>
@@ -70,6 +71,7 @@
 #include "ui/metadata_panel.h"
 #include "ui/fuzzy_authors.h"
 #include "ui/move_handle.h"
+#include "ui/new_instance.h"
 #include "ui/settings_dialog.h"
 #include "ui/grayscale.h"
 #include "ui/opacity_dialog.h"
@@ -305,6 +307,7 @@ private slots:
     void infoDialogsShowTheExpectedContent();
     void metadataPanelEditsAndCommits();
     void batchMetadataEditsTheSelection();
+    void newWindowRunsTheRightProgram();
     void metadataFieldsAreNormalized();
     void metadataFieldsClampTheirLength();
     void metadataYearAndCollection();
@@ -4215,6 +4218,95 @@ void TestUiScene::batchMetadataEditsTheSelection()
     QVERIFY(url->isVisible());
     QVERIFY(notes->isVisible());
     QCOMPARE(author->placeholderText(), QStringLiteral("Author"));
+
+    settings::setSettingsDir(QString());
+}
+
+void TestUiScene::newWindowRunsTheRightProgram()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    settings::setSettingsDir(dir.path());
+
+    // A plain install (build tree, tarball, apt/rpm package) runs the
+    // executable again with nothing added.
+    const ui::NewInstanceSpec plain = ui::newInstanceSpec(
+        QProcessEnvironment(), QStringLiteral("/usr/bin/beexref"), QString(), false);
+    QCOMPARE(plain.program, QStringLiteral("/usr/bin/beexref"));
+    QVERIFY(plain.args.isEmpty());
+
+    // The AppImage is the exception: the child must run the .AppImage
+    // file again (a fresh mount), not the copy inside this process's
+    // mount, and the runtime's variables leave its environment.
+    const QString appImage = dir.filePath(QStringLiteral("BeeXRef-test.AppImage"));
+    {
+        QFile file(appImage);
+        QVERIFY(file.open(QIODevice::WriteOnly));
+        file.write("#!/bin/sh\n");
+    }
+    QVERIFY(QFile::setPermissions(appImage, QFileDevice::ReadOwner | QFileDevice::WriteOwner
+                                               | QFileDevice::ExeOwner));
+    QProcessEnvironment appImageEnv;
+    appImageEnv.insert(QStringLiteral("APPIMAGE"), appImage);
+    appImageEnv.insert(QStringLiteral("APPDIR"), QStringLiteral("/tmp/.mount_test"));
+    appImageEnv.insert(QStringLiteral("OWD"), QStringLiteral("/somewhere"));
+    appImageEnv.insert(QStringLiteral("ARGV0"), QStringLiteral("./BeeXRef.AppImage"));
+    const ui::NewInstanceSpec inside = ui::newInstanceSpec(
+        appImageEnv, QStringLiteral("/tmp/.mount_test/usr/bin/beexref"), QString(), false);
+    QCOMPARE(inside.program, appImage);
+    QVERIFY(!inside.environment.contains(QStringLiteral("APPIMAGE")));
+    QVERIFY(!inside.environment.contains(QStringLiteral("APPDIR")));
+    QVERIFY(!inside.environment.contains(QStringLiteral("OWD")));
+    QVERIFY(!inside.environment.contains(QStringLiteral("ARGV0")));
+
+    // A stale APPIMAGE (moved or deleted while running) falls back to
+    // the executable.
+    QProcessEnvironment staleEnv;
+    staleEnv.insert(QStringLiteral("APPIMAGE"), dir.filePath(QStringLiteral("gone.AppImage")));
+    const ui::NewInstanceSpec stale = ui::newInstanceSpec(
+        staleEnv, QStringLiteral("/usr/bin/beexref"), QString(), false);
+    QCOMPARE(stale.program, QStringLiteral("/usr/bin/beexref"));
+
+    // A custom settings directory travels to the child; the default is
+    // left out, because naming it moves the cache beside the settings.
+    const ui::NewInstanceSpec custom = ui::newInstanceSpec(
+        QProcessEnvironment(), QStringLiteral("/usr/bin/beexref"),
+        QStringLiteral("/tmp/beexref-config"), false);
+    QCOMPARE(custom.args, QStringList({QStringLiteral("--settings-dir"),
+                                       QStringLiteral("/tmp/beexref-config")}));
+    const ui::NewInstanceSpec customAppImage = ui::newInstanceSpec(
+        appImageEnv, QStringLiteral("/tmp/.mount_test/usr/bin/beexref"),
+        QStringLiteral("/tmp/beexref-config"), false);
+    QCOMPARE(customAppImage.program, appImage);
+    QCOMPARE(customAppImage.args, QStringList({QStringLiteral("--settings-dir"),
+                                               QStringLiteral("/tmp/beexref-config")}));
+
+    // macOS: a bundle opens through LaunchServices (--args carries the
+    // app's arguments), and a binary outside a bundle runs directly.
+    const ui::NewInstanceSpec macBundle = ui::newInstanceSpec(
+        QProcessEnvironment(),
+        QStringLiteral("/Applications/BeeXRef.app/Contents/MacOS/beexref"), QString(), true);
+    QCOMPARE(macBundle.program, QStringLiteral("/usr/bin/open"));
+    QCOMPARE(macBundle.args, QStringList({QStringLiteral("-n"),
+                                          QStringLiteral("/Applications/BeeXRef.app")}));
+    const ui::NewInstanceSpec macCustom = ui::newInstanceSpec(
+        QProcessEnvironment(),
+        QStringLiteral("/Applications/BeeXRef.app/Contents/MacOS/beexref"),
+        QStringLiteral("/tmp/beexref-config"), true);
+    QCOMPARE(macCustom.args,
+             QStringList({QStringLiteral("-n"), QStringLiteral("/Applications/BeeXRef.app"),
+                          QStringLiteral("--args"), QStringLiteral("--settings-dir"),
+                          QStringLiteral("/tmp/beexref-config")}));
+    const ui::NewInstanceSpec macPlain = ui::newInstanceSpec(
+        QProcessEnvironment(), QStringLiteral("/Users/x/build/beexref"), QString(), true);
+    QCOMPARE(macPlain.program, QStringLiteral("/Users/x/build/beexref"));
+
+    // The File menu carries the action, always enabled.
+    ui::MainWindow window;
+    QAction *newWindow = actionByText(window, QStringLiteral("New &Window"));
+    QVERIFY(newWindow);
+    QCOMPARE(newWindow->shortcut(), QKeySequence(QStringLiteral("Ctrl+Shift+N")));
+    QVERIFY(newWindow->isEnabled());
 
     settings::setSettingsDir(QString());
 }
