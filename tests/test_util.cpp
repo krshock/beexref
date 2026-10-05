@@ -18,10 +18,14 @@ private slots:
 
 void TestUtil::appVersionIsSemver()
 {
-    // The version comes from CMake's project VERSION; keep it explicit
-    // MAJOR.MINOR.PATCH so tags and --version stay predictable.
+    // The version comes from CMake's project VERSION, optionally
+    // decorated by BEEXREF_VERSION_SUFFIX for test and pre-release
+    // builds: the base stays explicit MAJOR.MINOR.PATCH so tags and
+    // --version stay predictable, and a label keeps SemVer's pre-release
+    // or build-metadata shape.
     const QString version = QString::fromLatin1(constants::Version);
-    QVERIFY2(QRegularExpression(QStringLiteral("^[0-9]+\\.[0-9]+\\.[0-9]+$"))
+    QVERIFY2(QRegularExpression(QStringLiteral(
+                                    "^[0-9]+\\.[0-9]+\\.[0-9]+(-[0-9A-Za-z.-]+)?(\\+[0-9A-Za-z.-]+)?$"))
                  .match(version)
                  .hasMatch(),
              qPrintable(version));
