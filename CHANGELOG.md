@@ -34,6 +34,16 @@ project uses [Semantic Versioning](https://semver.org/).
   colour), and double-clicking it opens the address in your browser. Only
   `http` and `https` links are handed over — a file path or a script
   never launches anything.
+- **Compact Board**: File ▸ Compact Board writes a smaller copy of the
+  board by re-encoding its lossless images — losslessly (WebP, pixel for
+  pixel) or imperceptibly (quality 95 for photographs, lossless where
+  artifacts would show). The original file is left untouched, and a
+  `.bee` export converts those images back to png/jpg so upstream BeeRef
+  still opens it.
+- **Image Storage setting**: how images entering the board are encoded —
+  keep the originals (default), compact lossless, or compact
+  imperceptibly. Pasted images are no longer stored as oversized PNG:
+  they become lossless WebP.
 - **A new window**: File ▸ New Window (`Ctrl+Shift+N`) opens a second
   BeeXRef window with its own board, undo history and memory, so a heavy
   board never holds up the other window. From an AppImage the new window

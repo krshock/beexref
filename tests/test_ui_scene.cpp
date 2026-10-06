@@ -5,6 +5,7 @@
 #include <QColor>
 #include <QContextMenuEvent>
 #include <QImage>
+#include <QImageWriter>
 #include <QMenu>
 #include <QMenuBar>
 #include <QMimeData>
@@ -40,6 +41,7 @@
 #include <QProcessEnvironment>
 #include <QTextEdit>
 #include <QToolButton>
+#include <QUrl>
 #include <QtTest>
 #include <QWheelEvent>
 
@@ -311,6 +313,7 @@ private slots:
     void newWindowRunsTheRightProgram();
     void themeModesFollowTheSetting();
     void metadataDraftIsCommittedBeforeSaving();
+    void imageStorageSettingAppliesOnInsert();
     void openingABoardConfirmsUnsavedChanges();
     void metadataFieldsAreNormalized();
     void metadataFieldsClampTheirLength();
@@ -4002,7 +4005,10 @@ void TestUiScene::metadataPanelEditsAndCommits()
     };
     QCOMPARE(rows.size(), 12);
     QCOMPARE(infoValue(QStringLiteral("Size")), QStringLiteral("6 x 4"));
-    QCOMPARE(infoValue(QStringLiteral("Format")), QStringLiteral("png"));
+    // A pasted image is stored losslessly: WebP when the plugin is
+    // there, PNG otherwise.
+    QVERIFY(QStringList({QStringLiteral("png"), QStringLiteral("webp")})
+                .contains(infoValue(QStringLiteral("Format"))));
     QCOMPARE(infoValue(QStringLiteral("Save ID")), QStringLiteral("Not saved"));
 
     // The Meta tab edits a draft; Save commits one undo step and keeps
@@ -4460,6 +4466,74 @@ void TestUiScene::openingABoardConfirmsUnsavedChanges()
     });
     QVERIFY(window.openBoard(pathB));
     QCOMPARE(window.scene()->document()->path(), pathB);
+
+    settings::setSettingsDir(QString());
+}
+
+void TestUiScene::imageStorageSettingAppliesOnInsert()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    settings::setSettingsDir(dir.path());
+    if (!QImageWriter::supportedImageFormats().contains("webp"))
+        QSKIP("the WebP plugin is not available");
+
+    // A photo-like PNG on disk.
+    QImage image(64, 64, QImage::Format_RGB32);
+    for (int y = 0; y < 64; ++y) {
+        for (int x = 0; x < 64; ++x)
+            image.setPixel(x, y,
+                           qRgb((x * 4 + y) % 256, (y * 3 + x / 2) % 256, (x + y * 5) % 256));
+    }
+    const QString path = dir.filePath(QStringLiteral("photo.png"));
+    QVERIFY(image.save(path, "PNG"));
+    const qint64 pngSize = QFileInfo(path).size();
+
+    ui::MainWindow window;
+    // The default keeps the file's own bytes.
+    {
+        QMimeData urls;
+        urls.setUrls({QUrl::fromLocalFile(path)});
+        window.input()->insertMimeData(urls, QPointF(0, 0));
+    }
+    SceneItem *kept = window.scene()->pixmapItemViews().value(0);
+    QVERIFY(kept);
+    QCOMPARE(kept->item()->format, QStringLiteral("png"));
+    QCOMPARE(kept->item()->source->bytes().size(), pngSize);
+
+    // Compact lossless: the same pixels in a smaller WebP payload.
+    // The Compact Board command is in the File menu, enabled with items.
+    QAction *compact = actionByText(window, QStringLiteral("Compact &Board..."));
+    QVERIFY(compact);
+    QVERIFY(compact->isEnabled());
+
+    {
+        settings::File file(settings::iniPath());
+        file.load();
+        file.setValue(QStringLiteral("Items"), QStringLiteral("image_storage_format"),
+                      QStringLiteral("lossless"));
+        file.sync();
+    }
+    {
+        QMimeData urls;
+        urls.setUrls({QUrl::fromLocalFile(path)});
+        window.input()->insertMimeData(urls, QPointF(200, 0));
+    }
+    SceneItem *compacted = nullptr;
+    for (SceneItem *view : window.scene()->pixmapItemViews()) {
+        if (view != kept)
+            compacted = view;
+    }
+    QVERIFY(compacted);
+    QCOMPARE(compacted->item()->format, QStringLiteral("webp"));
+    QVERIFY(compacted->item()->source->bytes().size() < pngSize);
+    QImage back;
+    QVERIFY(back.loadFromData(compacted->item()->source->bytes(), "webp"));
+    QCOMPARE(back.size(), image.size());
+    for (int y = 0; y < image.height(); y += 7) {
+        for (int x = 0; x < image.width(); x += 7)
+            QCOMPARE(back.pixel(x, y), image.pixel(x, y));
+    }
 
     settings::setSettingsDir(QString());
 }

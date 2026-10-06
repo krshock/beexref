@@ -184,6 +184,22 @@ void TestSettings::fieldsDefaultsAndCasts()
     QCOMPARE(settings::valueOrDefault(file, QStringLiteral("View/theme")).toString(),
              QStringLiteral("light"));
 
+    // Image storage: the default keeps the originals; an unknown value
+    // (the upstream format names included) falls back to it.
+    QCOMPARE(settings::valueOrDefault(file, QStringLiteral("Items/image_storage_format"))
+                 .toString(),
+             QStringLiteral("original"));
+    file.setValue(QStringLiteral("Items"), QStringLiteral("image_storage_format"),
+                  QStringLiteral("best"));
+    QCOMPARE(settings::valueOrDefault(file, QStringLiteral("Items/image_storage_format"))
+                 .toString(),
+             QStringLiteral("original"));
+    file.setValue(QStringLiteral("Items"), QStringLiteral("image_storage_format"),
+                  QStringLiteral("compact"));
+    QCOMPARE(settings::valueOrDefault(file, QStringLiteral("Items/image_storage_format"))
+                 .toString(),
+             QStringLiteral("compact"));
+
     file.setValue(QStringLiteral("Items"), QStringLiteral("lod_method"),
                   QStringLiteral("ram_budget"));
     QCOMPARE(settings::valueOrDefault(file, QStringLiteral("Items/lod_method")).toString(),

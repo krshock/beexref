@@ -533,6 +533,48 @@ board::Status Document::exportBee(const QString &path, const board::Progress &pr
     return board::save(path, buildRecords(), false, progress, nullptr, board::Format::Bee);
 }
 
+CompactStats Document::compactImages(StorageMode mode, const board::Progress &progress)
+{
+    CompactStats stats;
+    const int total = static_cast<int>(items_.size());
+    int done = 0;
+    for (const ItemPtr &item : items_) {
+        if (progress)
+            progress(done, total);
+        ++done;
+        if (!item->isPixmap() || !item->source || !item->source->isValid())
+            continue;
+        // A recovered placeholder has no image data to re-encode.
+        if (item->data.contains(QStringLiteral("placeholder")))
+            continue;
+        const QString format = item->format.toLower();
+        // Already lossy payloads are never re-encoded: another
+        // generation only loses more.
+        if (format == QLatin1String("jpeg") || format == QLatin1String("jpg")
+            || format == QLatin1String("webp"))
+            continue;
+        const QByteArray bytes = item->source->bytes();
+        if (bytes.isEmpty())
+            continue;
+        const LoadedImage loaded = loadImageData(bytes);
+        if (!loaded.isValid())
+            continue;
+        const QByteArray webp = mode == StorageMode::Compact && !loaded.image.hasAlphaChannel()
+                                    ? encodeWebp(loaded.image, 95)
+                                    : encodeWebp(loaded.image, 100);
+        if (webp.isEmpty() || webp.size() >= bytes.size())
+            continue;
+        item->source = std::make_shared<BytesSource>(webp);
+        item->format = QStringLiteral("webp");
+        ++stats.converted;
+        stats.bytesBefore += bytes.size();
+        stats.bytesAfter += webp.size();
+    }
+    if (progress)
+        progress(total, total);
+    return stats;
+}
+
 QVector<board::Record> Document::buildRecords() const
 {
     QVector<board::Record> records;

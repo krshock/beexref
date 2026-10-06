@@ -295,8 +295,12 @@ const QVector<FieldSpec> &fields()
          oneOf({QStringLiteral("system"), QStringLiteral("dark"),
                 QStringLiteral("light")})},
         {QStringLiteral("Items/grayscale_method"), QStringLiteral("classic"), nullptr, nullptr},
-        {QStringLiteral("Items/image_storage_format"), QStringLiteral("best"), nullptr,
-         oneOf({QStringLiteral("png"), QStringLiteral("jpg"), QStringLiteral("best")})},
+        // How incoming images are encoded: keep the source bytes, a
+        // lossless pass, or an imperceptible lossy one. Unknown values
+        // (the upstream format names included) keep the originals.
+        {QStringLiteral("Items/image_storage_format"), QStringLiteral("original"), nullptr,
+         oneOf({QStringLiteral("original"), QStringLiteral("lossless"),
+                QStringLiteral("compact")})},
         {QStringLiteral("Items/arrange_gap"), 0, intCast(),
          [](const QVariant &value) { return value.toInt() >= 0 && value.toInt() <= 200; }},
         {QStringLiteral("Items/arrange_default"), QStringLiteral("optimal"), nullptr,

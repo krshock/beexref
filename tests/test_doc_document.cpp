@@ -1,6 +1,7 @@
 #include <QBuffer>
 #include <QColor>
 #include <QImage>
+#include <QImageWriter>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QTemporaryDir>
@@ -137,6 +138,8 @@ private slots:
     }
     void cleanup() { testenv::isolate(); }
     void savesAndReopensEveryField();
+    void compactionReEncodesLosslessImages();
+    void beeExportTranscodesWebpBlobs();
     void reopenReadsTheBlobFormat();
     void reusesSavedFloors();
     void reportsProgress();
@@ -164,6 +167,104 @@ private slots:
     void incrementalUpdateKeepsPlaceholders();
     void incrementalUpdateWritesOnlyWhatChanged();
 };
+
+void TestDocument::compactionReEncodesLosslessImages()
+{
+    if (!QImageWriter::supportedImageFormats().contains("webp"))
+        QSKIP("the WebP plugin is not available");
+
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString path = dir.filePath(QStringLiteral("compact.beex"));
+
+    // An incompressible PNG (noise): the compaction path must shrink it.
+    QImage image(64, 64, QImage::Format_RGB32);
+    quint32 noise = 987654321;
+    for (int y = 0; y < image.height(); ++y) {
+        for (int x = 0; x < image.width(); ++x) {
+            noise = noise * 1664525 + 1013904223;
+            image.setPixel(x, y,
+                           qRgb(int(noise >> 16) & 0xff, int(noise >> 8) & 0xff,
+                                int(noise) & 0xff));
+        }
+    }
+    const QByteArray png = doc::encodePng(image);
+    QVERIFY(!png.isEmpty());
+
+    auto document = doc::Document::create();
+    doc::ItemPtr item = pixmapItem(png);
+    item->setOriginalSize(image.size());
+    document.addItem(item);
+    QVERIFY(document.save(path).isOk());
+
+    const doc::CompactStats stats = document.compactImages(doc::StorageMode::Lossless);
+    QCOMPARE(stats.converted, 1);
+    QVERIFY(stats.bytesAfter < stats.bytesBefore);
+    QCOMPARE(document.items().first()->format, QStringLiteral("webp"));
+
+    // Lossless: the pixels come back exactly.
+    QImage back;
+    QVERIFY(back.loadFromData(document.items().first()->source->bytes(), "webp"));
+    QCOMPARE(back.size(), image.size());
+    for (int y = 0; y < image.height(); y += 5) {
+        for (int x = 0; x < image.width(); x += 5)
+            QCOMPARE(back.pixel(x, y), image.pixel(x, y));
+    }
+
+    // The save that follows writes the new payload (a whole file: an
+    // incremental update keeps the old blobs) and reopening reads WebP.
+    QVERIFY(document.save(path, true, {}, true).isOk());
+    auto reopened = doc::Document::open(path, dir.filePath(QStringLiteral("cache")));
+    QVERIFY(reopened.isOk());
+    QCOMPARE(reopened.value().items().size(), 1);
+    QCOMPARE(reopened.value().items().first()->format, QStringLiteral("webp"));
+    QVERIFY(reopened.value().items().first()->source->bytes().size() < png.size());
+}
+
+void TestDocument::beeExportTranscodesWebpBlobs()
+{
+    if (!QImageWriter::supportedImageFormats().contains("webp"))
+        QSKIP("the WebP plugin is not available");
+
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+
+    QImage image(64, 64, QImage::Format_RGB32);
+    quint32 noise = 424242;
+    for (int y = 0; y < image.height(); ++y) {
+        for (int x = 0; x < image.width(); ++x) {
+            noise = noise * 1664525 + 1013904223;
+            image.setPixel(x, y,
+                           qRgb(int(noise >> 16) & 0xff, int(noise >> 8) & 0xff,
+                                int(noise) & 0xff));
+        }
+    }
+    const QByteArray webp = doc::encodeWebp(image, 95);
+    QVERIFY(!webp.isEmpty());
+
+    auto document = doc::Document::create();
+    doc::ItemPtr item = pixmapItem(webp);
+    item->format = QStringLiteral("webp");
+    item->setOriginalSize(image.size());
+    document.addItem(item);
+
+    const QString path = dir.filePath(QStringLiteral("export.bee"));
+    QVERIFY(document.exportBee(path).isOk());
+
+    // Upstream BeeRef has no WebP: the export writes a JPEG (this image
+    // has no transparency) and the pixels survive.
+    auto reopened = doc::Document::open(path, dir.filePath(QStringLiteral("cache")));
+    QVERIFY(reopened.isOk());
+    QCOMPARE(reopened.value().items().size(), 1);
+    doc::ItemPtr exported = reopened.value().items().first();
+    // Qt's canonical name for the JPEG the export wrote.
+    QCOMPARE(exported->format, QStringLiteral("jpeg"));
+    const QByteArray bytes = exported->source->bytes();
+    QVERIFY(bytes.startsWith(QByteArray("\xff\xd8", 2)));
+    QImage back;
+    QVERIFY(back.loadFromData(bytes, "jpg"));
+    QCOMPARE(back.size(), image.size());
+}
 
 void TestDocument::savesAndReopensEveryField()
 {
@@ -244,7 +345,9 @@ void TestDocument::reopenReadsTheBlobFormat()
     QCOMPARE(reopened.value().items().size(), 1);
     // The format comes from the sqlar name, so a JPEG original is not
     // mistaken for its saved (PNG) floor.
-    QCOMPARE(reopened.value().items().first()->format, QStringLiteral("jpg"));
+    // The header decides, not the name: a ".jpg" blob reopens as Qt's
+    // canonical "jpeg" (a name from an older scheme cannot mislabel it).
+    QCOMPARE(reopened.value().items().first()->format, QStringLiteral("jpeg"));
 }
 
 void TestDocument::reusesSavedFloors()

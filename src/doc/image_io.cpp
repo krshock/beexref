@@ -48,6 +48,72 @@ QByteArray encodePng(const QImage &image)
     return bytes;
 }
 
+QByteArray encodeWebp(const QImage &image, int quality)
+{
+    QByteArray bytes;
+    QBuffer buffer(&bytes);
+    if (!buffer.open(QIODevice::WriteOnly))
+        return {};
+    QImageWriter writer(&buffer, QByteArrayLiteral("webp"));
+    writer.setQuality(quality);
+    if (!writer.write(image))
+        return {};
+    // Qt's WebP writer happily returns a truncated stream for some
+    // trivial images (a solid image up to 16x16, say). Decode it back
+    // and fail instead of storing something unreadable.
+    QImage decoded;
+    if (!decoded.loadFromData(bytes, "webp") || decoded.size() != image.size())
+        return {};
+    return bytes;
+}
+
+QByteArray encodeLossless(const QImage &image, QString *format)
+{
+    // WebP lossless is the smaller of the two when the plugin is there;
+    // PNG is the guaranteed fallback.
+    const QByteArray webp = encodeWebp(image, 100);
+    if (!webp.isEmpty()) {
+        if (format)
+            *format = QStringLiteral("webp");
+        return webp;
+    }
+    if (format)
+        *format = QStringLiteral("png");
+    return encodePng(image);
+}
+
+StorageMode storageModeForSetting(const QString &value)
+{
+    if (value == QLatin1String("lossless"))
+        return StorageMode::Lossless;
+    if (value == QLatin1String("compact"))
+        return StorageMode::Compact;
+    return StorageMode::Original;
+}
+
+void applyStorageMode(LoadedImage &loaded, StorageMode mode)
+{
+    if (loaded.encoded.isEmpty() || loaded.image.isNull() || mode == StorageMode::Original)
+        return;
+
+    const QString format = loaded.format.toLower();
+    if (format == QLatin1String("webp"))
+        return;
+    // Another generation of a lossy source only loses more: a source
+    // file's JPEG stays as it is.
+    if (loaded.originalBytes
+        && (format == QLatin1String("jpeg") || format == QLatin1String("jpg")))
+        return;
+
+    const QByteArray webp = mode == StorageMode::Compact && !loaded.image.hasAlphaChannel()
+                                ? encodeWebp(loaded.image, 95)
+                                : encodeWebp(loaded.image, 100);
+    if (webp.isEmpty() || webp.size() >= loaded.encoded.size())
+        return;
+    loaded.encoded = webp;
+    loaded.format = QStringLiteral("webp");
+}
+
 LoadedImage loadImageData(const QByteArray &bytes, const QString &source)
 {
     const Decoded decoded = decodeOriented(bytes);
@@ -61,9 +127,11 @@ LoadedImage loadImageData(const QByteArray &bytes, const QString &source)
         && decoded.rawSize == decoded.image.size()) {
         loaded.encoded = bytes;
         loaded.format = decoded.format.isEmpty() ? QStringLiteral("png") : decoded.format;
+        loaded.originalBytes = true;
     } else {
-        loaded.encoded = encodePng(decoded.image);
-        loaded.format = QStringLiteral("png");
+        QString format;
+        loaded.encoded = encodeLossless(decoded.image, &format);
+        loaded.format = format;
     }
     if (loaded.encoded.isEmpty())
         return {};
@@ -84,8 +152,7 @@ LoadedImage imageToLoaded(const QImage &image, const QString &source)
         return {};
     LoadedImage loaded;
     loaded.image = image;
-    loaded.encoded = encodePng(image);
-    loaded.format = QStringLiteral("png");
+    loaded.encoded = encodeLossless(image, &loaded.format);
     loaded.source = source;
     if (loaded.encoded.isEmpty())
         return {};

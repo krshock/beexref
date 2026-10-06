@@ -89,7 +89,7 @@ private slots:
     void textDropIsRejectedButPasteInserts();
     void dropsFileUriKeepsOriginalBytes();
     void dropsRemoteUrlKeepsTheExtractedName();
-    void dropsExifFileBakesPng();
+    void dropsExifFileBakesLossless();
     void internalCopyPasteCreatesCopies();
     void pastePreservesGroupArrangement();
     void pasteSystemClipboardText();
@@ -234,7 +234,7 @@ void TestInput::dropsRemoteUrlKeepsTheExtractedName()
     QVERIFY(document->items().at(1)->filename.isEmpty());
 }
 
-void TestInput::dropsExifFileBakesPng()
+void TestInput::dropsExifFileBakesLossless()
 {
     auto document = std::make_shared<doc::Document>(doc::Document::create());
     ui::Scene scene;
@@ -250,8 +250,10 @@ void TestInput::dropsExifFileBakesPng()
     QCOMPARE(document->items().size(), 1);
     const doc::ItemPtr item = document->items().first();
     QCOMPARE(item->originalSize(), QSize(2, 4));
-    QVERIFY(item->source->bytes().startsWith(QByteArray("\x89PNG", 4)));
-    QVERIFY(item->source->bytes() != fileBytes(path));
+    const QByteArray baked = item->source->bytes();
+    QVERIFY(baked.startsWith(QByteArray("\x89PNG", 4))
+            || (baked.startsWith(QByteArray("RIFF", 4)) && baked.contains("WEBP")));
+    QVERIFY(baked != fileBytes(path));
 }
 
 void TestInput::internalCopyPasteCreatesCopies()
@@ -408,6 +410,7 @@ void TestInput::removingAnImageSpillsItsBytes()
     QCOMPARE(document->items().size(), 1);
 
     const doc::ItemPtr item = document->items().first();
+    const QByteArray payload = item->source->bytes();
     const QString uuid = item->ensureUuid();
     QVERIFY(item->source->residentBytes() > 0);
 
@@ -424,14 +427,14 @@ void TestInput::removingAnImageSpillsItsBytes()
     QVERIFY(item->source->isValid());
     const auto spilled = cache->get(QStringLiteral("undo"), uuid);
     QVERIFY(spilled.has_value());
-    QCOMPARE(*spilled, png);
+    QCOMPARE(*spilled, payload);
 
     QVERIFY(stack.undo());
     scene.syncDocument();
     QCOMPARE(document->items().size(), 1);
     auto blob = document->blob(*document->items().first());
     QVERIFY(blob.isOk());
-    QCOMPARE(blob.value(), png);
+    QCOMPARE(blob.value(), payload);
 }
 
 void TestInput::undoBeforeTheSpillLandsStillRestores()
@@ -459,6 +462,7 @@ void TestInput::undoBeforeTheSpillLandsStillRestores()
     controller.insertMimeData(mime, QPointF(0, 0));
     QCOMPARE(document->items().size(), 1);
 
+    const QByteArray payload = document->items().first()->source->bytes();
     scene.itemViewFor(document->items().first())->setSelected(true);
     controller.cut();
     QCOMPARE(document->items().size(), 0);
@@ -470,7 +474,7 @@ void TestInput::undoBeforeTheSpillLandsStillRestores()
     QCOMPARE(document->items().size(), 1);
     auto blob = document->blob(*document->items().first());
     QVERIFY(blob.isOk());
-    QCOMPARE(blob.value(), png);
+    QCOMPARE(blob.value(), payload);
 }
 
 void TestInput::customInsertHandlerClaimsItsFormat()

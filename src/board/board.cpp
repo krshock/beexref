@@ -3,7 +3,9 @@
 #include "schema.h"
 #include "util/process.h"
 
+#include <QBuffer>
 #include <QCoreApplication>
+#include <QImageReader>
 #include <QDateTime>
 #include <QDir>
 #include <QFile>
@@ -362,7 +364,12 @@ Result<QByteArray> Board::blob(qint64 itemId)
 
 Result<QString> Board::blobFormat(qint64 itemId)
 {
-    auto statement = db_.prepare(QStringLiteral("SELECT name FROM sqlar WHERE item_id=?"));
+    // The blob's own header decides its format: a name can lie. An old
+    // naming scheme derived it from a URL whose last dot segment is not
+    // necessarily the image format (an instagram host ending in .webp,
+    // say), and the content is what readers decode.
+    auto statement = db_.prepare(
+        QStringLiteral("SELECT name, substr(data, 1, 64) FROM sqlar WHERE item_id=?"));
     if (!statement)
         return statement.error();
     if (Status status = statement.value().bind(1, itemId); !status)
@@ -374,6 +381,14 @@ Result<QString> Board::blobFormat(qint64 itemId)
     if (!row.value())
         return QString();
     const QString name = statement.value().columnText(0);
+    QBuffer buffer;
+    buffer.setData(statement.value().columnBlob(1));
+    if (buffer.open(QIODevice::ReadOnly)) {
+        QImageReader reader(&buffer);
+        const QByteArray format = reader.format();
+        if (!format.isEmpty())
+            return QString::fromLatin1(format).toLower();
+    }
     return QFileInfo(name).suffix().toLower();
 }
 

@@ -104,6 +104,8 @@ qt_add_library(beexref_core STATIC
     src/ui/actions.cpp
     src/ui/actions.h
     src/ui/color_gamut.cpp
+    src/ui/compact_dialog.cpp
+    src/ui/compact_dialog.h
     src/ui/controls.cpp
     src/ui/controls.h
     src/ui/controls_dialog.cpp

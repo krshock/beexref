@@ -3,6 +3,7 @@
 #include "actions.h"
 #include "cache/session_cache.h"
 #include "color_gamut.h"
+#include "compact_dialog.h"
 #include "color_tools.h"
 #include "grayscale.h"
 #include "hud.h"
@@ -906,6 +907,118 @@ void MainWindow::setGrayscaleMethod(const QString &id)
     updateActions();
 }
 
+// The estimated sizes for the Compact Board dialog: the modes are tried
+// on the first few images, scaled by the board's total bytes. An actual
+// conversion of every image would be the work itself; the estimate only
+// has to be the right order of magnitude.
+QString MainWindow::compactEstimate() const
+{
+    if (!document_)
+        return {};
+    qint64 total = 0;
+    QVector<QByteArray> sample;
+    for (const doc::ItemPtr &item : document_->items()) {
+        if (!item->isPixmap() || !item->source || !item->source->isValid())
+            continue;
+        const QByteArray bytes = item->source->bytes();
+        if (bytes.isEmpty())
+            continue;
+        total += bytes.size();
+        if (sample.size() < 4)
+            sample.append(bytes);
+    }
+    if (total == 0 || sample.isEmpty())
+        return {};
+
+    qint64 sampled = 0;
+    qint64 lossless = 0;
+    qint64 compact = 0;
+    for (const QByteArray &bytes : sample) {
+        const doc::LoadedImage loaded = doc::loadImageData(bytes);
+        if (!loaded.isValid())
+            continue;
+        sampled += bytes.size();
+        doc::LoadedImage compacted = loaded;
+        doc::applyStorageMode(compacted, doc::StorageMode::Lossless);
+        lossless += compacted.encoded.size();
+        compacted = loaded;
+        doc::applyStorageMode(compacted, doc::StorageMode::Compact);
+        compact += compacted.encoded.size();
+    }
+    if (sampled == 0)
+        return {};
+    const double factor = static_cast<double>(total) / sampled;
+    return QStringLiteral("Now about %1. From this sample: lossless \u2248 %2, "
+                          "imperceptible \u2248 %3. Already lossy images (jpeg, webp) are "
+                          "left alone.")
+        .arg(util::formatSize(total), util::formatSize(qint64(lossless * factor)),
+             util::formatSize(qint64(compact * factor)));
+}
+
+void MainWindow::compactBoard()
+{
+    if (!document_ || document_->items().isEmpty()) {
+        hud::toast(view_, QStringLiteral("Nothing to compact"));
+        return;
+    }
+    view_->cancelModes();
+
+    settings::File file(settings::iniPath());
+    file.load();
+    const doc::StorageMode setting = doc::storageModeForSetting(
+        settings::valueOrDefault(file, QStringLiteral("Items/image_storage_format")).toString());
+    CompactBoardDialog dialog(this,
+                              setting == doc::StorageMode::Compact ? setting
+                                                                   : doc::StorageMode::Lossless,
+                              compactEstimate());
+    if (dialog.exec() != QDialog::Accepted)
+        return;
+    const doc::StorageMode mode = dialog.mode();
+
+    // The compaction always writes a new file: the original is never
+    // touched, so a lossy choice stays reversible by keeping the old one.
+    const QString path = document_->path();
+    const QString startDir =
+        path.isEmpty() ? settings::configDir() : QFileInfo(path).absolutePath();
+    const QString base =
+        path.isEmpty() ? QStringLiteral("board") : QFileInfo(path).completeBaseName();
+    const QString target = QFileDialog::getSaveFileName(
+        this, QStringLiteral("Compact Board"),
+        startDir + QLatin1Char('/') + base + QStringLiteral("-compact.beex"),
+        QStringLiteral("BeeXRef File (*.beex)"));
+    if (target.isEmpty())
+        return;
+
+    // The conversion runs on this thread (the items are not touched from
+    // elsewhere) with a progress report; cancel would leave the board
+    // half converted, so the dialog has none.
+    QProgressDialog progress(QStringLiteral("Compacting images..."), QString(), 0, 100, this);
+    progress.setWindowModality(Qt::WindowModal);
+    progress.setMinimumDuration(0);
+    const doc::CompactStats stats = document_->compactImages(
+        mode, [&progress](int done, int total) {
+            progress.setMaximum(qMax(1, total));
+            progress.setValue(done);
+            QCoreApplication::processEvents();
+        });
+    progress.close();
+
+    const qint64 before = path.isEmpty() ? 0 : QFileInfo(path).size();
+    if (!saveDocumentTo(target, true)) {
+        // The in-memory images are compacted even when the write failed;
+        // say so instead of leaving the user guessing.
+        hud::toast(view_, QStringLiteral("Compacted in memory, but the file could not be "
+                                         "written; use Save As"));
+        return;
+    }
+    const qint64 after = QFileInfo(target).size();
+    hud::toast(view_, QStringLiteral("Compacted %1 images: %2 -> %3")
+                          .arg(stats.converted)
+                          .arg(before > 0 ? util::formatSize(before)
+                                          : util::formatSize(stats.bytesBefore),
+                               util::formatSize(after)));
+}
+
 void MainWindow::applySettingChanged(const QString &key)
 {
     if (key == QLatin1String("View/theme")) {
@@ -1248,6 +1361,9 @@ void MainWindow::buildActions()
     actions_->add(QStringLiteral("export_images"),
                   QStringLiteral("Export &Images..."), {}, G::ItemsInScene,
                   [this](bool) { exportImages(); });
+    // Compact: re-encodes the lossless images and writes a smaller copy.
+    actions_->add(QStringLiteral("compact_board"), QStringLiteral("Compact &Board..."), {},
+                  G::ItemsInScene, [this](bool) { compactBoard(); });
     actions_->add(QStringLiteral("quit"), QStringLiteral("&Quit"), QKeySequence::Quit, G::Always,
                   [this](bool) { close(); });
 

@@ -138,16 +138,19 @@ const QVector<FieldUi> &fieldTable()
                                     "unlimited."),
                      0, 65536),
         radioField(QStringLiteral("Items/image_storage_format"),
-                   QStringLiteral("Image Storage Format:"),
-                   QStringLiteral("How images are stored inside bee files. Changes will only "
-                                  "take effect on newly saved images."),
-                   {{QStringLiteral("best"), QStringLiteral("Best Guess"),
-                     QStringLiteral("Small images and images with alpha channel are stored as "
-                                    "png, everything else as jpg")},
-                    {QStringLiteral("png"), QStringLiteral("Always PNG"),
-                     QStringLiteral("Lossless, but large bee file")},
-                    {QStringLiteral("jpg"), QStringLiteral("Always JPG"),
-                     QStringLiteral("Small bee file, but lossy and no transparency support")}}),
+                   QStringLiteral("Image Storage:"),
+                   QStringLiteral("How images entering the board are encoded. Existing images "
+                                  "are left alone; File ▸ Compact Board re-encodes them. "
+                                  "Already lossy sources (jpeg, webp) are never re-encoded."),
+                   {{QStringLiteral("original"), QStringLiteral("Keep Originals"),
+                     QStringLiteral("Store the source bytes as they are; best quality, "
+                                    "largest board")},
+                    {QStringLiteral("lossless"), QStringLiteral("Compact Lossless"),
+                     QStringLiteral("Re-encode losslessly as WebP when that is smaller; no "
+                                    "pixel changes")},
+                    {QStringLiteral("compact"), QStringLiteral("Compact (Imperceptible)"),
+                     QStringLiteral("WebP at quality 95 for photographs; transparency stays "
+                                    "lossless")}}),
         integerField(QStringLiteral("Items/image_allocation_limit"),
                      QStringLiteral("Maximum Image Size:"),
                      QStringLiteral("The maximum image size that can be loaded (in megabytes). "

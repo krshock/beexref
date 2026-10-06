@@ -1,5 +1,6 @@
 #pragma once
 
+#include "image_io.h"
 #include "item.h"
 
 #include "board/board.h"
@@ -35,6 +36,14 @@ struct Damage
 // data key marking an item whose image is gone: a recovered save writes
 // the row as an explicit placeholder instead of refusing.
 inline constexpr char kPlaceholderKey[] = "placeholder";
+
+// What Document::compactImages() did.
+struct CompactStats
+{
+    int converted = 0;
+    qint64 bytesBefore = 0;
+    qint64 bytesAfter = 0;
+};
 
 // What changed since the last save, for the incremental writer: items
 // with no row in the file yet, existing items whose state changed, and
@@ -159,6 +168,12 @@ public:
     // Writes the legacy upstream .bee format (interchange only): no
     // thumbnails, no meta/uuid, the scene's ids and path untouched.
     board::Status exportBee(const QString &path, const board::Progress &progress = {}) const;
+
+    // Re-encodes the board's lossless images in memory -- never larger,
+    // and already lossy payloads are left alone -- so the caller can save
+    // a smaller file. The payloads changed, so that save must write the
+    // whole file: an incremental update keeps the old blobs.
+    CompactStats compactImages(StorageMode mode, const board::Progress &progress = {});
 
     std::shared_ptr<board::Board> board() const { return board_; }
     void close();

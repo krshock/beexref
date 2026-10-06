@@ -167,6 +167,12 @@ private:
     // Asks before dropping unsaved changes, honouring
     // Save/confirm_close_unsaved.
     bool confirmDiscardChanges(const QString &message);
+    // File ▸ Compact Board: re-encode the board's lossless images and
+    // write a smaller copy of the file.
+    void compactBoard();
+    // The estimated sizes the Compact Board dialog shows, from a sample
+    // of the board's images.
+    QString compactEstimate() const;
     // Saves and replacements read the document: a draft still open in
     // the metadata panel becomes part of it first.
     void commitPendingMetadataDraft();

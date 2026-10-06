@@ -190,9 +190,65 @@ Status insertItem(Connection &db, const Record &record, qint64 id, bool legacy)
     return stmt.exec();
 }
 
-Status insertBlob(Connection &db, const Record &record, qint64 id, const QByteArray &pixmap)
+// The format the bytes really are, from their header; empty when Qt
+// cannot tell. Blob names follow this, so a stale extension from an
+// older naming scheme never survives a save.
+QString sniffFormat(const QByteArray &bytes)
 {
-    const QString format = record.format.isEmpty() ? QStringLiteral("png") : record.format;
+    QBuffer buffer;
+    buffer.setData(bytes);
+    if (!buffer.open(QIODevice::ReadOnly))
+        return {};
+    QImageReader reader(&buffer);
+    const QByteArray format = reader.format();
+    return format.isEmpty() ? QString() : QString::fromLatin1(format).toLower();
+}
+
+// Encoded bytes for a legacy export: upstream BeeRef has no WebP, so a
+// WebP blob is transcoded to JPEG (quality 90) or, when the image has
+// transparency, PNG. Anything else is already what upstream reads and
+// stays untouched.
+QByteArray legacySafeBytes(const QByteArray &bytes, QString *format)
+{
+    const QString sniffed = sniffFormat(bytes);
+    if (sniffed != QLatin1String("webp")) {
+        if (!sniffed.isEmpty())
+            *format = sniffed;
+        return bytes;
+    }
+    QImage image;
+    if (!image.loadFromData(bytes, "webp"))
+        return {};
+    const bool alpha = image.hasAlphaChannel();
+    QByteArray encoded;
+    QBuffer output(&encoded);
+    if (!output.open(QIODevice::WriteOnly))
+        return {};
+    QImageWriter writer(&output, alpha ? "PNG" : "JPEG");
+    if (!alpha)
+        writer.setQuality(90);
+    if (!writer.write(image))
+        return {};
+    const QString outFormat = sniffFormat(encoded);
+    *format = outFormat.isEmpty() ? (alpha ? QStringLiteral("png") : QStringLiteral("jpg"))
+                                 : outFormat;
+    return encoded;
+}
+
+Status insertBlob(Connection &db, const Record &record, qint64 id, const QByteArray &pixmap,
+                  bool legacy)
+{
+    QString format = record.format.isEmpty() ? QStringLiteral("png") : record.format;
+    const QString sniffed = sniffFormat(pixmap);
+    if (!sniffed.isEmpty())
+        format = sniffed;
+    QByteArray data = pixmap;
+    if (legacy && format == QLatin1String("webp")) {
+        data = legacySafeBytes(pixmap, &format);
+        if (data.isEmpty())
+            return Error{0, QStringLiteral("Cannot convert a WebP image for the .bee export"),
+                         {}};
+    }
     const QString name = exportFilename(record.filename, format, id);
 
     auto statement = db.prepare(QStringLiteral(
@@ -207,10 +263,10 @@ Status insertBlob(Connection &db, const Record &record, qint64 id, const QByteAr
         return status;
     if (Status status = stmt.bind(3, qint64(0644)); !status)
         return status;
-    if (Status status = stmt.bind(4, qint64(pixmap.size())); !status)
+    if (Status status = stmt.bind(4, qint64(data.size())); !status)
         return status;
-    // Bound by reference; pixmap outlives the statement execution.
-    if (Status status = stmt.bind(5, pixmap); !status)
+    // Bound by reference; data outlives the statement execution.
+    if (Status status = stmt.bind(5, data); !status)
         return status;
     return stmt.exec();
 }
@@ -347,7 +403,7 @@ Status writeAll(Connection &db, const QVector<Record> &records, bool storeThumbn
             continue;
         }
 
-        if (Status status = insertBlob(db, record, id, pixmap); !status)
+        if (Status status = insertBlob(db, record, id, pixmap, legacy); !status)
             return status;
         // The legacy format stores no thumbnails.
         if (legacy || !storeThumbnails)
@@ -824,7 +880,7 @@ Status update(const QString &path, const QVector<Record> &changed, const QVector
                 if (!record.placeholder)
                     return Error{0, missingImagesMessage({id}), {}};
             } else {
-                if (Status status = insertBlob(connection, record, id, pixmap); !status)
+                if (Status status = insertBlob(connection, record, id, pixmap, false); !status)
                     return status;
                 counts.blobsAdded += 1;
                 if (storeThumbnails) {

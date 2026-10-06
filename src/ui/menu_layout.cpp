@@ -56,6 +56,7 @@ const QVector<MenuDef> &menuLayout()
              submenu("&Export",
                      {QStringLiteral("export_bee"), QStringLiteral("export_scene"),
                       QStringLiteral("export_images")}),
+             action("compact_board"),
              separator(),
              action("quit"),
          }},

@@ -7,6 +7,7 @@
 #include "drop.h"
 #include "logging.h"
 #include "scene.h"
+#include "settings.h"
 #include "util/format.h"
 
 #include <QApplication>
@@ -183,10 +184,22 @@ doc::ItemPtr InputController::insertText(const QString &text, const QPointF &sce
     return item;
 }
 
-void InputController::insertLoaded(const doc::LoadedImage &loaded, const QPointF &scenePos)
+void InputController::insertLoaded(const doc::LoadedImage &given, const QPointF &scenePos)
 {
-    if (!loaded.isValid())
+    if (!given.isValid())
         return;
+
+    // The Image Storage setting decides how the bytes are kept; the
+    // result never grows (see doc::applyStorageMode).
+    doc::LoadedImage loaded = given;
+    {
+        settings::File file(settings::iniPath());
+        file.load();
+        const QString setting =
+            settings::valueOrDefault(file, QStringLiteral("Items/image_storage_format"))
+                .toString();
+        doc::applyStorageMode(loaded, doc::storageModeForSetting(setting));
+    }
 
     auto item = doc::createItem(doc::kTypePixmap);
     item->source = std::make_shared<doc::BytesSource>(loaded.encoded);
